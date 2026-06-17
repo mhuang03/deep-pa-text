@@ -79,8 +79,17 @@ export const processGIFs = async (text) => {
   });
   await Promise.all(matches);
 
+  let content = text;
+  gifLinks.forEach(({ match, url }) => {
+    if (url) {
+      content = content.replace(match, '');
+    } else {
+      content = content.replace(match, '<INSERT GIF: ' + match.slice(5));
+    }
+  });
+
   return {
-    content: text.replace(/<gif!(.*?)>/g, '').trim(),
+    content,
     gifLinks,
   };
 }
