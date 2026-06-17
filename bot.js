@@ -88,6 +88,7 @@ client.once(Events.ClientReady, async () => {
 });
 
 let prevReplyTime = null;
+let probabilityFailCount = 0;
 client.on(Events.MessageCreate, async (message) => {
   if (message.channel.id !== CHANNEL_ID || message.author.bot) {
     return;
@@ -109,21 +110,23 @@ client.on(Events.MessageCreate, async (message) => {
     report.push(await recordMessage(msg));
     msg = filterAnyAuthor(msg);
     if (!msg) {
-      report.push(`    [not replyable]`);
+      report.push(`    [NOREPLY: not replyable]`);
       console.log(report.join('\n'));
       return;
     }
 
     if (!REPLY_OVERRIDE) {
       if (prevReplyTime && Date.now() - prevReplyTime < MIN_REPLY_INTERVAL) {
-        report.push(`    [rate limited]`);
+        report.push(`    [NOREPLY: rate limited]`);
         console.log(report.join('\n'));
         return;
       }
       let rand = Math.random();
-      if (rand > REPLY_PROBABILITY) {
-        report.push(`    [random ${rand.toFixed(2)} > ${REPLY_PROBABILITY}]`);
+      let replyChance = REPLY_PROBABILITY + Math.max(0, probabilityFailCount - 10)*0.05; // increase probability after 10 consecutive failures, up to 100% increase at 30 consecutive failures
+      if (rand > replyChance) {
+        report.push(`    [NOREPLY: random ${rand.toFixed(2)} > ${replyChance}]`);
         console.log(report.join('\n'));
+        probabilityFailCount++;
         return;
       };
     }
@@ -156,6 +159,7 @@ client.on(Events.MessageCreate, async (message) => {
     // reupdate last message time and author after sending the message for accuracy
     lastMessageTime = Date.now();
     lastMessageAuthor = "deep-pa-text";
+    probabilityFailCount = 0;
 
     console.log(report.join('\n'));
   } catch (e) {

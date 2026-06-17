@@ -152,7 +152,7 @@ export const recordMessage = async (msg) => {
     await insertEmbedding(filtered);
   }
   return `[${new Date(msg.timestamp).toLocaleString('en-US', { timeZone: 'America/Chicago' })}] ${msg.author}: ${msg.content}`
-    + `\n  [filtered: ${filtered ? 'yes' : 'no'}] (reference: ${msg.reference})`;
+    + `\n  [filter kept: ${filtered ? 'yes' : 'no'}] (reference: ${msg.reference})`;
 };
 
 
