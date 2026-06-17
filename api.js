@@ -70,12 +70,28 @@ export const getRandomResponse = async (respondingAuthor) => {
 
 const gf = new GiphyFetch(process.env.GIPHY_API_KEY);
 
+const hf = {
+  search: async (searchText) => {
+    let url = 'https://api.humorapi.com/gif/search';
+    let params = new URLSearchParams({
+      "api-key": process.env.HUMOR_API_KEY,
+      number: 1,
+      query: searchText,
+    });
+    const response = await fetch(url + '?' + params.toString());
+    const data = await response.json();
+    return data.images[0]?.url || '';
+  }
+}
+
 export const processGIFs = async (text) => {
   let gifLinks = [];
   let matches = [...text.matchAll(/<gif!(.*?)>/g)].map(async (match) => {
     let searchText = match[1].trim().slice(0, 50);
-    const { data: gifs } = await gf.search(searchText, { limit: 1 });
-    gifLinks.push({ match: match[0], url: gifs[0]?.images?.original?.url || '' });
+    // const { data: gifs } = await gf.search(searchText, { limit: 1 });
+    // gifLinks.push({ match: match[0], url: gifs[0]?.images?.original?.url || '' });
+    const url = await hf.search(searchText);
+    gifLinks.push({ match: match[0], url });
   });
   await Promise.all(matches);
 
