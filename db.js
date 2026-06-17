@@ -123,14 +123,17 @@ const insertEmbeddings = async (msgs) => {
   const dedupedReferenceIds = Array.from(new Set(withReference.map(m => m.reference)));
   if (dedupedReferenceIds.length === 0) return;
   const referenced = await messageEmbeddings.get({ ids: dedupedReferenceIds, include: ['embeddings'] });
+  if (referenced.ids.length === 0) return;
+  const referencedIdMap = new Map(
+    referenced.ids.map((id, index) => [id, referenced.embeddings[index]])
+  );
 
   await messageReplyEmbeddings.upsert({
     ids: withReference.map(m => m.id),
     documents: withReference.map(m => m.content),
     metadatas: withReference.map(m => ({ author: m.author, timestamp: m.timestamp, has_gif: m.hasGif })),
     embeddings: withReference.map(m => {
-      const index = dedupedReferenceIds.indexOf(m.reference);
-      return referenced.embeddings[index];
+      return referencedIdMap.get(m.reference);
     }),
   });
 };
@@ -142,15 +145,14 @@ const insertEmbedding = async (msg) => {
 
 
 export const recordMessage = async (msg) => {
-  console.log(`[${new Date(msg.timestamp).toLocaleString('en-US', { timeZone: 'America/Chicago' })}] ${msg.author}: ${msg.content}`);
   insertMessage(msg);
   const filtered = filter(msg);
   if (filtered) {
     insertFilteredMessage(filtered);
     await insertEmbedding(filtered);
-    return true;
   }
-  return false;
+  return `[${new Date(msg.timestamp).toLocaleString('en-US', { timeZone: 'America/Chicago' })}] ${msg.author}: ${msg.content}`
+    + `\n  [filtered: ${filtered ? 'yes' : 'no'}] (reference: ${msg.reference})`;
 };
 
 

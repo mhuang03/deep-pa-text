@@ -80,10 +80,10 @@ const TRANSFORMERS = {
 // bunch of filters that we want to apply to messages
 // these return true if the message should be kept, false if it should be filtered out
 const FILTERS = {
+  approvedAuthors: m => validUsernames.has(m.author),
   hasContent: m => Boolean(m.content),
   minLength: m => m.content.length >= 5,
   maxLength: m => m.content.length <= 200,
-  approvedAuthors: m => validUsernames.has(m.author),
   noCommands: m => commandPrefixes.every(p => !m.content.startsWith(p)),
   noConnections: m => !m.content.includes("Connections") && !m.content.includes("Puzzle #"),
   noWordles: m => !m.content.match(/Wordle \d+ \d\/\d/g),
@@ -97,4 +97,13 @@ export const filter = (msg) => {
     msg.content = t(msg.content);
   });
   return Object.values(FILTERS).every(f => f(msg)) ? msg : null;
+};
+
+// same as filter, but doesn't check for approved authors
+export const filterAnyAuthor = (msg) => {
+  msg.content = msg.content || "";
+  Object.values(TRANSFORMERS).forEach(t => {
+    msg.content = t(msg.content);
+  });
+  return Object.values(FILTERS).slice(1).every(f => f(msg)) ? msg : null;
 };

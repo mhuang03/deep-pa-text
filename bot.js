@@ -4,6 +4,7 @@ loadEnvFile('.env');
 import { EmbedBuilder, Client, GatewayIntentBits, Events } from 'discord.js';
 import { recordMessage, searchLikelyRepliers } from './db.js';
 import { getRAGResponse, getRandomResponse, processGIFs } from './api.js';
+import { filterAnyAuthor } from './filter.js';
 import { USERS } from './data.js';
 
 const REPLY_OVERRIDE = false; // set to true to reply to every message without randomness or rate limiting, for testing purposes
@@ -104,12 +105,27 @@ client.on(Events.MessageCreate, async (message) => {
   lastMessageAuthor = message.author.username;
 
   try {
-    let acceptable = await recordMessage(msg);
-    if (!acceptable) return;
+    const report = [];
+    report.push(await recordMessage(msg));
+    msg = filterAnyAuthor(msg);
+    if (!msg) {
+      report.push(`    [not replyable]`);
+      console.log(report.join('\n'));
+      return;
+    }
 
     if (!REPLY_OVERRIDE) {
-      if (prevReplyTime && Date.now() - prevReplyTime < MIN_REPLY_INTERVAL) return; // rate limit
-      if (Math.random() > REPLY_PROBABILITY) return;
+      if (prevReplyTime && Date.now() - prevReplyTime < MIN_REPLY_INTERVAL) {
+        report.push(`    [rate limited]`);
+        console.log(report.join('\n'));
+        return;
+      }
+      let rand = Math.random();
+      if (rand > REPLY_PROBABILITY) {
+        report.push(`    [random ${rand.toFixed(2)} > ${REPLY_PROBABILITY}]`);
+        console.log(report.join('\n'));
+        return;
+      };
     }
 
     // update last message time so that the bot doesn't try to send a message while it's already processing a message
@@ -129,7 +145,7 @@ client.on(Events.MessageCreate, async (message) => {
     }
     embeds.push(await makeAuthorEmbed(replyingAuthor, message.guild));
 
-    console.log(`[REPLY] ${replyingAuthor}: ${response}`);
+    report.push(`    [REPLY] ${replyingAuthor}: ${response}`);
     message.reply({ 
       embeds,
       content,
@@ -140,6 +156,8 @@ client.on(Events.MessageCreate, async (message) => {
     // reupdate last message time and author after sending the message for accuracy
     lastMessageTime = Date.now();
     lastMessageAuthor = "deep-pa-text";
+
+    console.log(report.join('\n'));
   } catch (e) {
     console.error('Error processing message:', e);
   }
