@@ -69,8 +69,14 @@ export const getRandomResponse = async (respondingAuthor) => {
 
 
 const gf = new GiphyFetch(process.env.GIPHY_API_KEY);
+const giphy = {
+  search: async (searchText) => {
+    const { data: gifs } = await gf.search(searchText, { limit: 1 });
+    return gifs[0]?.images?.original?.url || '';
+  }
+}
 
-const hf = {
+const humor = {
   search: async (searchText) => {
     let url = 'https://api.humorapi.com/gif/search';
     let params = new URLSearchParams({
@@ -84,13 +90,37 @@ const hf = {
   }
 }
 
+const klipy = {
+  search: async (searchText) => {
+    let url = `https://api.klipy.com/api/v1/${process.env.KLIPY_API_KEY}/gifs/search`;
+    let params = new URLSearchParams({
+      page: 1,
+      per_page: 8,
+      q: searchText,
+      customer_id: 'deep-pa-text',
+      locale: 'us',
+      content_filter: 'off',
+      format_filter: 'gif',
+    });
+    const response = await fetch(url + '?' + params.toString());
+    const data = await response.json();
+    return data.data?.data[0]?.file.hd.gif.url || '';
+  }
+}
+
+const searchEngines = [klipy, giphy, humor];
+
 export const processGIFs = async (text) => {
   let gifLinks = [];
   let matches = [...text.matchAll(/<gif!(.*?)>/g)].map(async (match) => {
     let searchText = match[1].trim().slice(0, 50);
-    // const { data: gifs } = await gf.search(searchText, { limit: 1 });
-    // gifLinks.push({ match: match[0], url: gifs[0]?.images?.original?.url || '' });
-    const url = await hf.search(searchText);
+
+    let url = '';
+    for (let engine of searchEngines) {
+      url = await engine.search(searchText);
+      if (url !== '') break;
+    }
+
     gifLinks.push({ match: match[0], url });
   });
   await Promise.all(matches);
