@@ -228,7 +228,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
           const authorSelect = modalInteraction.fields.getStringSelectValues('authorSelect');
           const replyingAuthor = authorSelect[0];
 
-          await modalInteraction.reply({ embeds: [await makeAuthorEmbed(replyingAuthor, guild, true)] });
+          await modalInteraction.reply({ embeds: [await makeAuthorEmbed(replyingAuthor, guild, true)], flags: MessageFlags.Ephemeral });
           
           const response = await getRAGResponse(replyingAuthor, msg);
           const { content, gifLinks } = await processGIFs(response);
@@ -240,10 +240,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
           embeds.push(await makeAuthorEmbed(replyingAuthor, guild));
 
-          await modalInteraction.editReply({ 
+          await message.reply({ 
             embeds,
             content,
           });
+          await modalInteraction.deleteReply();
         })
         .catch((err) => {
           console.error('Error handling modal submission:', err);
