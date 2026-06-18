@@ -1,7 +1,10 @@
 import { loadEnvFile } from 'node:process';
 loadEnvFile('.env');
 
-import { EmbedBuilder, Client, GatewayIntentBits, Events } from 'discord.js';
+import { 
+  EmbedBuilder, Client, GatewayIntentBits, Events, MessageFlags,
+  ModalBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, LabelBuilder 
+} from 'discord.js';
 import { recordMessage, searchLikelyRepliers } from './db.js';
 import { getRAGResponse, getRandomResponse, processGIFs } from './api.js';
 import { filterAnyAuthor } from './filter.js';
@@ -9,8 +12,8 @@ import { USERS } from './data.js';
 
 const REPLY_OVERRIDE = false; // set to true to reply to every message without randomness or rate limiting, for testing purposes
 const REVIVE_OVERRIDE = false; // set to true to post a new message every minute regardless of last message time, for testing purposes
-const CHANNEL_ID = '704837777564500149'; // pa-text
-// const CHANNEL_ID = '937203294693118023'; // bot-channel
+const PATEXT_CHANNEL_ID = '704837777564500149';
+const BOTTESTING_CHANNEL_ID = '937203294693118023';
 const REPLY_PROBABILITY = 0.1; // probability of replying to an acceptable message
 const MIN_REPLY_INTERVAL = 5 * 60 * 1000; // minimum interval between replies in milliseconds
 
@@ -20,7 +23,7 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent]
 });
 
-const makeAuthorEmbed = async (author, guild) => {
+const makeAuthorEmbed = async (author, guild, think=false) => {
   let avatarUrl = null;
 
   try {
@@ -31,9 +34,12 @@ const makeAuthorEmbed = async (author, guild) => {
     console.warn(`Could not fetch avatar for ${author}:`, e);
   }
 
-  return new EmbedBuilder()
+  const embed = new EmbedBuilder()
     .setAuthor({ name: author, iconURL: avatarUrl })
     .setColor('#5865F2');
+  if (think) embed.setFooter({ text: 'thinking...' });
+
+  return embed;
 };
 
 let lastMessageTime = Date.now();
@@ -58,7 +64,7 @@ client.once(Events.ClientReady, async () => {
         lastMessageTime = Date.now();
         lastMessageAuthor = "deep-pa-text";
 
-        const channel = await client.channels.fetch(CHANNEL_ID);
+        const channel = await client.channels.fetch(PATEXT_CHANNEL_ID);
         const guild = channel.guild ?? await guilds.fetch(channel.guildId);
         const author = USERS[Math.floor(Math.random() * USERS.length)].username;
         const response = await getRandomResponse(author);
@@ -90,7 +96,7 @@ client.once(Events.ClientReady, async () => {
 let prevReplyTime = null;
 let probabilityFailCount = 0;
 client.on(Events.MessageCreate, async (message) => {
-  if (message.channel.id !== CHANNEL_ID || message.author.bot) {
+  if (message.channel.id !== PATEXT_CHANNEL_ID || message.author.bot) {
     return;
   }
   
@@ -167,4 +173,83 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-client.login(process.env.DISCORD_TOKEN);
+client.on(Events.InteractionCreate, async (interaction) => {
+  if (interaction.isMessageContextMenuCommand()) {
+    if (interaction.commandName === 'reply') {
+      const message = interaction.targetMessage;
+      let msg = {
+        id: message.id,
+        author: message.author.username,
+        content: message.content,
+        timestamp: message.createdTimestamp,
+        reference: message.reference?.messageId || null
+      }
+      msg = filterAnyAuthor(msg);
+      if (!msg) {
+        await interaction.reply({ content: 'The selected message is not replyable.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      let guild = message.guild
+      if (!guild) {
+        guild = await client.guilds.fetch(message.guildId);
+      }
+      
+      if (message.channel.id !== BOTTESTING_CHANNEL_ID) { // PATEXT_CHANNEL_ID) {
+        await interaction.reply({ content: 'This command can only be used in the #pa-text channel.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+
+      const modal = new ModalBuilder()
+        .setCustomId('replyModal')
+        .setTitle('Reply to a message using deep pa-text');
+
+      const authorSelect = new StringSelectMenuBuilder()
+        .setCustomId('authorSelect')
+        .setPlaceholder('Select an author')
+        .addOptions(USERS.map(
+          user => new StringSelectMenuOptionBuilder()
+                    .setLabel(user.username)
+                    .setDescription(`Reply as ${user.name}`)
+                    .setValue(user.username)
+        ));
+
+      const label = new LabelBuilder()
+        .setLabel('Who should I reply as?')
+        .setStringSelectMenuComponent(authorSelect);
+
+      modal.addLabelComponents(label);
+
+      await interaction.showModal(modal);
+
+      await interaction.awaitModalSubmit({ time: 2 * 60 * 1000 }) // wait up to 2 minutes for the user to submit the modal
+        .then(async (modalInteraction) => {
+          if (modalInteraction.customId !== 'replyModal') return;
+          const authorSelect = modalInteraction.fields.getStringSelectValues('authorSelect');
+          const replyingAuthor = authorSelect[0];
+
+          await modalInteraction.reply({ embeds: [await makeAuthorEmbed(replyingAuthor, guild, true)] });
+          
+          const response = await getRAGResponse(replyingAuthor, msg);
+          const { content, gifLinks } = await processGIFs(response);
+          const embeds = [];
+          for (let { url } of gifLinks) {
+            if (url) {
+              embeds.push(new EmbedBuilder().setImage(url));
+            }
+          }
+          embeds.push(await makeAuthorEmbed(replyingAuthor, guild));
+
+          await modalInteraction.editReply({ 
+            embeds,
+            content,
+          });
+        })
+        .catch((err) => {
+          console.error('Error handling modal submission:', err);
+        });
+    }
+  }
+});
+
+client.login(process.env.DISCORD_BOT_TOKEN);
