@@ -195,7 +195,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         guild = await client.guilds.fetch(message.guildId);
       }
       
-      if (message.channel.id !== BOTTESTING_CHANNEL_ID) { // PATEXT_CHANNEL_ID) {
+      if (message.channel.id !== PATEXT_CHANNEL_ID) {
         await interaction.reply({ content: 'This command can only be used in the #pa-text channel.', flags: MessageFlags.Ephemeral });
         return;
       }
@@ -245,6 +245,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             content,
           });
           await modalInteraction.deleteReply();
+
+          prevReplyTime = Date.now();
+          lastMessageTime = Date.now();
+          lastMessageAuthor = "deep-pa-text";
         })
         .catch((err) => {
           console.error('Error handling modal submission:', err);
