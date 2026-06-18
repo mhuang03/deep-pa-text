@@ -3,7 +3,7 @@ loadEnvFile('.env');
 
 import { 
   EmbedBuilder, Client, GatewayIntentBits, Events, MessageFlags,
-  ModalBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, LabelBuilder 
+  ModalBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder, LabelBuilder, TextDisplayBuilder
 } from 'discord.js';
 import { recordMessage, searchLikelyRepliers } from './db.js';
 import { getRAGResponse, getRandomResponse, processGIFs } from './api.js';
@@ -173,10 +173,23 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
+const authorOptions = USERS.map(
+  user => new StringSelectMenuOptionBuilder()
+            .setLabel(user.username)
+            .setDescription(`Reply as ${user.name}`)
+            .setValue(user.username)
+);
+authorOptions.push(
+  new StringSelectMenuOptionBuilder()
+  .setLabel("random")
+  .setDescription(`Reply as a random user`)
+  .setValue("random")
+);
 client.on(Events.InteractionCreate, async (interaction) => {
   if (interaction.isMessageContextMenuCommand()) {
     if (interaction.commandName === 'reply') {
       const message = interaction.targetMessage;
+      const requestingUser = interaction.user.username;
       let msg = {
         id: message.id,
         author: message.author.username,
@@ -202,23 +215,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
       const modal = new ModalBuilder()
         .setCustomId('replyModal')
-        .setTitle('Reply to a message using deep pa-text');
+        .setTitle('Reply using deep pa-text');
+
+      const messageDisplay = new TextDisplayBuilder().setContent(`**Original message from ${msg.author}:**\n${msg.content}`);
 
       const authorSelect = new StringSelectMenuBuilder()
         .setCustomId('authorSelect')
         .setPlaceholder('Select an author')
-        .addOptions(USERS.map(
-          user => new StringSelectMenuOptionBuilder()
-                    .setLabel(user.username)
-                    .setDescription(`Reply as ${user.name}`)
-                    .setValue(user.username)
-        ));
+        .addOptions(authorOptions);
 
       const label = new LabelBuilder()
         .setLabel('Who should I reply as?')
         .setStringSelectMenuComponent(authorSelect);
 
-      modal.addLabelComponents(label);
+      modal
+        .addTextDisplayComponents(messageDisplay)
+        .addLabelComponents(label);
 
       await interaction.showModal(modal);
 
@@ -226,9 +238,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
         .then(async (modalInteraction) => {
           if (modalInteraction.customId !== 'replyModal') return;
           const authorSelect = modalInteraction.fields.getStringSelectValues('authorSelect');
-          const replyingAuthor = authorSelect[0];
+          let replyingAuthor = authorSelect[0];
 
-          await modalInteraction.reply({ embeds: [await makeAuthorEmbed(replyingAuthor, guild, true)], flags: MessageFlags.Ephemeral });
+          if (replyingAuthor === "random") {
+            const likelyRepliers = await searchLikelyRepliers(msg);
+            replyingAuthor = likelyRepliers[Math.floor(Math.random() * likelyRepliers.length)] 
+              || USERS[Math.floor(Math.random() * USERS.length)].username;
+          }
+
+          await modalInteraction.reply({ embeds: [await makeAuthorEmbed(replyingAuthor, guild, true)] });
           
           const response = await getRAGResponse(replyingAuthor, msg);
           const { content, gifLinks } = await processGIFs(response);
@@ -240,11 +258,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
           }
           embeds.push(await makeAuthorEmbed(replyingAuthor, guild));
 
-          await message.reply({ 
+          await modalInteraction.editReply({ 
             embeds,
             content,
           });
-          await modalInteraction.deleteReply();
+
+          console.log(`[REQUEST REPLY from ${requestingUser}] [${new Date(msg.timestamp).toLocaleString('en-US', { timeZone: 'America/Chicago' })}] ${msg.author}: ${msg.content}`);
+          console.log(`    [REPLY] ${replyingAuthor}: ${response}`);
 
           prevReplyTime = Date.now();
           lastMessageTime = Date.now();
