@@ -5,7 +5,7 @@ export const createComposer = ({ generator, gifResolver, config }) => {
 
   const generate = ({ persona, target, context }) =>
     (target === null
-      ? generator.generateRevive(persona)
+      ? generator.generateRevive(persona, context)
       : generator.generateReply(persona, target, context));
 
   // The single place that runs generate -> resolve GIFs -> shorten to the limit. A null target is a revive.

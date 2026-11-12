@@ -21,6 +21,17 @@ const RANDOM_MESSAGES = `
   ORDER BY RANDOM()
   LIMIT ?
 `;
+// The gap is measured on the raw table so messages the corpus filter dropped still count as activity.
+const RANDOM_STARTERS = `
+  SELECT f.content
+  FROM (
+    SELECT id, timestamp - LAG(timestamp) OVER (ORDER BY timestamp, id) AS gap
+    FROM messages
+  ) g
+  JOIN filtered_messages f ON f.id = g.id
+  WHERE f.author = ? AND (g.gap IS NULL OR g.gap > ?)
+  ORDER BY RANDOM() LIMIT ?
+`;
 const LATEST_WITH_REFERENCE = `
   SELECT m.*, r.content as reference_content FROM filtered_messages m
   JOIN filtered_messages r ON m.reference = r.id
@@ -50,6 +61,7 @@ export const createMessageStore = ({ db, config }) => {
   const previousSql = db.prepare(PREVIOUS_FILTERED);
   const existsSql = db.prepare(FILTERED_EXISTS);
   const randomSql = db.prepare(RANDOM_MESSAGES);
+  const startersSql = db.prepare(RANDOM_STARTERS);
   const latestRawSql = db.prepare(latestFrom('messages'));
   const latestFilteredSql = db.prepare(latestFrom('filtered_messages'));
   const latestGifSql = db.prepare(latestFrom('filtered_messages', 'WHERE has_gif = 1'));
@@ -87,6 +99,9 @@ export const createMessageStore = ({ db, config }) => {
   const randomMessages = ({ author, before = null, limit }) =>
     randomSql.all(author, before, before, limit).map((row) => ({ id: row.id, content: row.content }));
 
+  const randomStarters = ({ author, minGapMs, limit }) =>
+    startersSql.all(author, minGapMs, limit).map((row) => row.content);
+
   const chunksOf = (items) => {
     const chunks = [];
     for (let i = 0; i < items.length; i += CHUNK_SIZE) {
@@ -121,6 +136,7 @@ export const createMessageStore = ({ db, config }) => {
     getParents,
     insertFiltered,
     randomMessages,
+    randomStarters,
     latestRaw: (limit) => latestRawSql.all(limit),
     latestFiltered: (limit) => latestFilteredSql.all(limit),
     latestWithReference: (limit) => latestRefSql.all(limit),

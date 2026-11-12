@@ -10,8 +10,8 @@ const setup = ({ links = [], text = 'hello', generate = null } = {}) => {
       calls.push(['reply', persona, record, context]);
       return generate ?? `reply ${text}`;
     },
-    generateRevive: async (persona) => {
-      calls.push(['revive', persona]);
+    generateRevive: async (persona, context) => {
+      calls.push(['revive', persona, context]);
       return generate ?? `revive ${text}`;
     },
   };
@@ -37,10 +37,11 @@ test('compose with a target generates a reply, resolves GIFs, then returns the p
 
 test('compose with a null target generates a revive', async () => {
   const { composer, calls } = setup();
-  const { response, content } = await composer.compose({ persona: 'carol', target: null });
+  const context = { transcript: [], quietMs: 5, nowMs: 9 };
+  const { response, content } = await composer.compose({ persona: 'carol', target: null, context });
   assert.equal(response, 'revive hello');
   assert.equal(content, 'resolved revive hello');
-  assert.deepEqual(calls, [['revive', 'carol'], ['resolve', 'revive hello']]);
+  assert.deepEqual(calls, [['revive', 'carol', context], ['resolve', 'revive hello']]);
 });
 
 test('returns unresolved links untouched for the delivery layer to filter', async () => {

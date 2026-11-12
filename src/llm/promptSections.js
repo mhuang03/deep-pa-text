@@ -1,4 +1,5 @@
 import { formatTranscript, truncateEntry } from '../context/transcript.js';
+import { describeLocalTime, describeQuiet } from '../context/situation.js';
 
 const EXAMPLES_INTRO = {
   replies: 'Here are examples of how the user replied to messages similar to the one they just received. "them" is the message the user was responding to and "you" is the user\'s reply:',
@@ -10,6 +11,9 @@ const EXAMPLES_INTRO = {
 
 const FREQUENT_INTRO = 'The user sends some of these messages often. Number of times they have sent each (use them only where they fit):';
 const AVOID_INTRO = 'The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:';
+
+const LAST_CONVERSATION_INTRO = 'Here is the end of the last conversation in the channel, oldest first:';
+const STARTERS_INTRO = 'Here are messages this user has sent to start a conversation after the channel had been quiet:';
 
 export const identity = ({ author, name }) =>
   `The user you are emulating has username "${author}", and their real name is "${name}".`;
@@ -41,6 +45,23 @@ export const frequentPhrases = ({ buckets }) => {
 export const avoidRepeats = ({ recentBotMessages }) => {
   if (!recentBotMessages || recentBotMessages.length === 0) return null;
   return `${AVOID_INTRO}\n${JSON.stringify(recentBotMessages)}`;
+};
+
+export const situation = ({ nowMs, quietMs = null, timeZone }) => {
+  if (!Number.isFinite(nowMs)) return null;
+  const quiet = describeQuiet(quietMs);
+  const tail = quiet === null ? '' : ` The channel has been quiet for ${quiet}.`;
+  return `It is ${describeLocalTime(nowMs, timeZone)}.${tail}`;
+};
+
+export const lastConversation = ({ transcript: entries, timeZone }) => {
+  if (!entries || entries.length === 0) return null;
+  return `${LAST_CONVERSATION_INTRO}\n${formatTranscript(entries, { timeZone })}`;
+};
+
+export const starters = ({ starters: list }) => {
+  if (!list || list.length === 0) return null;
+  return `${STARTERS_INTRO}\n${JSON.stringify(list)}`;
 };
 
 export const pastExamples = ({ examples: list }) => examples(EXAMPLES_INTRO.past, list);

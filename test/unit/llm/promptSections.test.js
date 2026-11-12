@@ -82,3 +82,28 @@ test('avoidRepeats is omitted when empty or missing and otherwise lists the JSON
     'The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:\n["hi","yo \\"x\\""]',
   );
 });
+
+const NOW = Date.UTC(2026, 10, 12, 21, 10);
+
+test('situation names the local time and the quiet duration, omitted without a finite nowMs', () => {
+  assert.equal(sections.situation({ nowMs: NOW, quietMs: 5400000, timeZone: 'America/Chicago' }),
+    'It is Thursday 3:10 PM. The channel has been quiet for about 2 hours.');
+  assert.equal(sections.situation({ nowMs: NOW, timeZone: 'America/Chicago' }), 'It is Thursday 3:10 PM.');
+  assert.equal(sections.situation({ quietMs: 5 }), null);
+  assert.equal(sections.situation({ nowMs: NaN }), null);
+});
+
+test('lastConversation renders the transcript and is omitted when empty', () => {
+  const transcript = [{ id: '1', speaker: 'alice', content: 'hi', timestamp: NOW, replyTo: null }];
+  assert.equal(sections.lastConversation({ transcript, timeZone: 'America/Chicago' }),
+    'Here is the end of the last conversation in the channel, oldest first:\n[15:10] alice: hi');
+  assert.equal(sections.lastConversation({ transcript: [] }), null);
+  assert.equal(sections.lastConversation({}), null);
+});
+
+test('starters renders JSON and is omitted when empty', () => {
+  assert.equal(sections.starters({ starters: ['yo', 'hey'] }),
+    'Here are messages this user has sent to start a conversation after the channel had been quiet:\n["yo","hey"]');
+  assert.equal(sections.starters({ starters: [] }), null);
+  assert.equal(sections.starters({}), null);
+});

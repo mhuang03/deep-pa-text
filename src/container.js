@@ -59,13 +59,13 @@ const buildVectorStore = ({ config, vendor }) => {
 };
 
 const buildGenerator = ({
-  config, vendor, retriever, userDirectory, botMessageStore, logger,
+  config, vendor, retriever, userDirectory, botMessageStore, messageStore, logger,
 }) => {
   const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
   const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
   const chatClient = createChatClient({ client, config });
   return createGenerator({
-    chatClient, retriever, userDirectory, botMessageStore, config, logger,
+    chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
   });
 };
 
@@ -82,7 +82,7 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
     vectorStore, users: data.users, random: clock.random, config,
   });
   const generator = buildGenerator({
-    config, vendor, retriever, userDirectory, botMessageStore, logger,
+    config, vendor, retriever, userDirectory, botMessageStore, messageStore, logger,
   });
   return {
     db, messageStore, botMessageStore, vectorStore, messageFilter, ingest, retriever, userDirectory,

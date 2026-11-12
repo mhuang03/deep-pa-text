@@ -20,7 +20,8 @@ const EXPECTED_DEFAULTS = {
   },
   revive: {
     checkIntervalMs: 600000, overrideCheckIntervalMs: 60000, dayIdleMs: 10800000, nightIdleMs: 43200000,
-    dayStartHour: 10, dayEndHour: 22, timeZone: 'America/Chicago', override: false,
+    dayStartHour: 10, dayEndHour: 22, timeZone: 'America/Chicago',
+    transcriptLimit: 10, starterGapMs: 3600000, starterSamples: 20, override: false,
   },
   filter: { minLength: 5, maxLength: 200, commandPrefixes: ['!', '$', '#', '%', '&', '-', '+', 'p!'] },
   storage: {
@@ -30,7 +31,7 @@ const EXPECTED_DEFAULTS = {
   chroma: { port: 7429, messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
   embedding: { apiKeyEnvVar: 'OPENAI_API_KEY', modelName: 'text-embedding-3-small', dimensions: 512 },
   retrieval: {
-    replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 50, likelyRepliers: 20,
+    replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 30, likelyRepliers: 20,
     shortMessageChars: 25, queryContextMessages: 2,
     overFetchFactor: 3, nearDuplicateThreshold: 0.95, nearDuplicateMinChars: 12, frequentMinCount: 3,
     frequentLimit: 10, recentBotMessages: 10,

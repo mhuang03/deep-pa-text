@@ -27,6 +27,9 @@ const buildRevive = (env) => ({
   dayStartHour: 10,
   dayEndHour: 22,
   timeZone: 'America/Chicago',
+  transcriptLimit: 10,
+  starterGapMs: 3600000,
+  starterSamples: 20,
   override: env.REVIVE_OVERRIDE === 'true',
 });
 
@@ -67,7 +70,7 @@ const buildRetrieval = () => ({
   similarResults: 20,
   gifResults: 10,
   otherResults: 10,
-  reviveSamples: 50,
+  reviveSamples: 30,
   likelyRepliers: 20,
   shortMessageChars: 25,
   queryContextMessages: 2,

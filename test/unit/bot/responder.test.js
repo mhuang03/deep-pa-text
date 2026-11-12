@@ -18,6 +18,11 @@ const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', cr
   };
   const logger = { warn: (...a) => logs.push(['warn', ...a]), error: (...a) => logs.push(['error', ...a]) };
   const contextBuilder = {
+    forRevive: async (arg) => {
+      events.push(['reviveContext', arg]);
+      if (failContext) throw failContext;
+      return { transcript: [], quietMs: 9, nowMs: NOW };
+    },
     forReply: async (arg) => {
       events.push(['context', arg]);
       if (failContext) throw failContext;
@@ -55,11 +60,22 @@ test('composes then delivers and returns the response and the sent message', asy
   ]);
 });
 
-test('passes a null target through for a revive', async () => {
+test('a revive builds the revive context with the injected clock and passes it to compose', async () => {
   const { responder, events } = setup();
   await responder.respond({ ...REQUEST, trigger: 'revive', target: null });
-  assert.deepEqual(events[0], ['compose', { persona: 'bob', target: null, context: undefined }]);
+  assert.deepEqual(events[0], ['reviveContext', { channel: { id: 'c' }, nowMs: NOW }]);
+  assert.deepEqual(events[1], [
+    'compose', { persona: 'bob', target: null, context: { transcript: [], quietMs: 9, nowMs: NOW } },
+  ]);
   assert.equal(events.some(([name]) => name === 'context'), false);
+});
+
+test('a revive context failure is logged as a warning and the revive is still composed and sent', async () => {
+  const { responder, events, logs } = setup({ failContext: new Error('history down') });
+  await responder.respond({ ...REQUEST, trigger: 'revive', target: null });
+  assert.deepEqual(events.map(([name]) => name), ['reviveContext', 'compose', 'deliver']);
+  assert.deepEqual(events[1], ['compose', { persona: 'bob', target: null, context: undefined }]);
+  assert.equal(logs[0][0], 'warn');
 });
 
 test('a generation failure propagates unmarked and nothing is delivered', async () => {

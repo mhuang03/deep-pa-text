@@ -3,7 +3,7 @@
 import { loadConfig } from '../../src/config.js';
 import { buildContainer } from '../../src/container.js';
 import { BUCKET_ORDER } from '../../src/retrieval/retriever.js';
-import { buildReplyPrompt, buildRevivePrompt, SYSTEM_PROMPT } from '../../src/llm/prompts.js';
+import { buildReplyPrompt, buildRevivePrompt, SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT } from '../../src/llm/prompts.js';
 import { createFakeDiscord } from './fakes/discord.js';
 import { createFakeChroma } from './fakes/chroma.js';
 import { createFakeOpenAI } from './fakes/llm.js';
@@ -57,6 +57,7 @@ const buildSubject = (container, { timeZone: contextTimeZone, maxEntryChars }) =
     getRandomResponse: (author) => generator.generateRevive(author),
     processGIFs: (text) => gifResolver.resolve(text),
     SYSTEM_PROMPT,
+    REVIVE_SYSTEM_PROMPT,
     ragInput: (author, name, message, replies, similar, gifs, other, { messageAuthor, transcript = [] } = {}) =>
       buildReplyPrompt({
         author, name, message, messageAuthor, transcript, timeZone: contextTimeZone,

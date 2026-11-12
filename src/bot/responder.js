@@ -36,8 +36,18 @@ export const createResponder = ({
     }
   };
 
-  const contextFor = async ({ channel, target }) =>
-    (target === null ? undefined : contextBuilder.forReply({ channel, target }));
+  // A failed revive context degrades to none: the revive is still sent.
+  const reviveContext = async (channel) => {
+    try {
+      return await contextBuilder.forRevive({ channel, nowMs: now() });
+    } catch (error) {
+      logger.warn('Could not build revive context:', error);
+      return undefined;
+    }
+  };
+
+  const contextFor = ({ channel, target }) =>
+    (target === null ? reviveContext(channel) : contextBuilder.forReply({ channel, target }));
 
   const respond = async ({ trigger, persona, target, guild, via, channel }) => {
     const context = await contextFor({ channel, target });

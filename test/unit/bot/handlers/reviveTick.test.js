@@ -22,7 +22,7 @@ const setup = ({ env = {}, activity = { lastMessageTime: BASE_TIME - 4 * HOUR, l
     personaSelector: { pickRandomUser: () => (events.push('pick'), 'dave') },
     responder: {
       respond: async (request) => {
-        events.push(['respond', request.trigger, request.persona, request.target, request.guild === discord.state.guild]);
+        events.push(['respond', request.trigger, request.persona, request.target, request.guild === discord.state.guild, request.channel === discord.state.channel]);
         if (failCompose) throw new Error('llm down');
         if (request.via.type !== 'channel') throw new Error('unexpected via');
         const message = await request.via.channel.send({ content: 'c', embeds: [] });
@@ -51,7 +51,7 @@ test('revives: claims activity first, responds through the channel, claims again
   const { tick, events, logs, discord } = setup();
   await tick();
   assert.deepEqual(events, [
-    'noteBot', ['fetch', '704837777564500149'], 'pick', ['respond', 'revive', 'dave', null, true], 'noteBot',
+    'noteBot', ['fetch', '704837777564500149'], 'pick', ['respond', 'revive', 'dave', null, true, true], 'noteBot',
   ]);
   assert.deepEqual(discord.state.channel.sent, [{ content: 'c', embeds: [] }]);
   assert.deepEqual(logs.info, ['[REVIVE] dave: resp']);

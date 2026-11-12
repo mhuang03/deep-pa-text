@@ -13,7 +13,7 @@ export const createReviveTick = (deps) => {
     const guild = await findGuild(channel);
     const persona = personaSelector.pickRandomUser();
     const { response } = await responder.respond({
-      trigger: TRIGGERS.REVIVE, persona, target: null, guild, via: { type: 'channel', channel },
+      trigger: TRIGGERS.REVIVE, persona, target: null, guild, via: { type: 'channel', channel }, channel,
     });
     activity.noteBot();
     logger.info(formatRevive({ persona, response }));

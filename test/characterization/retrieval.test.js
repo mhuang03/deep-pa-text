@@ -216,17 +216,17 @@ test('semanticSearch other bucket holds every earlier row not in a previous buck
   assert.deepEqual(sorted(other), sorted(contents.slice(3)));
 });
 
-test('randomSearch returns exactly 50 distinct seeded contents from 60 messages', async (t) => {
+test('randomSearch returns exactly 30 distinct seeded contents from 60 messages', async (t) => {
   const world = await newWorld(t);
   const contents = Array.from({ length: 60 }, (_, i) => `random message number ${i}`);
   await seedAll(world, 'alice', contents);
   const result = await world.subject.randomSearch('alice');
-  assert.equal(result.length, 50);
-  assert.equal(new Set(result).size, 50);
+  assert.equal(result.length, 30);
+  assert.equal(new Set(result).size, 30);
   result.forEach((c) => assert.ok(contents.includes(c)));
 });
 
-test('randomSearch returns all messages when fewer than 50 exist and only from the author', async (t) => {
+test('randomSearch returns all messages when fewer than 30 exist and only from the author', async (t) => {
   const world = await newWorld(t);
   const contents = ['alice line one', 'alice line two', 'alice line three'];
   await seedAll(world, 'alice', contents);

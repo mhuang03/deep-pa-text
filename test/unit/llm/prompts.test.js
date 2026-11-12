@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src/llm/prompts.js';
+import { SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src/llm/prompts.js';
 
 const fixture = fs.readFileSync(new URL('../../characterization/fixtures/system-prompt.txt', import.meta.url), 'utf8');
 
@@ -104,4 +104,49 @@ test('frequent phrases follow the other examples and avoid-repeats comes last in
   assert.ok(at('sends some of these messages often') < at('recently sent these messages'));
   assert.ok(reply.endsWith('["bot"]'));
   assert.ok(buildRevivePrompt({ author: 'a', name: 'A', examples: ['x'], recentBotMessages: ['bot'] }).endsWith('["bot"]'));
+});
+
+const FIRST = 'You are emulating a user on a Discord server. Your task is to respond to this message in a way that is consistent with how the user has responded to messages in the past.';
+const REVIVE_FIRST = 'You are emulating a user on a Discord server. The channel has gone quiet. Your task is to write the next message this user would send to get conversation going again, in a way that is consistent with how the user has written in the past. It can follow up on the last conversation or bring up something new, as that user would.';
+const GIF = 'based on the content of the message they received, and based on the search terms that the user has used in the past when responding to similar messages';
+const REVIVE_GIF = 'based on what you are saying and on the search terms that the user has used in the past';
+
+test('REVIVE_SYSTEM_PROMPT differs from SYSTEM_PROMPT only in the two stated places', () => {
+  assert.notEqual(REVIVE_SYSTEM_PROMPT, SYSTEM_PROMPT);
+  const restored = REVIVE_SYSTEM_PROMPT.replace(REVIVE_FIRST, FIRST).replace(REVIVE_GIF, GIF);
+  assert.equal(restored, SYSTEM_PROMPT);
+  assert.ok(REVIVE_SYSTEM_PROMPT.includes(REVIVE_FIRST) && REVIVE_SYSTEM_PROMPT.includes(REVIVE_GIF));
+});
+
+test('buildRevivePrompt with every section follows the spec order', () => {
+  const T = Date.UTC(2026, 10, 12, 21, 10);
+  const out = buildRevivePrompt({
+    author: 'bob', name: 'Bob Example', examples: ['e1'], starters: ['s1'],
+    transcript: [{ id: '1', speaker: 'alice', content: 'hi', timestamp: T - 3600000, replyTo: null }],
+    quietMs: 3600000, nowMs: T, timeZone: 'America/Chicago', recentBotMessages: ['bot'],
+  });
+  assert.equal(out, `The user you are emulating has username "bob", and their real name is "Bob Example".
+
+It is Thursday 3:10 PM. The channel has been quiet for about 1 hour.
+
+Here is the end of the last conversation in the channel, oldest first:
+[14:10] alice: hi
+
+Here are messages this user has sent to start a conversation after the channel had been quiet:
+["s1"]
+
+Here are some examples of messages that the user has sent in the past:
+["e1"]
+
+The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:
+["bot"]`);
+});
+
+test('buildRevivePrompt keeps the time sentence without a quiet duration and omits empty sections', () => {
+  const out = buildRevivePrompt({
+    author: 'b', name: 'B', examples: ['e'], starters: [], transcript: [], nowMs: Date.UTC(2026, 10, 12, 21, 10),
+    timeZone: 'America/Chicago',
+  });
+  assert.equal(out.split('\n\n')[1], 'It is Thursday 3:10 PM.');
+  assert.ok(!out.includes('last conversation') && !out.includes('start a conversation'));
 });

@@ -22,14 +22,14 @@ const sorted = (xs) => [...xs].sort();
 // The prompt puts each JSON array alone on a line starting with '['.
 const parseArrays = (prompt) => prompt.split('\n').filter((line) => line.startsWith('[')).map((line) => JSON.parse(line));
 
-const assertRequestShape = (world, userContent) => {
+const assertRequestShape = (world, userContent, system = world.subject.SYSTEM_PROMPT) => {
   assert.equal(world.llm.calls.length, 1);
   const request = world.llm.calls[0];
   assert.equal(request.model, 'deepseek-v4-flash');
   assert.deepEqual(request.thinking, { type: 'enabled' });
   assert.equal(request.stream, false);
   assert.deepEqual(request.messages, [
-    { role: 'system', content: world.subject.SYSTEM_PROMPT },
+    { role: 'system', content: system },
     { role: 'user', content: userContent },
   ]);
 };
@@ -92,10 +92,10 @@ test('getRandomResponse sends contextlessInput built from a subset of the person
   assert.equal(result, 'random reply text');
 
   const userContent = world.llm.calls[0].messages[1].content;
-  const [shown] = parseArrays(userContent);
-  assert.deepEqual(sorted(shown), sorted(contents));
-  assert.equal(userContent, world.subject.contextlessInput('bob', 'Bob Example', shown));
-  assertRequestShape(world, userContent);
+  // Spec 20: alice's line shares the first timestamp, so bob has no starters and one examples list.
+  assert.deepEqual(sorted(parseArrays(userContent).flat()), sorted(contents));
+  assert.ok(!userContent.includes('start a conversation'));
+  assertRequestShape(world, userContent, world.subject.REVIVE_SYSTEM_PROMPT);
   assert.deepEqual(world.llm.callClients, [
     {
       apiKey: world.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com', timeout: 120000, maxRetries: 1,

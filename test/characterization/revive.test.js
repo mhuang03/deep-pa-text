@@ -134,7 +134,7 @@ test('an avatar lookup failure still sends the revive without an icon', async (t
   assert.ok(!author.icon_url);
 });
 
-test('the revive LLM prompt is the contextless input built from the persona\'s seeded messages', async (t) => {
+test('the revive LLM prompt lists the persona\'s seeded messages as starters and examples only', async (t) => {
   const world = await newWorld(t);
   const seeded = ['dave says one thing', 'dave says another thing', 'dave says a third thing'];
   await world.seed(seeded.map((content, i) => ({
@@ -145,9 +145,9 @@ test('the revive LLM prompt is the contextless input built from the persona\'s s
   await triggerRevive(world);
   assert.equal(world.llm.calls.length, 1);
   const prompt = world.llm.calls[0].messages[1].content;
-  const contents = JSON.parse(prompt.split('\n').at(-1));
-  assert.deepEqual([...contents].sort(), [...seeded].sort());
-  assert.equal(prompt, world.subject.contextlessInput('dave', 'Dave Example', contents));
+  const arrays = prompt.split('\n').filter((line) => line.startsWith('["')).map((line) => JSON.parse(line));
+  assert.deepEqual(arrays.flat().sort(), [...seeded].sort());
+  assert.equal(world.llm.calls[0].messages[0].content, world.subject.REVIVE_SYSTEM_PROMPT);
 });
 
 test('never twice in a row: no second revive without a new human message, which re-arms it', async (t) => {

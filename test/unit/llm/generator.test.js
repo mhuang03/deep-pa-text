@@ -1,14 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createGenerator } from '../../../src/llm/generator.js';
-import { SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src/llm/prompts.js';
+import { SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src/llm/prompts.js';
 
 import { loadConfig } from '../../../src/config.js';
 
 const config = loadConfig({});
 const buckets = { replies: [{ you: 'r', them: 'q' }], similar: ['s1', 's2'], gifs: ['g'], other: ['o'] };
 
-const setup = ({ retrieverError = null, chatError = null, recent = [], recentError = null } = {}) => {
+const setup = ({
+  retrieverError = null, chatError = null, recent = [], recentError = null, starterRows = [], starterError = null,
+  examples = ['x', 'y'],
+} = {}) => {
   const warnings = [];
   const recentCalls = [];
   const calls = { chat: [], reply: [], revive: [] };
@@ -27,7 +30,7 @@ const setup = ({ retrieverError = null, chatError = null, recent = [], recentErr
     },
     retrieveForRevive: async (...args) => {
       calls.revive.push(args);
-      return ['x', 'y'];
+      return examples;
     },
   };
   const userDirectory = { nameOf: (u) => ({ alice: 'Alice Example' })[u] };
@@ -38,9 +41,19 @@ const setup = ({ retrieverError = null, chatError = null, recent = [], recentErr
       return recent;
     },
   };
+  const starterCalls = [];
+  const messageStore = {
+    randomStarters: (args) => {
+      starterCalls.push(args);
+      if (starterError) throw starterError;
+      return starterRows;
+    },
+  };
   const logger = { warn: (line) => warnings.push(line) };
-  const generator = createGenerator({ chatClient, retriever, userDirectory, botMessageStore, config, logger });
-  return { calls, warnings, recentCalls, generator };
+  const generator = createGenerator({
+    chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
+  });
+  return { calls, warnings, recentCalls, starterCalls, generator };
 };
 const record = { author: 'bob', content: 'hello', timestamp: 5 };
 
@@ -82,12 +95,12 @@ test('an unknown persona renders undefined as the name', async () => {
   assert.match(calls.chat[0].user, /real name is "undefined"/);
 });
 
-test('generateRevive builds the contextless prompt', async () => {
+test('generateRevive without context builds the minimal prompt under the revive system prompt', async () => {
   const { calls, generator } = setup();
   assert.equal(await generator.generateRevive('alice'), 'raw response');
   assert.deepEqual(calls.revive, [['alice']]);
   assert.deepEqual(calls.chat, [{
-    system: SYSTEM_PROMPT,
+    system: REVIVE_SYSTEM_PROMPT,
     user: buildRevivePrompt({ author: 'alice', name: 'Alice Example', examples: ['x', 'y'] }),
   }]);
 });
@@ -110,6 +123,7 @@ const setupWith = (completion) => {
     retriever: { retrieveForReply: async () => buckets, retrieveForRevive: async () => [] },
     userDirectory: { nameOf: () => 'Alice Example' },
     botMessageStore: { recent: () => [] },
+    messageStore: { randomStarters: () => [] },
     config,
   });
   return generator;
@@ -141,6 +155,7 @@ test('replies and revives pass the recent bot messages, newest first, into the p
   }));
   assert.equal(calls.chat[1].user, buildRevivePrompt({
     author: 'alice', name: 'Alice Example', examples: ['x', 'y'], recentBotMessages,
+    timeZone: config.context.timeZone,
   }));
   assert.match(calls.chat[1].user, /recently sent these messages[^\n]*\n\["newest bot line","older bot line"\]$/);
 });
@@ -158,4 +173,37 @@ test('no bot messages yet means no avoid-repeats section', async () => {
   const { calls, generator } = setup();
   await generator.generateReply('alice', record);
   assert.ok(!calls.chat[0].user.includes('recently sent'));
+});
+
+test('generateRevive passes starters, transcript, quiet time and the clock into the prompt', async () => {
+  const { calls, starterCalls, generator } = setup({
+    starterRows: ['Yo', 'yoooo', 'hey all', 'a', 'b'], examples: ['x', 'HEY ALL', 'y'],
+  });
+  const transcript = [{ id: '1', speaker: 'bob', content: 'hi', timestamp: 5, replyTo: null }];
+  const nowMs = Date.UTC(2026, 10, 12, 21, 10);
+  await generator.generateRevive('alice', { transcript, quietMs: 7200000, nowMs });
+  assert.deepEqual(starterCalls, [{
+    author: 'alice', minGapMs: config.revive.starterGapMs,
+    limit: config.revive.starterSamples * config.retrieval.overFetchFactor,
+  }]);
+  assert.equal(calls.chat[0].user, buildRevivePrompt({
+    author: 'alice', name: 'Alice Example', examples: ['x', 'y'], starters: ['Yo', 'hey all', 'a', 'b'],
+    transcript, quietMs: 7200000, nowMs, timeZone: config.context.timeZone,
+  }));
+});
+
+test('starters are cut to starterSamples after deduplication', async () => {
+  const rows = Array.from({ length: 30 }, (_, i) => `starter number ${i}`);
+  const { calls, generator } = setup({ starterRows: [...rows, 'STARTER NUMBER 0'] });
+  await generator.generateRevive('alice');
+  const line = calls.chat[0].user.split('\n').find((l) => l.startsWith('["starter'));
+  assert.deepEqual(JSON.parse(line), rows.slice(0, config.revive.starterSamples));
+});
+
+test('a starters failure is logged and the revive is built without starters', async () => {
+  const { calls, warnings, generator } = setup({ starterError: new Error('db locked') });
+  assert.equal(await generator.generateRevive('alice'), 'raw response');
+  assert.match(warnings[0], /db locked/);
+  assert.ok(!calls.chat[0].user.includes('start a conversation'));
+  assert.ok(calls.chat[0].user.includes('["x","y"]'));
 });

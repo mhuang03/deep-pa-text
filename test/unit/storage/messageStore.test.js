@@ -203,3 +203,44 @@ test('getParents handles more than 500 ids in chunks', () => {
   assert.equal(parents.size, 1100);
   assert.equal(parents.get('c1099').content, 'the parent');
 });
+
+const addRaw = (store, row, { filtered = true } = {}) => {
+  store.insertRaw(row);
+  if (filtered) store.insertFiltered(row);
+};
+const starters = (store, extra = {}) =>
+  store.randomStarters({ author: 'a', minGapMs: HOUR, limit: 10, ...extra }).sort();
+
+test('randomStarters includes the first row and rows strictly more than the gap after the previous', () => {
+  const { store } = setup();
+  addRaw(store, msg('1', 'a', 1000));
+  addRaw(store, msg('2', 'a', 1000 + HOUR));
+  addRaw(store, msg('3', 'a', 1000 + 2 * HOUR + 1));
+  assert.deepEqual(starters(store), ['content 1', 'content 3']);
+});
+
+test('randomStarters counts messages the filter dropped and other authors as activity', () => {
+  const { store } = setup();
+  addRaw(store, msg('1', 'a', 1000));
+  addRaw(store, msg('2', 'b', 5 * HOUR), { filtered: false });
+  addRaw(store, msg('3', 'a', 5 * HOUR + 1000));
+  addRaw(store, msg('4', 'b', 20 * HOUR));
+  addRaw(store, msg('5', 'a', 20 * HOUR + 10));
+  assert.deepEqual(starters(store), ['content 1']);
+});
+
+test('randomStarters orders equal timestamps by id and only returns the author\'s rows', () => {
+  const { store } = setup();
+  addRaw(store, msg('1', 'b', 5000));
+  addRaw(store, msg('2', 'a', 5000));
+  addRaw(store, msg('3', 'a', 5000 + 3 * HOUR));
+  assert.deepEqual(starters(store), ['content 3']);
+  assert.deepEqual(starters(store, { author: 'b' }), ['content 1']);
+});
+
+test('randomStarters honours the limit', () => {
+  const { store } = setup();
+  for (let i = 0; i < 5; i += 1) addRaw(store, msg(String(i), 'a', i * 3 * HOUR));
+  assert.equal(starters(store, { limit: 2 }).length, 2);
+  assert.deepEqual(starters(store, { author: 'nobody' }), []);
+});

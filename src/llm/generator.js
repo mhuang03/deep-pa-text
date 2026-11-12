@@ -1,14 +1,17 @@
 import { sanitizeResponse } from './sanitize.js';
 import { buildQueryText } from '../retrieval/queryText.js';
-import { SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from './prompts.js';
+import { normalizeForDedup } from '../retrieval/normalize.js';
+import {
+  SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt,
+} from './prompts.js';
 
 const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
 
 export const createGenerator = ({
-  chatClient, retriever, userDirectory, botMessageStore, config, logger,
+  chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
 }) => {
-  const complete = async (user) => {
-    const response = sanitizeResponse(await chatClient.complete({ system: SYSTEM_PROMPT, user }));
+  const complete = async (user, system = SYSTEM_PROMPT) => {
+    const response = sanitizeResponse(await chatClient.complete({ system, user }));
     if (response === '') throw new Error(EMPTY_RESPONSE_MESSAGE);
     return response;
   };
@@ -42,15 +45,42 @@ export const createGenerator = ({
     return complete(user);
   };
 
-  const generateRevive = async (persona) => {
-    const examples = await retriever.retrieveForRevive(persona);
+  // A failed lookup is tolerated: the prompt just omits the starters section.
+  const loadStarters = (author) => {
+    const { revive, retrieval } = config;
+    try {
+      const rows = messageStore.randomStarters({
+        author, minGapMs: revive.starterGapMs, limit: revive.starterSamples * retrieval.overFetchFactor,
+      });
+      const unique = new Map();
+      rows.forEach((text) => {
+        const key = normalizeForDedup(text);
+        if (!unique.has(key)) unique.set(key, text);
+      });
+      return [...unique.values()].slice(0, revive.starterSamples);
+    } catch (error) {
+      logger?.warn?.(`Could not load conversation starters: ${error.message}`);
+      return [];
+    }
+  };
+
+  const generateRevive = async (persona, context = {}) => {
+    const starters = loadStarters(persona);
+    const taken = new Set(starters.map(normalizeForDedup));
+    const examples = (await retriever.retrieveForRevive(persona))
+      .filter((text) => !taken.has(normalizeForDedup(text)));
     const user = buildRevivePrompt({
       author: persona,
       name: userDirectory.nameOf(persona),
       examples,
+      starters,
+      transcript: context.transcript ?? [],
+      quietMs: context.quietMs ?? null,
+      nowMs: context.nowMs,
+      timeZone: config.context.timeZone,
       recentBotMessages: loadRecentBotMessages(),
     });
-    return complete(user);
+    return complete(user, REVIVE_SYSTEM_PROMPT);
   };
 
   return { generateReply, generateRevive };
