@@ -1,65 +1,40 @@
 # deep-pa-text
 
-A Discord bot that imitates the members of one group chat. It records every message in a single channel, and occasionally replies to a message (or revives a quiet channel) "as" one of the members, using retrieval over that member's past messages plus an LLM.
+A Discord bot that imitates the members of one group chat. It records every human message in a single channel. It occasionally replies to a message, or revives a quiet channel, "as" one of the members. Each reply uses retrieval over that member's past messages plus an LLM.
 
 ## How it works
 
 ```
-Discord message ──► corpus filter ──► SQLite (messages, filtered_messages)
-                                └► Chroma (message_embeddings, message_reply_embeddings)
-
-trigger (random reply / revive timer / "reply" context menu)
-  └► pick persona ──► retrieve persona's past messages ──► DeepSeek chat completion
-       └► resolve <gif! ...> tokens to GIF URLs ──► post with an embed showing the persona's name + avatar
+Discord message (configured channel, humans only)
+  -> ingest: raw row -> corpus filter -> corpus row -> Chroma vectors
+  -> triggers: auto reply | reply chain | reply command | revive
+  -> persona: weighted pick, the command's choice, or random (revive)
+  -> context (channel transcript or reply thread) + retrieval (examples, dedup, frequent phrases)
+  -> LLM chat completion (DeepSeek)
+  -> post-processing: unwrap quotes, split bursts, strip links, cap GIFs, resolve GIFs, truncate
+  -> delivery: embed or webhook, one message per burst part, recorded in bot_messages
 ```
 
-Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in `docs/specs/`. Development rules are in `CLAUDE.md`; behaviour and design changes start from a spec in `docs/specs/`.
-
-| Path | Role |
-| --- | --- |
-| `src/main.js` | Entry point (`npm start`): loads `.env` if present, config, required variables and data files, builds the container, connects Chroma, starts the bot. |
-| `src/container.js`, `src/container/` | `container.js` is the public entry that composes the service map; `container/` has one builder per layer (`storage`, `services`, `discord`, `bot`, `backfill`) and the default `clock`. `src/vendor.js` collects the real third-party constructors. |
-| `src/config.js`, `src/config/` | Every tunable, ID, model name and limit, with strict environment parsing and range validation (`config.js` is the public entry; `config/` holds the parsers, section builders, validators, required-variable checks, secret list and the optional `.env` loader). |
-| `src/bot/` | Triggers and orchestration: `handlers/` (message create with its auto-reply and chain parts, message edit, message delete and bulk delete, the `reply` command split into preparation and answering, revive tick, profile refresh), reply, chain, revive and command-limit policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (context, delivery of the parts, recording), lifecycle, startup and ready steps, process hooks, state restore and `bot.js`. |
-| `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
-| `src/storage/` | SQLite schema, migrations and queries (the message store is split into statements, writes and reads; soft deletes and edit revisions); the Chroma vector store (collections, guard, reads, writes, connection check, record mapping); the read-only, schema-tolerant inspector behind `inspectDb.js`. |
-| `src/ingest/` | Recording messages into SQLite and Chroma, the vector sync (reconciles Chroma with SQLite) and the vector health (automatic repair). |
-| `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/`, `src/profiles/` | Retrieval and persona choice; prompts (assembled from sections), the generators for replies, chains and revives, and the chat client; GIF resolution; the transcript builders and the reply-thread chain builder; member profile checks. |
-| `src/text/` | Pure text helpers shared by the services above: truncation, dedup keys, query text, transcript entries, situation wording and GIF tokens. Takes what it needs as parameters and imports nothing from the configuration. |
-| `src/util/` | Pure helpers with no project imports: link stripping, vector error marking and `withTimeout`. |
-| `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), webhooks, the reply modal, the command definition, login and the Discord error codes. |
-| `src/userData/`, `src/logger.js` | Reading and validating `data/*.json`; the logger (errors as text, secrets redacted) and timestamp formatting. |
-| `src/backfill/` | History import: argument parsing, the paged history reader, message classification, the importers for human and own-bot messages, catch-up, and the full re-import (steps, guards, database switch and its inspection, archive reader, plan, comparison, report). Imported only by `scripts/backfill.js`, `scripts/reimport.js` and the container. |
-| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js` and `reimport.js` (see the npm scripts below). Run them from the repo root with `.env` present; `inspect` needs an existing `messages.db`. |
-| `test/unit/` | One test file per source module, mirroring `src/`; plus the enforcement tests `layering`, `sizeLimits`, `unusedExports` and `coverageMap`, the non-destructive guard and the send-site guard. |
-| `test/characterization/`, `test/scenarios/` | Whole-bot tests through the `createWorld()` harness: behaviour pinned from the original bot, then one file per feature. |
-| `test/harness/`, `test/support/` | Smoke tests of the harness, and the harness itself: the world, the boot helper, the fakes for Discord, Chroma, the LLM, GIFs, webhooks and members, the clocks and the source scanners the enforcement tests use. |
+Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in `docs/specs/`. Contributor rules are in [CLAUDE.md](CLAUDE.md).
 
 ## Setup
 
-Requirements: Node 22.18+ (uses `node:sqlite` and `process.loadEnvFile`), a Chroma server, and a Discord application with the **Message Content** privileged intent.
+Requirements: Node 22.18+ (it uses `node:sqlite` and `process.loadEnvFile`), a Chroma server, and a Discord application with the **Message Content** privileged intent. All paths (`.env`, `data/`, `messages.db`) are relative to the working directory, so run everything from the repo root.
 
-All paths (`.env`, `data/`, `messages.db`) are relative to the working directory, so run everything from the repo root.
+1. Install dependencies with `npm install`.
+2. Provide the credentials below in `.env` or the environment. `.env` is optional and never overrides variables already set. A `.env` that exists but cannot be loaded stops startup. A missing required variable stops startup with one message listing all of them. An empty or whitespace-only value counts as not set.
 
-1. Install dependencies.
+   | Variable | Needed by | Purpose |
+   | --- | --- | --- |
+   | `DISCORD_BOT_TOKEN` | `start`, `backfill`, `reimport`, `register` | Bot login and command registration |
+   | `DISCORD_CLIENT_ID` | `register` | Command registration |
+   | `OPENAI_API_KEY` | `start`, `backfill`, `reimport` | Embeddings (`text-embedding-3-small`, 512 dimensions, via Chroma's embedding function) |
+   | `DEEPSEEK_API_KEY` | `start` | Chat completions (`deepseek-v4-flash`, thinking enabled). The chat client is never built without it, so `OPENAI_API_KEY` is never sent to DeepSeek |
+   | `KLIPY_API_KEY`, `GIPHY_API_KEY`, `HUMOR_API_KEY` | optional; `gif-smoke` needs at least one | GIF search, tried in that order. Only engines with a key are used. With none, GIF tokens stay as placeholder text and startup logs one warning |
 
-   ```bash
-   npm install
-   ```
+   `inspect` needs no variables. Optional overrides (channel, ports, switches) are in the [configuration reference](#configuration-reference).
 
-2. Provide the variables below in `.env` or in the environment. `.env` is optional (variables already in the environment are not overridden); a `.env` that exists but cannot be loaded stops startup. A missing required variable stops startup with one message listing all of them.
-
-   | Variable | Used for |
-   | --- | --- |
-   | `DISCORD_BOT_TOKEN` | Bot login and command registration. Required by `npm start`, `backfill`, `reimport` and `register` |
-   | `DISCORD_CLIENT_ID` | Command registration. Required by `npm run register` only |
-   | `OPENAI_API_KEY` | Embeddings (`text-embedding-3-small`, 512 dims, via Chroma's embedding function). Required by `npm start`, `backfill` and `reimport` |
-   | `DEEPSEEK_API_KEY` | Chat completions (`deepseek-v4-flash`, thinking enabled). Required by `npm start` only; the chat client is never built without it, so `OPENAI_API_KEY` is never sent to DeepSeek |
-   | `KLIPY_API_KEY`, `GIPHY_API_KEY`, `HUMOR_API_KEY` | GIF search, tried in that order. All optional: only engines with a key are used, and with none every GIF token stays as placeholder text (one startup warning). `npm run gif-smoke` needs at least one |
-
-   A variable that is empty or only whitespace counts as not set.
-
-3. Create the data files (git-ignored; `*.old` backups and `*.db.new` files from a re-import are git-ignored too).
+3. Create the data files. Both are git-ignored, as are `.env`, `*.db`, `*.old` and `*.db.new`.
 
    `data/users.json` lists the members the bot may imitate. Only their messages enter the corpus.
 
@@ -67,257 +42,432 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    [{ "username": "discord_username", "name": "Real Name", "id": "optional Discord user id" }]
    ```
 
-   Each entry needs a non-empty string `username` and `name`; usernames must be unique ignoring case; the file must be a non-empty array. `id`, when given, is 5 to 25 digits (a string or a number); other keys are ignored. The optional `id` makes member lookups exact from the first use (see [Member profiles](#member-profiles)); without it the id is learned from the first successful search.
+   The file must be a non-empty array. Each entry needs a non-empty string `username` and `name`. Usernames must be unique ignoring case. `id`, when given, is 5 to 25 digits (a string or a number). Other keys are ignored. With an `id`, member lookups are exact from the first use. Without it, the id is learned from the first successful username search.
 
-   `data/ping_caches.json` maps Discord IDs to display text, used to rewrite mentions.
+   `data/ping_caches.json` maps Discord ids to display text, used to rewrite mentions.
 
    ```json
    { "users": { "<id>": "name" }, "roles": { "<id>": "name" }, "channels": { "<id>": "name" } }
    ```
 
-   The file must be an object; `users`, `roles` and `channels` default to `{}` when absent. A missing, unreadable or malformed file stops startup with a one-line error naming the file.
+   The file must be an object. `users`, `roles` and `channels` default to `{}`. A missing, unreadable or malformed data file stops startup with a one-line error naming the file.
 
-4. Start Chroma on port 7429 (override with `CHROMA_PORT`).
+4. Start Chroma (port 7429 unless `CHROMA_PORT` is set): `npx chroma run --port 7429 --path ./data/chroma`.
+5. Register the context-menu command once, and again whenever the command definition changes: `npm run register`.
+6. Run the bot: `npm start`.
 
-   ```bash
-   npx chroma run --port 7429 --path ./data/chroma
-   ```
+## Upgrading an existing installation
 
-5. Register the context-menu command (once, or whenever commands change).
+For an installation that ran the old flat layout (`node bot.js`, a `messages.db` and Chroma data). The credential variable names are unchanged. Do these in order.
 
-   ```bash
-   npm run register
-   ```
+1. Stop the bot. Nothing else may write to `messages.db` during the upgrade.
+2. Back up `messages.db` and the Chroma data directory (the `--path` you gave `chroma run`). The re-import also keeps `messages.db.old`, but that is not a substitute for your own backup.
+3. Pull the new code and run `npm install`. Node must be 22.18 or newer.
+4. Change the process manager or service definition to run `npm start` (it runs `node src/main.js`) from the repo root. A supervisor should restart the bot on exit code 1 (see [Operations](#operations)).
+5. Check `.env`. The variable names are unchanged, but `.env` is now optional, GIF keys are optional, and boolean switches accept only `true` or `false`. Anything else (`0`, `yes`) stops startup. Missing required variables stop startup.
+6. Check `data/users.json` and `data/ping_caches.json` against the rules in [Setup](#setup). Duplicate usernames (ignoring case), a missing `name` or a malformed `id` now stop startup.
+7. Start Chroma as before. The default port, `message_embeddings` and `message_reply_embeddings` are unchanged.
+8. Decide about the re-import.
+   - **Without it,** `npm start` works on the old files. The first start applies additive migrations (new tables, columns and indexes) and keeps every existing row. Old rows keep their old filtering and reply links. `npm run backfill -- --skip-history --sync-vectors` adds the `has_gif` metadata that old Chroma rows lack.
+   - **With it (recommended once),** every current rule is applied uniformly to the history. Starting the bot first is not needed: the re-import reads the old database read-only and works on the old schema. Follow the steps below.
+9. Re-import:
+   1. `npm run reimport` (a dry run). It needs Discord and the variables above, not Chroma. It prints how many messages it would handle and changes nothing.
+   2. `npm run reimport -- --yes`. Chroma must be running. It backs up `messages.db` to `messages.db.old` (a hard link, else a verified copy), puts a freshly built database in its place and re-imports the whole channel. Vectors go into a new Chroma generation (`message_embeddings_g<UTC timestamp>` and the matching reply collection). The old collections are not touched.
+   3. `npm run backfill` once, to pick up anything posted during the re-import.
+   4. `npm start`.
 
-6. Run the bot.
+Cost: every kept message is embedded again, and Discord serves 100 messages per request. A channel with a few hundred thousand messages takes tens of minutes, a small embeddings bill and a few hundred megabytes of memory.
 
-   ```bash
-   npm start
-   ```
+Rollback: stop the bot, move `messages.db` aside and rename `messages.db.old` to `messages.db`. The restored database uses the old collections again. Rows recorded after the re-import stay in the file you moved aside. If a re-import stops midway, run `npm run reimport -- --yes --resume`. Details are under [Reimport](#reimport).
 
-Other npm scripts: `npm run backfill` (see [Backfill](#backfill)), `npm run reimport` (see [Re-importing from Discord](#re-importing-from-discord)), `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; each section's query is built from the columns that exist, so a database from any earlier schema is read in place: nothing is copied, migrated or written, a missing table prints `(no <table> table yet)`, and a missing or unreadable database prints one line and exits 1) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs; exits 1 when no GIF key is set or a token stays unresolved).
+## Triggers
 
-### Configuration overrides
+Every trigger acts only in the configured channel (`PATEXT_CHANNEL_ID`). Bot-authored messages are ignored.
 
-Everything else is defined in `src/config.js`. These optional environment variables (in `.env` or the shell) override the defaults. Boolean variables accept `true` or `false` in any case (anything else, such as `0`, `yes` or `off`, stops startup with an error naming the variable); an unset, empty or whitespace-only value takes the default. `PATEXT_CHANNEL_ID` and `GUILD_ID` must be 5 to 25 digits.
+| Trigger | When it fires | Persona | Posts as |
+| --- | --- | --- | --- |
+| Auto reply | A human message that passes the content filter and the checks below | Weighted pick (see [Retrieval and prompting](#retrieval-and-prompting)) | Discord reply to the message |
+| Reply chain | A human replies to a bot message whose persona is still in `users.json` | The persona of that bot message | Discord reply to the message |
+| `reply` command | A user picks **Apps -> reply** on a message and chooses a persona in a modal | The modal choice, or the auto-reply pick for `random` | Interaction reply (not a Discord reply to the target) |
+| Revive | A timer finds the channel idle after a human message | Random member | Plain channel message |
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `PATEXT_CHANNEL_ID` | `704837777564500149` | The one channel the bot reads and posts in |
-| `GUILD_ID` | `478743674826784769` | Guild for command registration and member lookups |
-| `CHROMA_PORT` | `7429` | Chroma server port (digits only, 1 to 65535) |
-| `REPLY_OVERRIDE` | off | `true` replies to every message, ignoring randomness and the rate limit (testing) |
-| `REVIVE_OVERRIDE` | off | `true` checks every minute and revives regardless of idle time (testing) |
-| `CHAIN_REPLIES` | on | `false` turns off chain replies (replies to a bot message). Such replies are then handled like any other message: content filter, rate limit, probability roll and persona selection |
-| `BURSTS` | on | `false` turns off multi-message bursts: the model is not told it may split, and any `<split>` marker in its output becomes a newline in a single message |
-| `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
-| `CATCH_UP` | on | `false` skips importing messages posted while the bot was down. See [Operations](#operations) |
-| `PERSONA_DISPLAY` | `embed` | `embed` or `webhook`; any other value stops startup with an error naming it. See [Persona display](#persona-display) |
+The author of an auto-reply or command target need not be a listed member (the content filter skips only the approved-author rule). A chain reply also skips the minimum length, so a short reply such as `why` can continue a thread.
 
-Reply-control tunables in `src/config.js` (all 0 or more unless stated): `reply.failureCooldownMs` (60000: no new auto reply attempt after a failed one), `revive.failureCooldownMs` (1800000: no new revive attempt after a failed one), `chain.userCooldownMs` (10000), `chain.maxPerWindow` (6, integer of 1 or more), `chain.windowMs` (600000, above 0), `command.userCooldownMs` (30000), `command.maxConcurrent` (2, integer of 1 or more), `discord.modalPreviewChars` (1000: the target preview in the reply modal), `gifs.maxPerMessage` (2, integer of 0 or more: GIF tokens kept per delivered message), `discord.maxEmbeds` (10, integer of 1 or more: embeds per payload) and `llm.postProcessRetries` (1: extra completions when the output is empty after cleaning). Values outside these ranges stop startup.
+**Auto reply checks.** They run in this order and stop at the first refusal.
+1. Rate limit: at least `reply.minIntervalMs` (5 min) since the last auto, chain or command reply.
+2. In-flight guard: only one auto reply is generated at a time. A message that arrives meanwhile is not answered, uses no roll and counts no miss. The slot is held until the whole reply, bursts included, is out or has failed.
+3. Failure cooldown: after a reply failed before anything was sent, no new attempt for `reply.failureCooldownMs`.
+4. Roll: chance `reply.probability` (0.1). After `reply.escalateAfterMisses` (10) misses the chance grows by `reply.escalationStep` (0.05) per further miss. Only a delivered auto reply resets the miss count.
 
-Lifecycle tunables in `src/config.js`: `lifecycle.graceMs` (10000, 0 or more: how long shutdown waits for in-flight handlers), `lifecycle.pollMs` (100, above 0) and `catchUp.maxMessages` (2000, integer of 1 or more). Values outside these ranges stop startup.
+A failure before delivery also hands the channel activity back to the human message. A failed send arms the rate limit, so a persistent send failure costs at most one LLM call per window.
 
-Vector-store tunables in `src/config.js`: `chroma.timeoutMs` (30000, above 0: every interactive Chroma or embedding call), `chroma.connectTimeoutMs` (10000, above 0: startup connection), `chroma.batchTimeoutMs` (120000, above 0: each call of a batch operation: backfill, re-import and sync writes and reads), `vector.repairIntervalMs` (600000, above 0: how often the automatic repair runs and how often the missing-vectors warning may repeat) and `vector.repairWindowMs` (604800000, 7 days, above 0: how far back the automatic repair looks). Values outside these ranges stop startup. A timeout abandons the request without cancelling it; Chroma may still finish it in the background.
+**Reply chain.**
+- With `CHAIN_REPLIES` on, a reply to a bot message continues the thread when the thread can be built. Otherwise (persona no longer listed, bot message deleted, message dropped by the chain filter) it is treated as any other message.
+- Rate limit and probability do not apply. The first `chain.fullDepth` (3) bot messages in a thread are always answered. Later ones are answered with chance `chain.decay` raised to the number of bot turns beyond that (0.5, 0.25, 0.125, 0.0625). A thread never holds more than `chain.maxBotTurns` (8) bot messages.
+- One chain reply is generated at a time. One user gets at most one per `chain.userCooldownMs`, and at most `chain.maxPerWindow` are accepted per `chain.windowMs`.
+- With `CHAIN_REPLIES=false` such a message goes through the auto-reply path.
 
-Backfill tunables in `src/config.js`: `backfill.pageSize` (100, 1 to 100), `backfill.batchSize` (100, 1 or more), `backfill.pageRetries` (3, 0 or more), `backfill.retryDelayMs` (2000), `backfill.pageTimeoutMs` (30000, above 0) and `backfill.comparisonPageSize` (500, 1 or more: rows per page when a re-import compares the old and new databases). Values outside these ranges stop startup.
+**`reply` command.** It skips the probability, the rate limit and the in-flight guard. A user may start one per `command.userCooldownMs`, and at most `command.maxConcurrent` run at once. A refused invocation gets an ephemeral message. The modal lists at most 24 members plus `random`. With more members the list starts with the default persona and is cut to 24. When the target is a bot message, its persona is the default choice. The submission is acknowledged at once (`deferReply`) before anything slow happens. If the reply fails afterwards, the placeholder is edited to `Could not generate a reply.`
 
-Other tunables in `src/config.js` for this feature: `discord.webhookName` (`deep-pa-text`), `discord.webhookUsernameMax` (80), `discord.webhookReplyLink` (true), `profiles.refreshIntervalMs` (3600000, integer of 0 or more; `0` disables the refresh), `profiles.minCheckIntervalMs` (10000, 0 or more), `profiles.lookupTimeoutMs` (5000, above 0) and `profiles.searchLimit` (100, 1 to 1000). Values outside these ranges stop startup.
+**Revive.** Checked every `revive.checkIntervalMs` (10 min).
+- It fires only when the last activity was a human message, not a fresh start and not a naturally spawned bot message. That message is more than `revive.dayIdleMs` (3 h) old between 10:00 and 22:59 in `revive.timeZone`, or more than `revive.nightIdleMs` (12 h) old otherwise.
+- Only auto replies and revives count as the bot speaking last. Chain and command replies do not, so idle time keeps running from the last human message. The bot never revives twice in a row.
+- A failed revive hands the activity back and blocks new attempts for `revive.failureCooldownMs` (kept in memory, cleared by a restart).
 
-Numeric tunables are validated when the config loads (for example `gifs.candidates` an integer of 1 or more, `gifs.timeoutMs` and `llm.timeoutMs` above 0, `llm.maxRetries` and `llm.emptyRetries` integers of 0 or more, `reply.probability` 0 to 1, `reply.minIntervalMs` 0 or more, `filter.minLength` at most `filter.maxLength`, every `retrieval.*Results`, `reviveSamples` and `likelyRepliers` an integer of 1 or more). `storage.chunkSize` (500, integer of 1 or more) bounds how many ids one SQL lookup carries, and `persona.missingSimilarity` (0.5, above 0 and at most 1) is the similarity weight of a hit without a distance when a persona is chosen. `storage.busyTimeoutMs` (5000, integer of 0 or more) is applied as the SQLite busy timeout on every connection, read-only ones included, so a brief overlap between the bot and a script waits instead of failing.
+**All reply types** arm the 5 minute rate limit after delivery, except revive. Edits and deletes never trigger anything.
 
-The corpus is filled by live messages and by the [backfill](#backfill) script.
+**Overrides.** `REPLY_OVERRIDE` replies to every message, ignoring randomness, rate limit and the in-flight guard. `REVIVE_OVERRIDE` checks every `revive.overrideCheckIntervalMs` (1 min) and revives regardless of idle time or who spoke last. Both are for testing.
+
+**Typing and bursts.** While an auto reply, chain reply or revive is worked on, the bot shows the typing indicator (`typing.*`). The `reply` command does not type.
+- A persona who often sends several short messages in a row may answer with a burst. At least `burst.minSamples` of their raw messages must exist, and at least `burst.minRate` of them must have been followed by another message from the same author within `burst.windowMs`. The rate is cached per author for `burst.cacheMs`.
+- Such personas get a prompt section saying the answer may be split into up to `burst.maxMessages` messages with `<split>` on its own line. A `<split>` from any persona is honoured. With `BURSTS=false` it becomes a newline in one message.
+- The first part is sent as usual. Later parts are plain channel messages (follow-ups for the command), each with its own author embed and GIFs. Each follows a pause of `burst.msPerChar` per character, clamped to `burst.minDelayMs` and `burst.maxDelayMs`, with a typing pulse. Only the first part can ping the replied user.
+- Every part is recorded in `bot_messages`. The rate limit is armed when the first part is delivered. If a later part fails, it is logged and the rest is skipped. Replies to any part of a burst count as one assistant turn in a chain.
+
+## Retrieval and prompting
+
+**Persona selection.** For an auto reply or a `random` command choice, the bot queries `message_reply_embeddings` for the `retrieval.likelyRepliers` (20) nearest entries by people other than the message's author, older than the message. Each hit weighs `1 / (1 + distance)` times a recency factor. The factor halves every `persona.recencyHalfLifeMs` (180 days) and never drops below `persona.minRecencyWeight`. An author's weight is the sum over their hits, and only members in `users.json` count. With no usable hits it falls back to a random member other than the author. Hits hidden in SQLite are dropped first.
+
+**Examples for a reply.** Four buckets are fetched, restricted to the persona's messages older than the target. Each fetch asks for `limit * retrieval.overFetchFactor` candidates.
+1. `retrieval.replyResults` (10) from `message_reply_embeddings`: their replies to similar messages. Each is paired with the stored text of the message it answered, if any.
+2. `retrieval.similarResults` (20) from `message_embeddings`: their own similar messages.
+3. `retrieval.gifResults` (10) from `message_embeddings` with `has_gif`.
+4. `retrieval.otherResults` (10) random corpus rows.
+
+Candidates are deduplicated greedily in that order, so an earlier bucket keeps a text and suppresses its variants later. A bucket's limit applies during the pass. Two texts merge when their normalised keys are equal (NFKC, lowercase, collapsed whitespace and letter runs, trimmed punctuation). They also merge when both keys are at least `retrieval.nearDuplicateMinChars` long and the cosine similarity of their embeddings is at least `retrieval.nearDuplicateThreshold`. If embeddings cannot be loaded, a warning is logged and only keys are compared.
+
+**Query text.** A target shorter than `retrieval.shortMessageChars` after cleaning is embedded together with the last `retrieval.queryContextMessages` transcript (or thread) lines, so a message like `why` still matches something. Persona selection always queries with the target only.
+
+**Frequent phrases.** Items the persona sent at least `retrieval.frequentMinCount` times among their earlier messages are listed, most frequent first, up to `retrieval.frequentLimit`. Only spellings found among the retrieved candidates are counted, so the number is a lower bound. The section is omitted when nothing qualifies.
+
+**Recent bot output.** Replies, chains and revives end with the last `retrieval.recentBotMessages` rows of `bot_messages`, newest first, with a request not to repeat them. A failed load is logged and the section is left out.
+
+**Reply prompt.** The user message holds these sections in order, omitting empty ones: identity (username and real name), the channel transcript, the target message with its sender, the four buckets (reply examples as `{"them", "you"}` objects), frequent phrases, the burst note, recent bot output.
+
+**Channel transcript.** Before a reply, the bot fetches up to `context.transcriptLimit` messages that precede the target (for the command, those before the selected message). They render as `[HH:MM] speaker: text` in `context.timeZone`, oldest first, with `(replying to <speaker>)` where applicable. Bot messages appear under the persona they imitated. Other bots and bot messages with no stored row or persona embed are left out. Text is cleaned like corpus content, newlines become spaces and empty lines are dropped. Lines are cut to `context.maxEntryChars`, and messages more than `context.maxAgeMs` older than the target are dropped. A failed fetch is a warning and the reply goes out without a transcript. Privacy: recent messages from people not listed in `users.json` are sent to the LLM provider as context.
+
+**Reply thread (chain).** The bot walks up the reply references (at most `chain.maxWalkSteps`) through `bot_messages` and the raw `messages` table. A bot message from before `bot_messages` existed is fetched once through Discord and attributed by its embed. The thread goes to the model as chat turns: the persona's own messages as `assistant` turns, everyone else's as `user` turns prefixed with their username. The last `chain.maxContextTurns` turns are kept. A deleted human turn is skipped. A deleted bot message ends the walk. No channel history is fetched for chain replies, and the system prompt is unchanged.
+
+**Revive prompt.** It uses `REVIVE_SYSTEM_PROMPT`, in this section order: identity, a situation line (local weekday and time, and how long the channel has been quiet), the end of the last conversation (`revive.transcriptLimit` messages, no age cut-off), up to `revive.starterSamples` conversation starters, up to `retrieval.reviveSamples` random examples, the burst note and recent bot output. A starter is a message by the persona that came more than `revive.starterGapMs` after the previous channel message from anyone, or the first message ever. A failed history or starter lookup is a warning and the section is left out.
+
+**Filtering.** `filter(record)` returns a transformed copy or `null`. Transformers, in order: resolve mentions through the ping cache (mention-only messages become empty), turn Tenor links into `<gif! search terms>`, strip URLs (markdown links keep their text), reduce custom emoji to `:name:`, drop Discord timestamps, soundboard tags and `discord.gg` links, trim. Predicates: approved author, non-empty, `filter.minLength` to `filter.maxLength`, no command prefix (`filter.commandPrefixes`), and no Connections, Wordle or Strands shares.
+
+**GIFs.** `<gif! terms>` is the corpus form of a GIF. For each token the resolver searches Klipy, then Giphy, then Humor API with the first `gifs.maxQueryLength` code points. The first engine with any result wins, and one of its results is chosen at random. An engine that throws, times out (`gifs.timeoutMs`) or answers with an HTTP error is logged and the next is tried. Resolved GIFs are removed from the text and attached as image embeds. Unresolved tokens become `<INSERT GIF: terms>` and the reply is still sent.
+
+**LLM calls and cleaning.** The chat client uses `llm.timeoutMs` and `llm.maxRetries`, so the SDK retries connection errors, timeouts, 408, 409, 429 and 5xx. A completion with no content is retried up to `llm.emptyRetries` times, then fails. A completion that is empty only after cleaning is requested again up to `llm.postProcessRetries` times. A final failure is logged and nothing is sent. Cleaning does the following.
+- Unwraps one pair of surrounding quotes (a JSON string is decoded).
+- Splits on `<split>`.
+- Removes stray `\n`, `\t` and `\"` escapes and a dangling quote.
+- Removes every link, so a generated message cannot post a link under a member's name: markdown links keep their text, and bare URLs, `www.` hosts and Discord invites are removed.
+- Drops parts that become empty, merges parts beyond `burst.maxMessages` into the last, and keeps at most `gifs.maxPerMessage` GIF tokens per message.
+
+Delivered text is cut to `discord.maxMessageLength`, at whitespace within the last `discord.truncateLookbackChars` characters when possible. A payload carries at most `discord.maxEmbeds` embeds, the author embed included.
+
+**Mentions.** The bot never pings anyone. Every payload, including placeholders and refusals, carries `allowedMentions: { parse: [] }`, and the client is constructed with the same default. Replies keep the reply ping unless `PING_REPLIED_USER=false`. Embed-mode replies use `failIfNotExists: false`, so a target deleted during generation still gets the reply as a plain message.
+
+## Storage
+
+SQLite file `messages.db` (source of truth):
+
+| Table | Contents |
+| --- | --- |
+| `messages` | Every human message, raw: `id`, `author` (username), `content`, `timestamp` (ms), `reference`, `deleted_at` |
+| `filtered_messages` | Messages that passed the filter, with transformed content, `has_gif`, `source_id` and `deleted_at`. `reference` is the Discord reply target if that is also in the table, else the previous filtered message when it is from a different author and less than `storage.inferredReferenceWindowMs` (1 h) older, else null. A human reply to a bot message gets a null reference and no reply embedding |
+| `bot_messages` | Every message the bot sent and Discord accepted: `id`, `persona`, `content` (corpus form, GIF tokens kept), `timestamp`, `reference` (the message it answered, null for a revive), `trigger` (`auto`, `command`, `revive`, `chain` or `imported`), `deleted_at`. One row per burst part. A failed insert is logged and does not affect the reply |
+| `user_profiles` | Append-only observations of members' Discord profiles: `username`, `user_id`, `display_name`, `avatar_url`, `observed_at`. The newest row per user is current |
+| `message_revisions` | Append-only edit history: `message_id`, `content`, `edited_at` |
+| `meta` | Installation facts, written once and never overwritten. `chroma_generation` names the Chroma generation. `reimport_started_at` and `reimport_completed_at` mark a re-import |
+
+Indexes cover corpus timestamp, author and content (frequency counts), `source_id`, bot message timestamp and raw `(timestamp, id)`. Migrations are additive and idempotent, run on every non-read-only open, and work on a database from any earlier version.
+
+**Soft deletes and edits.** Nothing is removed or overwritten. A message has one logical id, its Discord id. A corpus row's logical id is `COALESCE(source_id, id)`, and `reference` columns hold logical ids.
+- A delete sets `deleted_at` on the raw row, on every corpus row of that logical id, and on the `bot_messages` row if the bot sent it.
+- An edit appends a `message_revisions` row, marks the visible corpus row as superseded and, if the new text passes the filter, adds a corpus row `<id>:<editedAt>` with `source_id = <id>`. The raw row keeps the original text. An edit never infers a reference. Edits that change no text (link previews, pins) are ignored.
+- Every read (retrieval, samples, frequency counts, burst statistics, reply parents, recent bot output, `inspect`) ignores rows that are not visible.
+- Chroma is never modified for a delete. Hits whose SQLite row is hidden are dropped after each vector query, and an edit's new row is simply added.
+- The bot listens to message update, delete and bulk delete events in the channel (partial messages are enabled, so an uncached edit costs one REST fetch). Edits and deletes made while the bot is offline are not seen. A full re-import reconciles them.
+- "Deleted" means the bot no longer uses the text. It stays in the SQLite file and in Chroma.
+
+**Chroma** collections:
+- `message_embeddings`: one entry per corpus row, embedded on its own content. Metadata: `author`, `timestamp`, `has_gif`.
+- `message_reply_embeddings`: one entry per corpus row whose resolved reference has an embedding, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
+- A database created by a re-import records `chroma_generation` in `meta` and uses `<name>_<generation>` collections. A database without it uses the two plain names.
+
+**Non-destructive rule.** Code may add to the database and to Chroma. It never deletes, truncates, drops or overwrites existing data. The only way a database file is replaced is `src/backfill/databaseSwitch.js`, which keeps the old file as `*.old`. The full rule and its enforcement are in [CLAUDE.md](CLAUDE.md).
+
+## Member profiles and persona display
+
+**Profiles.** Before a message is sent in a member's name, and every `profiles.refreshIntervalMs` for every member (also once at startup, without delaying it), the bot reads the member's display name and avatar from Discord. Lookups use REST only: by id with `force`, else a username search that accepts only an exact username match, so a prefix or nickname is never taken for the member. No extra privileged intent is needed. The guild is the channel's guild. Sends within `profiles.minCheckIntervalMs` of a successful check share its result, and concurrent sends share one lookup.
+
+The profile used at send time was read within the last `profiles.minCheckIntervalMs`, unless Discord could not be reached (error, `profiles.lookupTimeoutMs`, or the member left). Then the last stored profile is used, one warning is logged per member per refresh interval, and the message is still sent. With nothing stored, the username and no avatar are used. Each change of id, display name or avatar is appended to `user_profiles`.
+
+**Display modes.** `PERSONA_DISPLAY=embed` (default) posts as the bot, with an author embed naming the persona and showing their avatar. `PERSONA_DISPLAY=webhook` posts through a channel webhook named `discord.webhookName`, which the bot creates or reuses (it needs the Manage Webhooks permission). The message carries the member's display name and avatar, and only the GIF embeds.
+- Webhook messages cannot be native replies. An auto or chain reply therefore starts with `-# ↪ <jump link>` (`discord.webhookReplyLink`). The stored text has no such line.
+- Names are cut to `discord.webhookUsernameMax` code points. Discord rejects names containing `clyde` or `discord`, so such a name is replaced by the username. If that fails too, the message goes out in embed form.
+- If the webhook cannot be obtained or the send fails, the message is delivered in embed form. A failed lookup is retried on the next send.
+- For the `reply` command the acknowledgement is ephemeral, the placeholder reads `Replying as <persona>...` and becomes `Sent as <persona>.`, and the persona message goes to the channel.
+- Messages already sent keep the name and avatar they were sent with.
+
+## Operations
+
+**Startup.** Startup refuses a database with an unfinished re-import (`npm run reimport -- --resume --yes`). It stops with a one-line message when Chroma cannot be reached (limit `chroma.connectTimeoutMs`). It compares `embedding.dimensions` with the length of one stored embedding and refuses on a mismatch. Invalid configuration, missing variables and bad data files also stop it. A changed embedding model with the same dimension cannot be detected, so do not change `embedding.*` for an existing collection. Use a re-import, which starts a new generation.
+
+**Shutdown and exit codes.** `SIGINT` and `SIGTERM` stop the revive, profile and repair timers, ignore new events, and wait up to `lifecycle.graceMs` for running handlers. Then the Discord client is destroyed, the database is closed and the process exits 0. A warning names handlers still running at the end of the grace period. A second signal exits at once with code 1. An unhandled rejection or uncaught exception is logged and shuts down with code 1 and no grace period. A failed start (invalid configuration, unfinished re-import, Chroma unreachable, login failure) also exits 1.
+
+**Gateway failures.** discord.js reports a disconnect only when the gateway closed for good, for example close code 4004 (bad `DISCORD_BOT_TOKEN`) or 4014 (Message Content intent not enabled). The bot logs the code with a hint and exits 1 instead of idling. Run it under a supervisor (systemd `Restart=on-failure`, pm2, a container restart policy). A supervisor will also restart a bot that exits because Chroma is down, so start Chroma first. Reconnects and resumes are logged at info level.
+
+**Restart continuity.** From the database the bot restores the reply rate limit (newest auto, chain or command reply, so a restart allows no extra reply) and who spoke last and when (newest human message, or a newer auto reply or revive). A channel that was already quiet is revived at the first check. The miss counter restarts at 0. With an empty database the bot counts as the last speaker.
+
+**Catch-up.** At ready the bot fetches messages posted after the newest stored one, up to `catchUp.maxMessages`. It imports them like a backfill (corpus, embeddings, own bot messages) and generates no replies. It does nothing on an empty database (use `npm run backfill`). If more than the cap were missed, the oldest are imported, a warning says to run `npm run backfill`, and activity restarts as on a fresh start. A failed fetch is a warning. `CATCH_UP=false` turns it off. A bot message delivered but not recorded before a crash is imported as `imported`, so it does not restore the rate limit.
+
+**Vector outage and repair.** Every Chroma and embedding call has a timeout, and a lookup that hung is not cached. A live message, edit or delete is always written to SQLite first. If its vector write then fails, the handler carries on and logs one warning per `vector.repairIntervalMs`. A reply attempt that needs Chroma fails on its own and sends nothing. Every `vector.repairIntervalMs`, if a failure was noted, the bot re-checks rows of the last `vector.repairWindowMs` against Chroma and adds what is missing, reply rows included. At ready, after catch-up, the same check runs once regardless and does not delay ready. A failed repair keeps the debt and retries at the next tick. Older rows, and failed batch writes of `backfill` and `reimport`, are repaired by hand with `npm run backfill -- --skip-history --sync-vectors`.
+
+**Logging.** All output goes through one logger per process. Errors are logged as text (stack, `[code=... status=...]`, up to three `caused by:` levels), never as objects, so request URLs and headers are not printed. Every logged string has the Discord token, the LLM key, the embedding key and the GIF keys (and their URL-encoded forms; values under 8 characters are ignored) replaced by `[redacted]`. Webhook URL tokens are redacted too. Handler errors name the work that failed, for example `Error processing message 123 (auto reply as bob, stage delivery):`.
+
+## Scripts
+
+Run from the repo root with `.env` present. Stop the bot before `backfill` and `reimport`: the script and the bot would write the same SQLite file.
+
+| Command | What it does |
+| --- | --- |
+| `npm start` | Runs the bot |
+| `npm test` | Unit and scenario tests: no network, real clock or real data |
+| `npm run register` | Registers the `reply` context-menu command for `GUILD_ID` |
+| `npm run inspect` | Prints the latest rows of `messages.db` per table, opened read-only. It needs no Chroma, copies, migrates and writes nothing, and reads a database from any earlier schema. A missing table prints `(no <table> table yet)`. A missing database exits 1 |
+| `npm run gif-smoke` | Resolves a sample text through the real GIF APIs. Exits 1 when no GIF key is set or a token stays unresolved |
+| `npm run backfill -- [options]` | Imports channel history and repairs Chroma (below) |
+| `npm run reimport -- [options]` | Rebuilds the database from Discord (below) |
 
 ### Backfill
 
-`npm run backfill -- [options]` imports the channel history into the existing database and repairs Chroma. Everything is additive and idempotent, and a dry run (`--dry-run`) writes no rows; it may apply additive schema migrations and create empty collections.
+Everything is additive and idempotent. The script logs in without starting the bot, so it never replies. An unknown option or invalid value prints the usage and exits 2.
 
 | Option | Meaning |
 | --- | --- |
-| `--dry-run` | Report what would be written; writes no rows (it may apply additive schema migrations and create empty collections) |
+| `--dry-run` | Report what would be written. Writes no rows, but may apply additive migrations and create empty collections |
 | `--skip-history` | Do not import from Discord (requires `--sync-vectors`) |
 | `--sync-vectors` | After importing, reconcile Chroma with SQLite |
 | `--before <id>` | Import only messages older than this Discord message id |
 | `--limit <n>` | Fetch at most n messages, newest first |
 
-An unknown option or invalid value prints the usage and exits 2. Without options the whole channel history is imported, skipping what is already stored. The import logs in to Discord without starting the bot (no handlers, so it never replies), pages backwards 100 messages at a time (each page has a timeout and is retried), and writes nothing until every page was read. Human messages go through the usual corpus filter in batches of `backfill.batchSize`, oldest first, so inferred reply references work; each batch makes one embedding request. The bot's own past messages (its user, its own webhooks, or ids already in `bot_messages`) are imported into `bot_messages` with trigger `imported`: the persona comes from the embed author, or for webhook messages from the one member whose username or a past display name equals the webhook name, and the reply-link line of webhook messages is removed. Messages with no attributable persona or no text are skipped and counted. Other bots and other applications' webhooks are dropped. A human reply to a bot message is stored without a reference, like a live one.
+- The import pages backwards `backfill.pageSize` messages at a time (each page has a timeout and is retried) and writes nothing until every page was read. Human messages go through the corpus filter in batches of `backfill.batchSize`, oldest first, so inferred references work. Each batch makes one embedding request.
+- The bot's own past messages (its user, its own webhooks, or ids already in `bot_messages`) go into `bot_messages` with trigger `imported`. The persona comes from the embed author or, for webhook messages, from the one member whose username or past display name equals the webhook name. Messages with no attributable persona or no text are skipped and counted. Other bots and other applications' webhooks are dropped.
+- `--sync-vectors` walks the corpus in pages and adds rows missing from Chroma, adds `has_gif` to Chroma rows that lack it (document and embedding unchanged) and adds missing reply rows. Rows with a missing stored document or embedding are skipped and counted. Nothing is removed. In a dry run the sync cannot see rows the import would have added.
+- If a vector call fails during an import, the SQLite rows are already written. Repair with `npm run backfill -- --skip-history --sync-vectors`.
+- A backfill only adds messages that are not stored yet. It does not re-filter old rows, apply offline edits or deletes, or change stored references.
 
-`--sync-vectors` walks the visible corpus in pages and adds rows missing from Chroma, adds `has_gif` to Chroma rows that lack it (document and embedding are passed back unchanged, nothing is re-embedded) and adds missing reply rows for rows with a reference. Rows whose stored document or embedding is missing, and replies whose parent has no embedding, are skipped and counted. Nothing is removed. If a vector call fails during an import, the SQLite rows are already written; run `npm run backfill -- --skip-history --sync-vectors` to repair. In a dry run the sync cannot see rows the import would have added.
+### Reimport
 
-Limits: a backfill only adds messages that are not stored yet. It does not re-filter existing raw rows, apply edits or deletions made while the bot was offline, or change stored references (a full [re-import](#re-importing-from-discord) does). Stop the bot first: the script and the bot would write the same SQLite file concurrently. A channel with a few hundred thousand messages takes tens of minutes to fetch (Discord serves 100 per request) and a few hundred megabytes of memory, plus one embedding call per batch of kept messages.
+`npm run reimport -- [--yes] [--resume]` rebuilds the database from Discord so every current rule applies to old rows: `has_gif` metadata, reply links, the corpus filter, offline edits and deletes, and the bot's own messages. It is not routine. The script cannot detect a running bot and says so before doing anything.
 
-### Re-importing from Discord
-
-`npm run reimport -- [--yes] [--resume]` rebuilds the database from Discord so that every current rule applies uniformly to old rows: `has_gif` metadata, reply links (replies to bot messages are no longer linked to unrelated messages), today's corpus filter, edits and deletions made while the bot was offline, and the bot's own past messages. Do it once after upgrading across the changes above; it is not routine.
-
-**Stop the bot first.** A running bot keeps the old file open and would write into the backup; the script cannot detect a running bot and says so before doing anything.
-
-1. Run `npm run reimport` without flags (a dry run). It reads the whole channel and prints a plan (messages fetched, human, the bot's own, other bots', how many the filter would keep) and changes nothing on disk or in Chroma.
-2. Run `npm run reimport -- --yes`. It checks the state, reads the history (a failure here changes nothing), then backs up `messages.db` as `messages.db.old` (a hard link, else a copy made as `messages.db.old.tmp`, verified and renamed into place; it refuses to overwrite an existing backup), puts a fresh database in its place and imports through the normal path: the bot's own messages first, then human messages oldest first, then a vector sync. Nothing is ever deleted.
-3. Run `npm run backfill` once to pick up anything posted during the re-import, then start the bot.
-
-The new database belongs to a new generation of Chroma collections (`message_embeddings_g<UTC timestamp>` and the matching reply collection), recorded in `meta`. The old collections are not touched. If the run stops midway (a crash, or Chroma rejecting a batch), run `npm run reimport -- --yes --resume`; the steps are idempotent and the vector sync repairs batches whose vectors were not written. A fresh run refuses to start while a `.new`, `.old` or `.old.tmp` file from an earlier run exists, and says which file to move away. A leftover `messages.db.old.tmp` is an incomplete backup (the copy was interrupted) and may be moved away; the database itself is untouched.
-
-**Verification.** Before every swap, including on `--resume`, the backup must be the same file as the database (same inode) or have the same size and SHA-256, and must open read-only with a `messages` table. A backup that fails this makes the run refuse, naming the file and leaving the database untouched: move `messages.db.old` (and `messages.db.new`) away and run again without `--resume`. A `-journal`, `-wal` or `-shm` file next to the database means it was not closed cleanly: start the bot and stop it cleanly (or open and close the database with `sqlite3`) so SQLite recovers it; do not move or delete that file.
-
-**Resume and Discord changes.** A resumed run reads Discord afresh, but rows imported by the interrupted run are not re-checked against it. Messages edited or deleted in between are not reconciled; run a second re-import if that matters.
+1. Without flags it is a dry run: it reads the whole channel and prints a plan (fetched, human, own, other bots', how many the filter would keep). Nothing changes on disk or in Chroma.
+2. With `--yes` it checks the state, reads the history (a failure here changes nothing), and backs up `messages.db` as `messages.db.old`. The backup is a hard link, else a copy made as `messages.db.old.tmp`, verified and renamed. It never overwrites an existing backup. A fresh database (built as `messages.db.new`) replaces the original by rename. The bot's own messages are imported first, then human messages oldest first, then a vector sync. Nothing is deleted.
+3. It prints the backup path, the generation, a comparison with the old database (counts, ids missing in the new one, ids whose content changed) and the next steps.
 
 | Data | In the new database |
 | --- | --- |
-| Human messages currently in the channel | Re-imported with their current content, filtered, referenced and embedded by the current rules |
+| Human messages currently in the channel | Re-imported with current content, filter, references and embeddings |
 | Messages deleted from Discord, edit history, soft-delete markers | Not carried over (they stay in the backup) |
-| The bot's own messages still in the channel | Stored in `bot_messages`: persona, trigger, reference and GIF-token content from the backup's table; else the embed author (trigger `imported`); else the profile history of webhook names. Messages with no recognisable persona are not stored and the script warns |
+| The bot's own messages still in the channel | Stored in `bot_messages`: persona, trigger, reference and text from the backup's table, else the embed author (trigger `imported`), else the webhook name history. Messages with no recognisable persona are not stored, and the script warns |
 | `user_profiles` history | Copied |
 | Old Chroma collections and the backup | Left in place |
-| Messages posted after the history was read | Not included; `npm run backfill` adds them |
-
-After an applied run the script prints the backup path, the generation, a comparison of the old and new databases (counts, ids missing in the new one, ids whose content changed) and these steps again.
-
-Rollback: stop the bot, move `messages.db` aside, rename `messages.db.old` to `messages.db`. The restored database automatically uses the old collections again. Anything recorded after the re-import stays in the file moved aside. The backup and the old Chroma collections stay until someone removes them by hand; a second re-import requires moving `messages.db.old` away first.
-
-Cost: every kept message is embedded again (one embeddings request per batch of 100), and Discord serves 100 messages per request. A channel with a few hundred thousand messages takes tens of minutes, a small embeddings bill and a few hundred megabytes of memory.
-
-## Triggers
-
-All four only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-authored messages are ignored.
-
-| Trigger | When | Persona | Posts as |
-| --- | --- | --- | --- |
-| Auto reply | A human message that passes the content filters, at least 5 min after the last bot reply, with probability 0.1. After 10 consecutive random misses the chance rises 0.05 per miss until a reply happens. An accepted roll claims the single in-flight slot until the whole reply, bursts included, is out or has failed, so a message arriving meanwhile is not answered (it consumes no roll and counts no miss). A reply that fails before anything was sent (retrieval, persona selection, model, context) also blocks new attempts for `reply.failureCooldownMs` (60 s) and hands the activity back to the human message that triggered it; a failed send keeps arming the normal rate limit. | Weighted pick from the authors of the 20 nearest entries in `message_reply_embeddings` (people who replied to similar messages, excluding the message's author). Each hit weighs `1 / (1 + distance)` times a recency factor that halves every `persona.recencyHalfLifeMs` (180 days) and never drops below `persona.minRecencyWeight` (0.25); an author's weight is the sum over their hits. With no usable hits it falls back to a random user other than the message's author. | Discord reply to the message |
-| Revive | Checked every 10 min. Fires only when the last activity in the channel was a human message (not a naturally spawned bot message, meaning an auto reply or a revive, and not a fresh start; chain replies and `reply` command replies do not count as the bot speaking, so idle time keeps running from the last human message) and it is more than 3 h old during 10:00–22:59 Central, or more than 12 h old otherwise. The bot therefore never revives twice in a row. A failed revive gives the activity back and blocks new attempts for `revive.failureCooldownMs` (30 min, kept in memory only). | Random user | Plain channel message |
-| Chain reply | A human replies to a bot message and the bot message's persona is still in `users.json`. The first 3 bot messages in a thread are always answered (the global rate limit and probability do not apply); later ones with chance 0.5, 0.25, 0.125 and 0.0625; a thread never holds more than 8 bot messages. One chain reply is generated at a time. The same user gets at most one chain reply per `chain.userCooldownMs` (10 s) and at most `chain.maxPerWindow` (6) chain replies are accepted per `chain.windowMs` (10 min) in total. With chains enabled a reply to a bot message never falls through to the random auto reply; with `CHAIN_REPLIES=false` it does. Controlled by `CHAIN_REPLIES`, `chain.fullDepth`, `chain.decay`, `chain.maxBotTurns`, `chain.maxContextTurns` (12) and `chain.maxWalkSteps` (50). | Same persona as the bot message replied to | Discord reply to the message |
-| `reply` context menu | A user right-clicks a message, then **Apps → reply**, and picks a persona (or `random`, which uses the auto-reply selection) in a modal (at most 24 users plus `random`: with more users the list starts with the default persona and is cut to 24; the original message is previewed up to `discord.modalPreviewChars` characters). Skips the probability and rate limit. A user may start one every `command.userCooldownMs` (30 s) and at most `command.maxConcurrent` (2) run at once; a refused invocation gets an ephemeral message. The submission is acknowledged at once (`deferReply`), then the persona is chosen, the placeholder is shown and the reply generated, so slow lookups cannot miss Discord's 3 s limit. | Chosen in the modal | Interaction reply (not a Discord reply to the target). When the target is a bot message it is shown as its persona and that persona is the modal's default choice. |
-
-`REPLY_OVERRIDE` and `REVIVE_OVERRIDE` remove the randomness and timers for testing.
-
-### Typing and bursts
-
-While the bot works on an auto reply, chain reply or revive it shows the typing indicator (sent immediately, refreshed every `typing.refreshMs`, 8 s, and stopped when the reply is out or fails; `typing.enabled: false` turns it off). The `reply` command does not type: its interaction shows its own placeholder.
-
-A persona who often sends several short messages in a row may answer with a burst. `burst.minSamples` (20) of the persona's raw messages must exist and at least `burst.minRate` (0.2) of them must have been followed by another message from the same author within `burst.windowMs` (30 s); the rate is measured on the raw `messages` table and cached per author for `burst.cacheMs` (1 h). Such personas get a prompt section (just before avoid-repeats) saying the response may be split into up to `burst.maxMessages` (3) messages with `<split>` on its own line. A `<split>` from any persona is honoured; parts beyond the maximum are joined onto the last one, each part is cleaned on its own, and empty parts are dropped. The first part is sent as usual (a Discord reply, or the interaction reply for the command); later parts are plain channel messages (follow-ups for the command), each with its own author embed and GIFs, after a pause of `burst.msPerChar` (40 ms) per character clamped to `burst.minDelayMs` (800) and `burst.maxDelayMs` (4000), with a typing pulse before each. Only the first part can ping the replied user. Every part is recorded in `bot_messages`. The reply rate limit is armed as soon as the first part is delivered, so a message arriving mid-burst cannot trigger another reply; if a later part fails to send it is logged and the rest of the burst is skipped. When someone replies to any part of a burst, the parts count as one assistant turn (and one bot turn) in the chain.
-
-## Storage
-
-SQLite (`messages.db`):
-
-- `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
-- `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive`, `chain` or `imported`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
-- `user_profiles`: append-only observations of members' Discord profiles (`username`, `user_id`, `display_name`, `avatar_url`, `observed_at` ms; primary key `(username, observed_at)`). The newest row per user is their stored profile; every distinct display name ever seen stays available.
-- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below. The raw table has an index on `(timestamp, id)` (`idx_messages_timestamp_id`) that serves the newest-message lookups used at restart.
-
-- `message_revisions`: append-only edit history (`message_id` logical id, `content`, `edited_at` ms; primary key `(message_id, edited_at)`).
-- `meta`: installation facts, written once and never overwritten (`key`, `value`). `chroma_generation` names the generation of Chroma collections this database belongs to (absent in an installation that was never re-imported, which uses `message_embeddings` and `message_reply_embeddings`; otherwise `<name>_<generation>`). `reimport_started_at` and `reimport_completed_at` (ms) mark a [re-import](#re-importing-from-discord).
-
-### Edits and deletes (soft)
-
-Nothing is ever removed or overwritten. `messages`, `filtered_messages` and `bot_messages` have a nullable `deleted_at` (ms) marker; `filtered_messages` also has `source_id`. Every message has one logical id, its Discord message id; a corpus row's logical id is `COALESCE(source_id, id)`, and `reference` columns hold logical ids. A deleted message gets `deleted_at` on its raw row and on every corpus row of that logical id (and on its `bot_messages` row if the bot sent it). An edit appends a `message_revisions` row, marks the visible corpus row as superseded and, when the new text passes the filter, adds a corpus row `<id>:<editedAt>` with `source_id = <id>` and the original timestamp; the raw `messages` row keeps the original text. A logical message has at most one visible corpus row, and every read (retrieval, random and starter samples, frequency counts, burst statistics, reply parents, recent bot output, the inspect script) ignores rows that are not visible. Chroma is never modified for a delete: hits whose SQLite row is hidden are dropped after each vector query, and an edit's new row is simply added. A reply row in Chroma stays under the embedding its parent had when the reply was stored, even if the parent is later edited. In a reply chain, a deleted human turn is skipped, and a deleted bot message ends the walk (no chain at all when it is the direct parent). The bot listens to message delete, bulk delete and update events in the configured channel (partial messages are enabled, so uncached edits cost one REST fetch); these are not channel activity and never trigger a reply. Edits that change nothing in the text (link previews, pins) are ignored. The first corpus row of a logical message always takes the logical id (a message the filter first dropped, such as a bare link, and that is kept after an edit gets its corpus row with `id = <id>` and no `source_id`), so replies to it keep their reference. An edit never infers a reference: its new row keeps the reference of the message's newest corpus row, or, when the message never had one, its explicit reference if that resolves to a visible message. Corpus rows created by edits before this change (`<id>:<editedAt>` with no row under the plain id) are left as they are, so replies to those messages keep a `NULL` reference.
-
-Limitations: edits and deletes that happen while the bot is offline are not seen (the full re-import reconciles them, spec 26). "Deleted" means the bot no longer uses the text, not that it is erased: it remains in the SQLite file and in Chroma, hidden and never used.
-
-Chroma:
-
-- `message_embeddings`: one entry per filtered message, embedded on its own content. Metadata: `author`, `timestamp`, `has_gif`.
-- `message_reply_embeddings`: one entry per filtered message whose resolved reference (explicit Discord reply, else the inferred previous message) has an embedding in `message_embeddings`, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
-
-## Member profiles
-
-A user's display name and avatar are read from Discord every time a message is about to be sent in that user's name, and every directory user is re-checked hourly (`profiles.refreshIntervalMs`, also once at startup without delaying it), so what the bot shows stays current. Lookups use REST only (by id with `force`, else a username search that accepts only an exact username match, so `bobby` or a nickname `bob` is never taken for `bob`); no privileged intent is needed. Sends and burst parts within `profiles.minCheckIntervalMs` (10 s) of a successful check share its result, and concurrent sends share one lookup.
-
-**Guarantee:** the profile used at send time was read from Discord within the last 10 s. It can be older only when Discord could not be reached (error, `profiles.lookupTimeoutMs` of 5 s, or the member left): then the last stored profile is used, one warning is logged per user per refresh interval, and the message is still sent. With nothing stored the username and no avatar are used.
-
-Each change of id, display name or avatar is appended to the `user_profiles` table (see Storage); nothing is overwritten. Messages already sent keep the name and avatar they were sent with.
-
-## Persona display
-
-`PERSONA_DISPLAY=embed` (default) posts as the bot with an author embed naming the persona (the persona's current avatar as its icon). `PERSONA_DISPLAY=webhook` posts through a channel webhook named `discord.webhookName` that the bot creates or reuses (it needs the Manage Webhooks permission; a channel holds at most 15 webhooks), with the member's current display name and avatar and only the GIF embeds. Webhook messages cannot be native replies, so an auto or chain reply starts with a small line `-# ↪ <jump link>` to the message being answered (`discord.webhookReplyLink`); the stored text has no such line. Display names are cut to 80 code points; Discord rejects names containing `clyde` or `discord`, so such a name is replaced by the username, and if that fails too the message goes out in embed form. If the webhook cannot be obtained or the send fails, the message is delivered in embed form (a failed webhook lookup is retried on the next send; a webhook deleted behind the bot's back is looked up again). Messages are never duplicated except when a send times out after Discord accepted it. For the `reply` command the acknowledgement is ephemeral, the placeholder reads `Replying as <persona>…` and is edited to `Sent as <persona>.`; the persona message itself goes to the channel. Old messages keep the name and avatar they were sent with.
-
-## Retrieval and prompting
-
-For a reply (`retrieveForReply`), four buckets are fetched, all restricted to the persona's messages older than the target message:
-
-Each fetch asks for `limit x retrieval.overFetchFactor` (3) candidates so that deduplication does not leave a bucket short; each bucket's limit is applied during deduplication, so candidates cut by a full bucket do not suppress duplicates in later buckets. The persona selector over-fetches the same way before it drops hidden hits.
-
-1. 10 nearest from `message_reply_embeddings` (their replies to similar messages), each paired with the message it answered: `messageStore.getParents` looks up the stored content of the reply's `reference`, giving `{ you, them }` (`them` is `null` when the row has no stored parent, including rows that exist only in Chroma)
-2. 20 nearest from `message_embeddings` (their own similar messages)
-3. 10 nearest from `message_embeddings` with `has_gif`
-4. 10 random rows from `filtered_messages`
-
-Candidates are deduplicated greedily in bucket order (replies, similar, gifs, other), so an earlier bucket keeps a text and suppresses its variants in later buckets (only texts it actually kept). Two texts are merged when their normalised keys are equal (NFKC, lowercase, whitespace collapsed, runs of three or more identical letters collapsed, leading and trailing punctuation stripped; GIF tokens are compared whole; digits are never collapsed), or when both keys are at least `retrieval.nearDuplicateMinChars` (12) characters and the cosine similarity of their embeddings is at least `retrieval.nearDuplicateThreshold` (0.95, a conservative tunable). Embeddings always come from `message_embeddings` (`vectorStore.getEmbeddings`), never from the reply collection, where rows carry their parent's embedding; if they cannot be loaded a warning is logged and only keys are compared. The reply bucket is rendered as JSON objects with `them` first (`{"them": ..., "you": ...}`, or `{"you": ...}` without a parent), and `them` is cut to `context.maxEntryChars` code points with `…` (never inside an emoji).
-
-`buildReplyPrompt` assembles the user message from ordered sections: the persona's username and real name, the recent channel transcript (omitted when empty), the target message naming its sender (`The user has just received this message from "<sender>": "<message>"`), the four buckets, a frequent-phrases section and an avoid-repeats section. Sections are joined by a blank line.
-
-### Frequent phrases and recent bot output
-
-For every kept example the retriever sums `messageStore.countContents` (exact-content counts among the persona's earlier messages) over the spellings merged into it. Items sent at least `retrieval.frequentMinCount` (3) times, most frequent first and at most `retrieval.frequentLimit` (10), form the `frequent` list shown to the model as `{ text, times }`. Only spellings among the retrieved candidates are counted, so the number is a lower bound; the section is omitted when nothing qualifies.
-
-For replies and revives the generator also loads the last `retrieval.recentBotMessages` (10) rows of `bot_messages` (the bot serves a single channel, so no channel filter) and ends the prompt with them, newest first, asking the model not to repeat them. A failed load is logged and the section is left out; it is also left out when the bot has said nothing yet.
-
-### Conversation context
-
-Before composing a reply, the bot fetches up to `context.transcriptLimit` (20) messages that precede the target message in the channel (for the `reply` command, those before the selected message, not before now) and renders them as `[HH:MM] speaker: text` lines, oldest first, with `(replying to <speaker>)` when a line answers another line in the window. Times use `context.timeZone` (`America/Chicago`). Bot messages appear under the persona they imitated, with their stored text (GIF tokens included); bot messages with no stored row or persona embed, and other bots, are left out. Text is cleaned like corpus content (mentions, URLs), newlines become spaces, mention-only and empty lines are dropped, lines longer than `context.maxEntryChars` (300) are cut with `…`, and messages more than `context.maxAgeMs` (6 h) older than the target are dropped.
-
-**Privacy:** up to `context.transcriptLimit` recent channel messages, including those of people who are not listed in `users.json`, are now sent to the LLM provider as context (previously only the target message was). A failed history fetch is logged as a warning and the reply is sent without a transcript.
-
-Retrieval for a short target (fewer than `retrieval.shortMessageChars`, 25, characters after cleaning) embeds the last `retrieval.queryContextMessages` (2) transcript lines followed by the target, so a message like "why" still matches something; longer targets are embedded alone. Persona selection still queries with the target only.
-
-For a revive the prompt, under a revive variant of the system prompt (`REVIVE_SYSTEM_PROMPT`, derived from `SYSTEM_PROMPT` by two replacements: "the channel has gone quiet, write the next message to get conversation going" instead of "respond to this message", and GIF search terms based on what is being said), has these sections in order: identity; a situation line (`It is Thursday 3:10 PM.` in `context.timeZone`, plus `The channel has been quiet for about 3 hours.` when known); the end of the last conversation (the last `revive.transcriptLimit` (10) channel messages, with no age cut-off); up to `revive.starterSamples` (20) conversation starters; up to `retrieval.reviveSamples` (30) random example messages (over-fetched 3x and deduplicated by normalised key, minus anything already shown as a starter); and the avoid-repeats section. A starter is a message by the persona that came more than `revive.starterGapMs` (1 h) after the previous message in the channel from anyone, including messages the corpus filter dropped and the bot's own messages (so the first human reply to a revive is not a starter), or the first message ever. Sections with nothing to say are omitted. A failed history fetch or starter query is logged as a warning and the revive is sent without that section.
-
-### Chain replies
-
-When a message replies to a bot message, the bot walks up the reply references (at most `chain.maxWalkSteps` steps, through `bot_messages` and the raw `messages` table; a bot message from before `bot_messages` existed is fetched once through Discord and attributed by its embed) and sends the thread to the model as chat turns: the persona's own messages as `assistant` turns, everyone else's as `user` turns prefixed with their username, consecutive same-role turns merged. The last `chain.maxContextTurns` (12) turns are kept, but the bot-message cap counts the whole walk. No channel history is fetched for these replies. The system prompt is unchanged; the user preamble holds identity, reply examples, similar, GIF and other examples, frequent phrases, avoid-repeats and a thread note.
-
-## Filtering
-
-`messageFilter.filter(record)` returns a new record with transformed content, or `null`; the input is not modified. `filterAnyAuthor` is the same without the `approvedAuthors` predicate (excluded by name), and `filterForChain` additionally skips `minLength`, so short replies such as `why` can continue a chain.
-
-Transformers, in order: resolve mentions through the ping cache (mention-only messages become empty), turn Tenor links into `<gif! search terms>`, strip URLs (markdown links keep their text), reduce custom emoji to `:name:`, drop Discord timestamps, soundboard tags and invite links, trim.
-
-Predicates: approved author, non-empty, 5–200 characters, no bot-command prefix (`! $ # % & - + p!`), no Connections/Wordle/Strands shares.
-
-## GIFs
-
-`<gif! terms>` is the corpus representation of a GIF. When the LLM emits one, the GIF resolver searches Klipy, then Giphy, then Humor API with the first 50 code points of the terms. Each engine returns up to 5 results (`gifs.candidates`) and the first engine with any result wins; one of its results is picked at random, so the same terms do not always give the same GIF. Each lookup has a 5 s timeout (`gifs.timeoutMs`); an engine that throws, times out or answers with an HTTP error is logged as a warning and the next engine is tried. If every engine fails the token stays as a placeholder and the reply is still sent. Resolved GIFs are removed from the text and attached as image embeds; unresolved ones are left as `<INSERT GIF: terms>`.
-
-## LLM calls and output cleaning
-
-The chat client is built with `llm.timeoutMs` (120 s) and `llm.maxRetries` (1), so the SDK aborts a slow attempt and retries connection errors, timeouts, 408, 409, 429 and 5xx. A completion with no content is retried up to `llm.emptyRetries` (1) more times, then fails with `LLM returned an empty response`; a completion that is empty only after cleaning (for example just quotes or `<split>`) is requested again up to `llm.postProcessRetries` (1) times; the handler logs a final failure and nothing is sent. Every completion is cleaned before use: a whole answer wrapped in one pair of quotes is unwrapped once (a JSON string is decoded; `"yes" or "no"` is two quoted units and stays as written), the text is split on `<split>` without merging, and each part loses stray `\n`, `\t` and `\"` escapes (the cleaning repeats until nothing changes), a leftover quote that has no partner in its part, and every link: markdown links keep their text, bare URLs (any scheme, `www.` hosts) and Discord invites (`discord.gg`, `discord.com/invite`, `discordapp.com/invite`, `dsc.gg`) are removed, so a generated message can never post a link under a member's name. A part that is only a link is dropped. Only then are parts beyond `burst.maxMessages` merged onto the last one, and at most `gifs.maxPerMessage` (2) GIF tokens are kept in each delivered message (the rest are removed without a placeholder). A payload never carries more than `discord.maxEmbeds` (10) embeds, the author embed included. Delivered text is cut to `discord.maxMessageLength` (2000) characters, at whitespace within the last `discord.truncateLookbackChars` (200) characters when possible; the untruncated cleaned text is what is logged.
-
-## Delivery and mentions
-
-Every outbound message is awaited, so reply state (rate limit, miss counter, activity) only keeps a change after a send succeeded (the activity is claimed before generating and handed back when the attempt delivers nothing). The bot never pings anyone: every payload, including the thinking placeholder, the failure notice and the ephemeral refusals, carries `allowedMentions: { parse: [] }`, and the Discord client is constructed with the same default, so `@everyone`, `@here` or `<@id>` in model output stays plain text. Replies keep the reply ping unless `PING_REPLIED_USER=false`.
-
-If an auto reply cannot be sent, the failure is logged and the rate limit is armed, so a persistent send failure costs at most one LLM call per window. Embed-mode replies are sent with `failIfNotExists: false`, so a target deleted while the reply was being generated no longer loses it: Discord posts it as a plain channel message. If a `reply` command fails after its acknowledgement, the placeholder (or the deferred "thinking" state) is edited to `Could not generate a reply.`
-
-## Operations
-
-**Signals and shutdown.** `SIGINT` and `SIGTERM` start a graceful shutdown: the revive and profile timers stop, new events are ignored, and the bot waits up to `lifecycle.graceMs` (10 s) for handlers already running (a reply being generated is finished, sent and recorded). Then the Discord client is destroyed, the database is closed and the process exits 0. If handlers are still running when the grace period ends, a warning names how many were abandoned. A second signal during shutdown exits immediately with code 1. An unhandled rejection or uncaught exception is logged and shuts down at once (no grace period) with code 1.
-
-**Exit codes.** 0 after a signal; 1 after a fatal gateway close, a crash, or a failed start (an unfinished re-import, Chroma not reachable, invalid configuration).
-
-**Logging.** All output goes through one logger per process (created in `main.js` and in each script). Errors are logged as text (stack, then `[code=... status=...]`, then up to three `caused by:` levels), never as objects, so request URLs and headers carried by library errors are not printed. Every logged string has the Discord token, the LLM key, the embedding key and the three GIF keys (and their URL-encoded forms; values shorter than 8 characters are ignored) replaced by `[redacted]`, and webhook URLs have their token replaced the same way. Handler error logs say which work failed, for example `Error processing message 123 (auto reply as bob, stage delivery):`; a failure while building the transcript is a warning and the reply is sent without it.
-
-**Gateway failures.** Client errors and warnings and shard errors are logged; reconnects and resumes are logged at info level. discord.js reports a disconnect only when the gateway closed for good (for example close code 4004, a bad `DISCORD_BOT_TOKEN`, or 4014, the Message Content intent not enabled in the developer portal). The bot logs the code with a hint and exits 1 instead of idling as a silent zombie, so run it under a supervisor (systemd `Restart=on-failure`, pm2, a container restart policy) that restarts it. A supervisor will also restart a bot that exits because Chroma is down, so start Chroma first or accept the retries.
-
-**Starting.** Startup refuses a database whose [re-import](#re-importing-from-discord) is unfinished (`npm run reimport -- --resume --yes`) and prints a one-line message with the port and the start command when Chroma cannot be reached (the connection attempt has its own timeout, `chroma.connectTimeoutMs`).
-
-**When Chroma or the embedding API is down.** Every Chroma and embedding call has a timeout (see the vector-store tunables), and a lookup that hung is not cached, so the next call retries. A live message, edit or delete is always written to SQLite first. If its vector write then fails or times out, the handler does not abort: one warning per `vector.repairIntervalMs` says that vectors are missing and will be repaired automatically, and the bot carries on (a reply attempt that needs Chroma fails on its own, is logged and sends nothing). Every `vector.repairIntervalMs` (10 minutes) the bot re-checks the rows of the last `vector.repairWindowMs` (7 days) against Chroma and adds what is missing, reply rows included, but only after a failure was noted; a tick with nothing to repair makes no Chroma call. At ready, after catch-up, the same check runs once regardless, to pick up vectors that were missing when the process last stopped (it is not awaited and does not delay ready). A failed repair or a failed catch-up keeps the debt and is retried at the next tick. Rows older than the window, and batch writes of `backfill` and `reimport` (which still fail loudly), are repaired by hand: `npm run backfill -- --skip-history --sync-vectors`. A SQLite error during a sync is reported as such, not as a vector-store failure.
-
-**Changing embedding settings.** `embedding.modelName` and `embedding.dimensions` must not change for an existing collection. Startup compares `embedding.dimensions` with the length of one stored embedding and refuses to start on a mismatch, without making an embedding request. A changed model with the same dimension cannot be detected: the new vectors would silently be incomparable with the old ones. Use a [re-import](#re-importing-from-discord), which starts a new collection generation.
-
-**What a restart restores.** From the database: the reply rate limit (from the newest auto, chain or command reply, so a restart does not allow an extra reply) and who spoke last and when (from the newest human message, or a newer auto reply or revive), so a channel that was already quiet is revived at the first check. The miss counter starts again at 0. With an empty database the bot counts as the last speaker, as on a first run.
-
-**Catch-up.** At ready the bot fetches the messages posted after the newest stored one (up to `catchUp.maxMessages`, 2000), imports them like a backfill (corpus, embeddings, own bot messages) and generates no replies for them. If more than the cap were missed, the oldest are imported, a warning says to run `npm run backfill`, and activity restarts as on a fresh start. A failed fetch is a warning. `CATCH_UP=false` turns it off. A bot message that was delivered but not recorded before a crash is imported as `imported` and so does not restore the rate limit.
-
-## Known issues
-
-These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
-
-
-None are open at the moment. These limits are accepted and recorded in `docs/specs/33-standards-and-test-gaps.md`:
-
-- `PATEXT_CHANNEL_ID` and `GUILD_ID` default to the values the original bot hard-coded, so the existing deployment keeps working; set both variables to point the bot elsewhere.
-- The Klipy content filter stays `off` as in the original (`gifs.klipyContentFilter`), and no output token cap is set: Discord's length limit and the reply limits bound what is sent.
-- A human replying to part one of a burst while later parts are pending, and GIF lookups that run one after another across the parts of a burst, are accepted.
-- Discord REST calls rely on discord.js's own request timeout and retries. The `reply` command has no role allow-list: the per-user cooldown and the concurrency cap bound its cost. GIF engine errors are logged by message only, and secrets are redacted by the logger.
-- A dry run of `backfill` or `reimport` may apply additive schema migrations and create empty collections.
-- The startup checks stop the bot on an invalid configuration or an unreachable Chroma; shutdown is graceful for signals only, and `backfill` leaves its SQLite handle to process exit.
+| Messages posted after the history was read | Not included. `npm run backfill` adds them |
+
+**Interrupted runs.** If the run stops midway, run `npm run reimport -- --yes --resume`. The steps are idempotent, and the vector sync repairs batches whose vectors were not written. A fresh run refuses to start while a `.new`, `.old` or `.old.tmp` file from an earlier run exists, and names the file to move away. A `.old.tmp` is an incomplete backup and may be moved away.
+
+**Verification.** Before every swap, including on `--resume`, the backup must be the same file as the database (same inode) or have the same size and SHA-256, and must open read-only with a `messages` table. Otherwise the run refuses, naming the file and leaving the database untouched. Move `messages.db.old` and `messages.db.new` away and run again without `--resume`. A `-journal`, `-wal` or `-shm` file next to the database means it was not closed cleanly. Start the bot and stop it cleanly (or open and close the database with `sqlite3`) so SQLite recovers it. Do not move or delete that file.
+
+**Resume and Discord changes.** A resumed run reads Discord afresh. Rows imported by the interrupted run are not re-checked, so edits or deletes made in between are not reconciled. Run a second re-import if that matters. A second re-import also needs `messages.db.old` moved away first. The backup and old collections stay until someone removes them by hand.
+
+## Configuration reference
+
+Everything tunable is in `src/config.js` and `src/config/`, validated when the config loads. A value outside its range stops startup with a message naming the key. Ranges are noted where they exist. Keys without a range are not checked. Only the environment variables below can change a value at run time. Everything else is a source edit.
+
+### Environment variables
+
+Credentials are listed under [Setup](#setup). Boolean variables accept `true` or `false` in any case. Anything else stops startup with an error naming the variable. An unset, empty or whitespace-only value takes the default.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PATEXT_CHANNEL_ID` | `704837777564500149` | The one channel the bot reads and posts in. 5 to 25 digits |
+| `GUILD_ID` | `478743674826784769` | Guild for `npm run register` only. 5 to 25 digits |
+| `CHROMA_PORT` | `7429` | Chroma server port, 1 to 65535 |
+| `REPLY_OVERRIDE` | `false` | `true` replies to every message (testing) |
+| `REVIVE_OVERRIDE` | `false` | `true` checks every minute and revives regardless of idle time (testing) |
+| `CHAIN_REPLIES` | `true` | `false` turns off reply chains |
+| `BURSTS` | `true` | `false` turns off multi-message bursts |
+| `PING_REPLIED_USER` | `true` | `false` stops replies from pinging the author of the message they answer |
+| `CATCH_UP` | `true` | `false` skips importing messages posted while the bot was down |
+| `PERSONA_DISPLAY` | `embed` | `embed` or `webhook`, lowercase. Anything else stops startup |
+
+### Tunables in `src/config.js`
+
+Times are in milliseconds unless the key says otherwise.
+
+**`reply`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `probability` | 0.1 | Chance of an auto reply per eligible message. 0 to 1 |
+| `minIntervalMs` | 300000 | Rate limit between replies. 0 or more |
+| `escalateAfterMisses` | 10 | Misses before the chance starts to grow |
+| `escalationStep` | 0.05 | Chance added per further miss |
+| `failureCooldownMs` | 60000 | No new attempt after a failed one. 0 or more |
+
+**`revive`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `checkIntervalMs` | 600000 | Revive check period |
+| `overrideCheckIntervalMs` | 60000 | Period with `REVIVE_OVERRIDE` |
+| `dayIdleMs`, `nightIdleMs` | 10800000, 43200000 | Idle time needed by day and by night |
+| `dayStartHour`, `dayEndHour` | 10, 22 | Daytime hours in `timeZone`, both inclusive |
+| `timeZone` | `America/Chicago` | Zone for the day and night rule |
+| `transcriptLimit` | 10 | Channel messages shown as the last conversation |
+| `starterGapMs` | 3600000 | Gap that makes a message a conversation starter |
+| `starterSamples` | 20 | Starters shown |
+| `failureCooldownMs` | 1800000 | No new revive after a failed one. 0 or more |
+
+**`chain`, `command`, `typing`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `chain.fullDepth` | 3 | Bot messages in a thread that are always answered |
+| `chain.decay` | 0.5 | Answer chance factor per bot turn beyond `fullDepth`. Above 0, below 1 |
+| `chain.maxBotTurns` | 8 | Bot messages a thread may hold |
+| `chain.maxContextTurns` | 12 | Turns sent to the model. Integer, 2 or more |
+| `chain.maxWalkSteps` | 50 | Reply references followed |
+| `chain.userCooldownMs` | 10000 | Per-user spacing of chain replies. 0 or more |
+| `chain.maxPerWindow`, `chain.windowMs` | 6, 600000 | Chain replies accepted per window. Integer 1 or more; above 0 |
+| `command.userCooldownMs` | 30000 | Per-user spacing of `reply` commands. 0 or more |
+| `command.maxConcurrent` | 2 | Commands running at once. Integer, 1 or more |
+| `typing.enabled`, `typing.refreshMs` | true, 8000 | Typing indicator and its refresh |
+
+**`burst`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `maxMessages` | 3 | Parts per reply. Integer, 1 or more |
+| `windowMs` | 30000 | Follow-up window when measuring a persona's burst rate |
+| `minRate`, `minSamples` | 0.2, 20 | Rate and raw messages needed to offer bursts |
+| `cacheMs` | 3600000 | Rate cache per author |
+| `msPerChar`, `minDelayMs`, `maxDelayMs` | 40, 800, 4000 | Pause before a later part |
+| `siblingWindowMs` | 60000 | Window for treating bot rows with the same persona, trigger and reference as one burst |
+
+**`filter`, `retrieval`, `persona`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `filter.minLength`, `filter.maxLength` | 5, 200 | Corpus length bounds in characters. 0 or more, minimum not above maximum |
+| `filter.commandPrefixes` | `! $ # % & - + p!` | Messages starting with these are dropped |
+| `retrieval.replyResults`, `similarResults`, `gifResults`, `otherResults` | 10, 20, 10, 10 | Examples per bucket. Integers, 1 or more |
+| `retrieval.reviveSamples`, `likelyRepliers` | 30, 20 | Revive examples; hits used for persona choice. Integers, 1 or more |
+| `retrieval.overFetchFactor` | 3 | Candidates fetched per example kept. Integer, 1 or more |
+| `retrieval.shortMessageChars`, `queryContextMessages` | 25, 2 | Short-target rule: length and context lines added |
+| `retrieval.nearDuplicateThreshold` | 0.95 | Cosine similarity that merges texts. Above 0, at most 1 |
+| `retrieval.nearDuplicateMinChars` | 12 | Minimum key length for the similarity check |
+| `retrieval.frequentMinCount`, `frequentLimit` | 3, 10 | Frequent-phrase threshold and cap |
+| `retrieval.recentBotMessages` | 10 | Recent bot rows shown to avoid repeats |
+| `persona.recencyHalfLifeMs` | 15552000000 | Recency half-life (180 days). Above 0 |
+| `persona.minRecencyWeight` | 0.25 | Recency floor. Above 0, at most 1 |
+| `persona.missingSimilarity` | 0.5 | Weight of a hit without a distance. Above 0, at most 1 |
+
+**`context`, `llm`, `embedding`, `gifs`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `context.transcriptLimit` | 20 | Messages in the reply transcript |
+| `context.maxEntryChars` | 300 | Cut length of a transcript line and of a `them` example |
+| `context.maxAgeMs` | 21600000 | Transcript messages older than this (before the target) are dropped |
+| `context.timeZone` | `America/Chicago` | Zone for transcript times and the situation line |
+| `llm.model`, `llm.baseURL` | `deepseek-v4-flash`, `https://api.deepseek.com` | Chat model and endpoint |
+| `llm.thinking`, `llm.stream` | true, false | Thinking mode; streaming |
+| `llm.timeoutMs` | 120000 | Per attempt. Above 0 |
+| `llm.maxRetries`, `emptyRetries`, `postProcessRetries` | 1, 1, 1 | SDK retries; retries for empty content; retries for empty cleaned output. Integers, 0 or more |
+| `embedding.modelName`, `embedding.dimensions` | `text-embedding-3-small`, 512 | Must not change for an existing collection |
+| `gifs.maxQueryLength` | 50 | Code points of a GIF search |
+| `gifs.candidates` | 5 | Results kept per engine. Integer, 1 or more |
+| `gifs.timeoutMs` | 5000 | Per lookup. Above 0 |
+| `gifs.maxPerMessage` | 2 | GIF tokens kept per delivered message. Integer, 0 or more |
+| `gifs.klipy*`, `gifs.humorUrl` | see source | Klipy base URL, page size 8, customer id, locale `us`, content filter `off`, format `gif`; Humor API URL |
+
+**`discord`, `profiles`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `discord.maxMessageLength` | 2000 | Delivered text length limit |
+| `discord.truncateLookbackChars` | 200 | How far back a cut looks for whitespace |
+| `discord.maxEmbeds` | 10 | Embeds per payload. Integer, 1 or more |
+| `discord.modalPreviewChars` | 1000 | Target preview in the reply modal. Integer, 0 or more |
+| `discord.modalTimeoutMs` | 120000 | How long the modal waits for a submission |
+| `discord.embedColor` | `0x5865F2` | Author embed colour |
+| `discord.webhookName` | `deep-pa-text` | Name of the channel webhook |
+| `discord.webhookUsernameMax` | 80 | Display name length in webhook mode |
+| `discord.webhookReplyLink` | true | Prefix webhook replies with a jump link |
+| `profiles.refreshIntervalMs` | 3600000 | Refresh of all profiles. Integer, 0 or more; 0 disables it |
+| `profiles.minCheckIntervalMs` | 10000 | Reuse window of a successful check. 0 or more |
+| `profiles.lookupTimeoutMs` | 5000 | Per lookup. Above 0 |
+| `profiles.searchLimit` | 100 | Members returned by a username search. Integer, 1 to 1000 |
+
+**`storage`, `chroma`, `vector`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `storage.databasePath`, `usersPath`, `pingCachePath` | `messages.db`, `data/users.json`, `data/ping_caches.json` | File locations, relative to the working directory |
+| `storage.inferredReferenceWindowMs` | 3600000 | Window for inferring a reply reference |
+| `storage.busyTimeoutMs` | 5000 | SQLite busy timeout on every connection. Integer, 0 or more |
+| `storage.chunkSize` | 500 | Ids per SQL lookup. Integer, 1 or more |
+| `chroma.messagesCollection`, `repliesCollection` | `message_embeddings`, `message_reply_embeddings` | Base collection names |
+| `chroma.timeoutMs` | 30000 | Interactive Chroma and embedding calls. Above 0 |
+| `chroma.connectTimeoutMs` | 10000 | Startup connection. Above 0 |
+| `chroma.batchTimeoutMs` | 120000 | Each call of a batch operation (backfill, re-import, sync). Above 0 |
+| `vector.repairIntervalMs` | 600000 | Repair period and warning spacing. Above 0 |
+| `vector.repairWindowMs` | 604800000 | How far back the repair looks (7 days). Above 0 |
+
+**`backfill`, `lifecycle`, `catchUp`, `logging`**
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `backfill.pageSize` | 100 | Messages per history request. Integer, 1 to 100 |
+| `backfill.batchSize` | 100 | Messages per ingest or sync batch. Integer, 1 or more |
+| `backfill.pageRetries`, `retryDelayMs` | 3, 2000 | Page retries (integer, 0 or more) and delay (0 or more) |
+| `backfill.pageTimeoutMs` | 30000 | Per history page. Above 0 |
+| `backfill.comparisonPageSize` | 500 | Rows per page when a re-import compares databases. Integer, 1 or more |
+| `lifecycle.graceMs`, `pollMs` | 10000, 100 | Shutdown grace (0 or more) and its poll step (above 0) |
+| `catchUp.maxMessages` | 2000 | Messages imported at startup. Integer, 1 or more |
+| `logging.locale`, `logging.timeZone` | `en-US`, `America/Chicago` | Timestamps in log lines and `inspect` |
+
+## Development
+
+Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are non-destructive, `npm test` must pass before every commit, behaviour changes ship with tests, the bot never pings, and non-trivial changes start from a spec.
+
+**Layout.** Imports point downward only, as enforced by `test/unit/layering.test.js`.
+
+| Path | Role |
+| --- | --- |
+| `src/main.js`, `src/container.js`, `src/container/`, `src/vendor.js` | Entry point; the only place services are wired (one builder per layer, plus the default clock); the only place real third-party constructors are collected |
+| `src/config.js`, `src/config/` | Every tunable, strict environment parsing, range validation, required-variable checks, the secret list and the optional `.env` loader |
+| `src/backfill/` | History import, catch-up and the full re-import (steps, guards, database switch, archive reader, plan, comparison, report). Imported only by scripts and the container |
+| `src/bot/` | Triggers and orchestration: the handlers (message create, edit, delete, `reply` command, revive tick, profile refresh), reply, chain, revive and command-limit policies, activity tracker, composer, responder, lifecycle, startup and ready steps, process hooks and state restore |
+| `src/ingest/`, `src/retrieval/`, `src/context/`, `src/profiles/`, `src/llm/`, `src/gifs/` | Recording into SQLite and Chroma, vector sync and repair; retrieval and persona choice; transcript and thread builders; member profile checks; prompts, generators, chat client and output cleaning; GIF engines and resolver |
+| `src/storage/`, `src/discord/` | SQLite schema, migrations, stores and the read-only inspector, and the Chroma vector store; Discord client, payloads, embeds, delivery, webhooks, the reply modal, command definition, login and error codes |
+| `src/corpus/`, `src/text/`, `src/util/`, `src/userData/`, `src/logger.js` | Content transformers and filter predicates; pure text helpers; small pure helpers; validation of `data/*.json`; the logger |
+| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js`, `reimport.js` |
+| `test/unit/` | One file per source module, mirroring `src/`, plus the enforcement tests `layering`, `sizeLimits`, `unusedExports`, `coverageMap`, `nonDestructive` and `sendSites` |
+| `test/characterization/`, `test/scenarios/` | Whole-bot tests through the `createWorld()` harness: behaviour pinned from the original bot, then one file per feature |
+| `test/harness/`, `test/support/` | Smoke tests of the harness, and the harness itself: the world, boot helper, fakes for Discord, Chroma, the LLM, GIFs, webhooks and members, clocks and the source scanners |
+
+**Tests.** `npm test` runs `node --test` over `test/**/*.test.js`. Tests use fakes at the third-party boundary and never touch the network, real clock, real randomness or real data.
+
+**Specs and audit.** Behaviour is specified in `docs/specs/`; the index and implementation order are in [docs/specs/README.md](docs/specs/README.md). Specs 27 to 33 resolve the findings of the audit recorded in [docs/audit/findings.md](docs/audit/findings.md). Decisions to leave things as they are are in [spec 33](docs/specs/33-standards-and-test-gaps.md).
+
+## Limitations
+
+- **Only fakes were run.** The automated tests drive the bot against fakes for Discord, the LLM and the GIF APIs. Storage calls were verified against a real local Chroma server during the audit, but the whole bot has not been run against real Discord, DeepSeek, OpenAI embeddings or GIF services. Do a first run against a test channel (set `PATEXT_CHANNEL_ID`) before pointing it at the real one.
+- `PATEXT_CHANNEL_ID` and `GUILD_ID` default to the values the original bot hard-coded. Set both to point the bot elsewhere.
+- The Klipy content filter stays `off` (`gifs.klipyContentFilter`) and no output token cap is set. Discord's length limit and the reply limits bound what is sent.
+- A human replying to part one of a burst while later parts are pending, and GIF lookups that run one after another across burst parts, are accepted.
+- Discord REST calls rely on discord.js's own request timeout and retries. The `reply` command has no role allow-list: the per-user cooldown and the concurrency cap bound its cost.
+- Edits and deletes made while the bot is offline are not seen until a re-import. A re-import does not carry over edit history or soft-delete markers.
+- A dry run of `backfill` may apply additive schema migrations and create empty collections.
+- Recent channel messages, including from people not in `users.json`, are sent to the LLM provider as context.
