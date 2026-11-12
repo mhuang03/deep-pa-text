@@ -61,10 +61,10 @@ export const createResponder = ({
   const laterVia = ({ trigger, via, channel }) =>
     (trigger === TRIGGERS.COMMAND ? { type: 'followUp', interaction: via.interaction } : { type: 'channel', channel });
 
-  const send = async ({ via, persona, guild, part }) => {
+  const send = async ({ via, persona, guild, channel, part }) => {
     try {
       return await delivery.deliver({
-        via, persona, guild, content: part.content, gifLinks: part.gifLinks,
+        via, persona, guild, channel, content: part.content, gifLinks: part.gifLinks,
       });
     } catch (error) {
       throw markDelivery(error);
@@ -72,8 +72,8 @@ export const createResponder = ({
   };
 
   const deliverPart = async (request, via, part) => {
-    const { persona, guild, target, trigger } = request;
-    const message = await send({ via, persona, guild, part });
+    const { persona, guild, channel, target, trigger } = request;
+    const message = await send({ via, persona, guild, channel, part });
     record({ message, text: part.text, persona, target, trigger });
     return message;
   };

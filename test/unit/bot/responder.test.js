@@ -75,7 +75,7 @@ test('composes then delivers and returns the response and the sent message', asy
     ['context', { channel: channelStub, target: { id: '1' } }],
     ['compose', { persona: 'bob', target: { id: '1' }, context: { transcript: ['t'] } }],
     ['deliver', {
-      via: { type: 'channel' }, persona: 'bob', guild: { id: 'g' }, content: 'shown',
+      via: { type: 'channel' }, persona: 'bob', guild: { id: 'g' }, channel: channelStub, content: 'shown',
       gifLinks: [{ match: 'm', url: 'u' }],
     }],
   ]);

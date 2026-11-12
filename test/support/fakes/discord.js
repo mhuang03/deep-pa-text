@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { runInEntry } from './parking.js';
+import { createMembers } from './members.js';
+import { attachWebhooks } from './webhooks.js';
 import { CHANNEL_ID, GUILD_ID, OTHER_CHANNEL_ID } from '../fixtures.js';
 
 // Interactions that define this symbol are told which tracked handler run they belong to.
@@ -7,27 +9,7 @@ export const INVOKED = Symbol('fake-discord-invoked');
 
 const BOT = { id: 'bot-user', bot: true };
 
-const createGuild = () => {
-  let failing = false;
-  let missing = false;
-  const members = {
-    calls: [],
-    avatars: {},
-    setFailing: (x) => {
-      failing = x;
-    },
-    setMissing: (x) => {
-      missing = x;
-    },
-    async fetch({ query, limit }) {
-      members.calls.push({ query, limit });
-      if (failing) throw new Error('fake discord: member fetch failed');
-      const avatar = query in members.avatars ? members.avatars[query] : `https://cdn.example/avatars/${query}.png`;
-      return { first: () => (missing ? undefined : { displayAvatarURL: () => avatar }) };
-    },
-  };
-  return { id: GUILD_ID, members };
-};
+const createGuild = () => ({ id: GUILD_ID, members: createMembers() });
 
 // One-shot by default: the next `times` calls of the guarded method reject with `error`.
 const createFailer = () => {
@@ -85,6 +67,7 @@ const createChannel = (id, guild, nextId) => {
     channel.sentMessages.push(message);
     return message;
   };
+  attachWebhooks(channel, nextId);
   return channel;
 };
 
@@ -97,6 +80,7 @@ const makeBotMessage = (id, payload, channel, reference = null) => {
     reference,
     createdTimestamp: Date.now(),
     channel,
+    url: `https://discord.test/channels/${channel.guildId}/${channel.id}/${id}`,
   };
   channel.history.push(message);
   return message;
@@ -179,6 +163,7 @@ export const createFakeDiscord = () => {
       guildId: target.guildId,
       replies: [],
       referenceFetches: 0,
+      url: `https://discord.test/channels/${target.guildId}/${target.id}/${id}`,
     };
     // Resolves to the history message with the referenced id, like discord.js; rejects when it is gone.
     message.fetchReference = async () => {

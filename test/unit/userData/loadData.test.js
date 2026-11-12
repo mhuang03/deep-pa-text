@@ -32,3 +32,12 @@ test('nameOf yields undefined for unknown usernames', () => {
   assert.equal(directory.nameOf('mallory'), undefined);
   assert.equal(directory.nameOf('constructor'), undefined);
 });
+
+test('idOf returns the optional Discord id of a user and undefined otherwise', () => {
+  const directory = buildUserDirectory([
+    { username: 'a', name: 'A', id: '123' }, { username: 'b', name: 'B' },
+  ]);
+  assert.equal(directory.idOf('a'), '123');
+  assert.equal(directory.idOf('b'), undefined);
+  assert.equal(directory.idOf('constructor'), undefined);
+});

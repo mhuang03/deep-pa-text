@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
+import { DEFAULTS, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -14,6 +14,10 @@ const EXPECTED_DEFAULTS = {
     maxMessageLength: 2000,
     truncateLookbackChars: 200,
     pingRepliedUser: true,
+    personaDisplay: 'embed',
+    webhookName: 'deep-pa-text',
+    webhookUsernameMax: 80,
+    webhookReplyLink: true,
   },
   reply: {
     probability: 0.1, minIntervalMs: 300000, escalateAfterMisses: 10, escalationStep: 0.05, override: false,
@@ -43,6 +47,7 @@ const EXPECTED_DEFAULTS = {
     enabled: true, maxMessages: 3, windowMs: 30000, minRate: 0.2, minSamples: 20, cacheMs: 3600000,
     msPerChar: 40, minDelayMs: 800, maxDelayMs: 4000, siblingWindowMs: 60000,
   },
+  profiles: { refreshIntervalMs: 3600000, minCheckIntervalMs: 10000, lookupTimeoutMs: 5000, searchLimit: 100 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
@@ -173,4 +178,25 @@ test('assertBurst requires maxMessages to be an integer of at least 1', () => {
   [0, -1, 1.5, NaN, '3'].forEach((maxMessages) =>
     assert.throws(() => assertBurst({ ...ok, maxMessages }), /burst\.maxMessages/));
   assert.doesNotThrow(() => assertBurst({ ...ok, maxMessages: 1 }));
+});
+
+test('PERSONA_DISPLAY accepts embed and webhook and rejects anything else naming the value', () => {
+  assert.equal(loadConfig({ PERSONA_DISPLAY: 'webhook' }).discord.personaDisplay, 'webhook');
+  assert.equal(loadConfig({ PERSONA_DISPLAY: 'embed' }).discord.personaDisplay, 'embed');
+  assert.throws(() => loadConfig({ PERSONA_DISPLAY: 'Webhook' }), /PERSONA_DISPLAY.*"Webhook"/);
+  assert.throws(() => loadConfig({ PERSONA_DISPLAY: '' }), /PERSONA_DISPLAY/);
+});
+
+test('assertProfiles accepts the boundaries and rejects values outside the ranges', () => {
+  const ok = { refreshIntervalMs: 0, minCheckIntervalMs: 0, lookupTimeoutMs: 1, searchLimit: 1 };
+  assert.deepEqual(assertProfiles(ok), ok);
+  assert.equal(assertProfiles({ ...ok, searchLimit: 1000 }).searchLimit, 1000);
+  const bad = [
+    { refreshIntervalMs: -1 }, { refreshIntervalMs: 1.5 }, { minCheckIntervalMs: -1 },
+    { minCheckIntervalMs: Number.NaN }, { lookupTimeoutMs: 0 }, { searchLimit: 0 }, { searchLimit: 1001 },
+    { searchLimit: 2.5 },
+  ];
+  bad.forEach((override) => {
+    assert.throws(() => assertProfiles({ ...ok, ...override }), /profiles\./, JSON.stringify(override));
+  });
 });

@@ -53,4 +53,16 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS idx_filtered_messages_author_content ON filtered_messages (author, content)
 `,
   },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS user_profiles (
+    username TEXT NOT NULL,
+    user_id TEXT,
+    display_name TEXT NOT NULL,
+    avatar_url TEXT,
+    observed_at INTEGER NOT NULL,
+    PRIMARY KEY (username, observed_at)
+  )
+`,
+  },
 ];

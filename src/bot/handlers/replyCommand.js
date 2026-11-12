@@ -1,6 +1,6 @@
 import { MessageFlags } from 'discord.js';
 import { TRIGGERS } from '../triggers.js';
-import { withSafeMentions, SAFE_MENTIONS } from '../../discord/payload.js';
+import { SAFE_MENTIONS } from '../../discord/payload.js';
 import { toMessageRecord } from '../../discord/messageRecord.js';
 import { REPLY_COMMAND_NAME } from '../../discord/commands.js';
 import {
@@ -12,7 +12,7 @@ import { formatCommandRequest, formatReply } from '../logLines.js';
 export const createReplyCommandHandler = (deps) => {
   const {
     client, config, users, messageFilter, personaSelector, responder,
-    authorEmbeds, replyPolicy, botMessageResolver, logger,
+    delivery, replyPolicy, botMessageResolver, logger,
   } = deps;
 
   const isReplyCommand = (interaction) =>
@@ -64,8 +64,7 @@ export const createReplyCommandHandler = (deps) => {
 
   const answer = async ({ interaction, modalInteraction, target, guild, channel }) => {
     const persona = await chooseReplier(modalInteraction, target);
-    const thinking = await authorEmbeds.make(persona, guild, { thinking: true });
-    await modalInteraction.reply(withSafeMentions({ embeds: [thinking] }));
+    await modalInteraction.reply(await delivery.placeholder({ persona, guild }));
     let response;
     try {
       const onDelivered = () => replyPolicy.noteReply({ resetMisses: false });

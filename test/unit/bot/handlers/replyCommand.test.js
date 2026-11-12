@@ -27,7 +27,9 @@ const setup = ({ target = null, failCompose = false, resolveBot = () => null } =
         return { response: 'resp', messages: [message] };
       },
     },
-    authorEmbeds: { make: async (author, guild, opts) => ({ author, thinking: opts.thinking }) },
+    delivery: { placeholder: async ({ persona }) => ({
+      embeds: [{ author: persona, thinking: true }], allowedMentions: { parse: [] },
+    }) },
     replyPolicy: { noteReply: (arg) => events.push(['noteReply', arg]) },
     botMessageResolver: { resolve: (m) => resolveBot(m) },
     logger: { info: (m) => logs.info.push(m), error: (...a) => logs.error.push(a) },

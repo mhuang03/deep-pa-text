@@ -1,3 +1,13 @@
+export const PERSONA_DISPLAYS = Object.freeze(['embed', 'webhook']);
+
+const parsePersonaDisplay = (raw) => {
+  if (raw === undefined) return 'embed';
+  if (!PERSONA_DISPLAYS.includes(raw)) {
+    throw new Error(`PERSONA_DISPLAY must be one of ${PERSONA_DISPLAYS.join(', ')}, got "${raw}"`);
+  }
+  return raw;
+};
+
 const buildDiscord = (env) => ({
   token: env.DISCORD_BOT_TOKEN,
   clientId: env.DISCORD_CLIENT_ID,
@@ -9,6 +19,10 @@ const buildDiscord = (env) => ({
   maxMessageLength: 2000,
   truncateLookbackChars: 200,
   pingRepliedUser: env.PING_REPLIED_USER !== 'false',
+  personaDisplay: parsePersonaDisplay(env.PERSONA_DISPLAY),
+  webhookName: 'deep-pa-text',
+  webhookUsernameMax: 80,
+  webhookReplyLink: true,
 });
 
 const buildReply = (env) => ({
@@ -187,6 +201,32 @@ const buildBurst = (env) => assertBurst({
   siblingWindowMs: 60000,
 });
 
+const MAX_SEARCH_LIMIT = 1000;
+
+export const assertProfiles = (profiles) => {
+  const { refreshIntervalMs, minCheckIntervalMs, lookupTimeoutMs, searchLimit } = profiles;
+  if (!(Number.isInteger(refreshIntervalMs) && refreshIntervalMs >= 0)) {
+    throw new Error('profiles.refreshIntervalMs must be an integer of at least 0');
+  }
+  if (!(Number.isFinite(minCheckIntervalMs) && minCheckIntervalMs >= 0)) {
+    throw new Error('profiles.minCheckIntervalMs must be a number of at least 0');
+  }
+  if (!(Number.isFinite(lookupTimeoutMs) && lookupTimeoutMs > 0)) {
+    throw new Error('profiles.lookupTimeoutMs must be a number greater than 0');
+  }
+  if (!(Number.isInteger(searchLimit) && searchLimit >= 1 && searchLimit <= MAX_SEARCH_LIMIT)) {
+    throw new Error(`profiles.searchLimit must be an integer from 1 to ${MAX_SEARCH_LIMIT}`);
+  }
+  return profiles;
+};
+
+const buildProfiles = () => assertProfiles({
+  refreshIntervalMs: 3600000,
+  minCheckIntervalMs: 10000,
+  lookupTimeoutMs: 5000,
+  searchLimit: 100,
+});
+
 const buildLogging = () => ({
   locale: 'en-US',
   timeZone: 'America/Chicago',
@@ -214,6 +254,7 @@ const buildConfig = (env) => ({
   chain: buildChain(env),
   typing: buildTyping(),
   burst: buildBurst(env),
+  profiles: buildProfiles(),
   logging: buildLogging(),
 });
 

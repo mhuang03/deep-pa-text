@@ -124,14 +124,15 @@ test('a resolved GIF token becomes an image embed ahead of the author embed and 
   assert.equal(payload.embeds[1].data.author.name, 'dave');
 });
 
-test('an avatar lookup failure still sends the revive without an icon', async (t) => {
+// Spec 23: a failed lookup uses the stored profile, which the ready-time refresh already recorded.
+test('an avatar lookup failure still sends the revive, with the stored profile icon', async (t) => {
   const world = await armedWorld(t);
   world.discord.guild.members.setFailing(true);
   await triggerRevive(world);
   assert.equal(sent(world).length, 1);
   const { author } = authorEmbed(sent(world)[0]);
   assert.equal(author.name, 'dave');
-  assert.ok(!author.icon_url);
+  assert.equal(author.icon_url, 'https://cdn.example/avatars/dave.png');
 });
 
 test('the revive LLM prompt lists the persona\'s seeded messages as starters and examples only', async (t) => {

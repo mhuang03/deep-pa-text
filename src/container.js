@@ -5,6 +5,7 @@ import { createMessageFilter } from './corpus/messageFilter.js';
 import { openDatabase } from './storage/database.js';
 import { createMessageStore } from './storage/messageStore.js';
 import { createBotMessageStore } from './storage/botMessageStore.js';
+import { createProfileStore } from './storage/profileStore.js';
 import { createVectorStore } from './storage/vectorStore.js';
 import { createIngestService } from './ingest/ingestService.js';
 import { createBurstProfile } from './retrieval/burstProfile.js';
@@ -19,6 +20,10 @@ import { createGifResolver } from './gifs/gifResolver.js';
 import { createDiscordClient } from './discord/client.js';
 import { createAuthorEmbeds } from './discord/authorEmbed.js';
 import { createEmbedDelivery } from './discord/delivery.js';
+import { fetchMember } from './discord/memberLookup.js';
+import { createWebhookProvider } from './discord/webhooks.js';
+import { createWebhookDelivery } from './discord/webhookDelivery.js';
+import { createMemberProfiles } from './profiles/memberProfiles.js';
 import { createActivityTracker } from './bot/activityTracker.js';
 import { createReplyPolicy } from './bot/replyPolicy.js';
 import { createChainPolicy } from './bot/chainPolicy.js';
@@ -29,6 +34,7 @@ import { createResponder } from './bot/responder.js';
 import { createMessageCreateHandler } from './bot/handlers/messageCreate.js';
 import { createReplyCommandHandler } from './bot/handlers/replyCommand.js';
 import { createReviveTick } from './bot/handlers/reviveTick.js';
+import { createProfileRefresh } from './bot/handlers/profileRefresh.js';
 import { createBot } from './bot/bot.js';
 
 // Lazy wrappers: global mocks of Date, Math.random and setInterval are honoured at call time.
@@ -81,6 +87,7 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
   const db = openDatabase(config.storage.databasePath);
   const messageStore = createMessageStore({ db, config });
   const botMessageStore = createBotMessageStore({ db, config });
+  const profileStore = createProfileStore({ db });
   const vectorStore = buildVectorStore({ config, vendor });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
   const ingest = createIngestService({ messageStore, vectorStore, messageFilter });
@@ -94,13 +101,14 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
     config, vendor, retriever, userDirectory, botMessageStore, messageStore, burstProfile, logger,
   });
   return {
-    db, messageStore, botMessageStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
+    db, messageStore, botMessageStore, profileStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
     personaSelector, burstProfile, generator,
   };
 };
 
 const buildHandlers = ({
-  config, data, clock, logger, client, core, responder, authorEmbeds, botMessageResolver, chainBuilder,
+  config, data, clock, logger, client, core, responder, delivery, memberProfiles,
+  botMessageResolver, chainBuilder,
 }) => {
   const activity = createActivityTracker({ now: clock.now });
   const replyPolicy = createReplyPolicy({ config, now: clock.now, random: clock.random });
@@ -113,12 +121,24 @@ const buildHandlers = ({
     }),
     replyCommand: createReplyCommandHandler({
       client, config, users: data.users, messageFilter, personaSelector, responder,
-      authorEmbeds, replyPolicy, botMessageResolver, logger,
+      delivery, replyPolicy, botMessageResolver, logger,
     }),
+    profileRefresh: createProfileRefresh({ client, config, memberProfiles, logger }),
     reviveTick: createReviveTick({
       client, config, activity, personaSelector, responder, clock: { now: clock.now }, logger,
     }),
   };
+};
+
+const buildDelivery = ({ config, client, memberProfiles, logger }) => {
+  const authorEmbeds = createAuthorEmbeds({ config, memberProfiles });
+  const embedDelivery = createEmbedDelivery({ authorEmbeds, config });
+  const webhooks = createWebhookProvider({ getBotUserId: () => client.user?.id, config });
+  if (config.discord.personaDisplay !== 'webhook') return { delivery: embedDelivery, webhooks };
+  const delivery = createWebhookDelivery({
+    webhooks, memberProfiles, fallback: embedDelivery, config, logger,
+  });
+  return { delivery, webhooks };
 };
 
 export const buildContainer = ({
@@ -127,10 +147,12 @@ export const buildContainer = ({
   const core = buildCore({ config, vendor, data, clock, logger });
   const client = createDiscordClient(vendor.Client);
   const gifResolver = buildGifResolver({ config, vendor, clock, logger });
-  const authorEmbeds = createAuthorEmbeds({ config, logger });
   const composer = createComposer({ generator: core.generator, gifResolver, config });
-  const delivery = createEmbedDelivery({ authorEmbeds, config });
-  const { botMessageStore, userDirectory } = core;
+  const { botMessageStore, userDirectory, profileStore } = core;
+  const memberProfiles = createMemberProfiles({
+    profileStore, fetchMember, userDirectory, config, clock, logger,
+  });
+  const { delivery, webhooks } = buildDelivery({ config, client, memberProfiles, logger });
   const botMessageResolver = createBotMessageResolver({
     botMessageStore, userDirectory, getBotUserId: () => client.user?.id,
   });
@@ -145,8 +167,12 @@ export const buildContainer = ({
     botMessageStore, messageStore: core.messageStore, messageFilter: core.messageFilter, userDirectory, config,
   });
   const handlers = buildHandlers({
-    config, data, clock, logger, client, core, responder, authorEmbeds, botMessageResolver, chainBuilder,
+    config, data, clock, logger, client, core, responder, delivery, memberProfiles,
+    botMessageResolver, chainBuilder,
   });
   const bot = createBot({ client, config, handlers, clock, logger });
-  return { bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder, chainBuilder, ...core };
+  return {
+    bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder,
+    chainBuilder, memberProfiles, webhooks, ...core,
+  };
 };

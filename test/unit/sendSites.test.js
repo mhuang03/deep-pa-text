@@ -5,7 +5,9 @@ import path from 'node:path';
 
 const ROOT = new URL('../../', import.meta.url).pathname;
 // Later specs extend this list; every other module must go through the delivery adapter.
-const ALLOWED = ['src/discord/delivery.js', 'src/bot/handlers/replyCommand.js'];
+const ALLOWED = [
+  'src/discord/delivery.js', 'src/discord/webhookDelivery.js', 'src/bot/handlers/replyCommand.js',
+];
 const SEND_CALL = /\.(reply|send|editReply|followUp)\(/;
 
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');

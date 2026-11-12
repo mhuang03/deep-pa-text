@@ -25,5 +25,10 @@ export const createEmbedDelivery = ({ authorEmbeds, config }) => {
     return sender.send(payload);
   };
 
-  return { deliver };
+  const placeholder = async ({ persona, guild }) => {
+    const thinking = await authorEmbeds.make(persona, guild, { thinking: true });
+    return withSafeMentions({ embeds: [thinking] });
+  };
+
+  return { deliver, placeholder };
 };

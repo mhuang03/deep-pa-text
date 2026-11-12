@@ -157,23 +157,69 @@ test('fake chroma ranks, filters and projects', async () => {
   assert.equal(fakeEmbed('').length, 64);
 });
 
-test('guild members controls and channel lookup', async (t) => {
+test('guild members: seeded fixture users, fetch by id, prefix search and controls', async (t) => {
   const world = await newWorld(t);
   const { guild, client } = world.discord;
-  const first = async (query) => (await guild.members.fetch({ query, limit: 1 })).first();
-  assert.equal((await first('alice')).displayAvatarURL(), 'https://cdn.example/avatars/alice.png');
-  guild.members.avatars.bob = 'https://cdn.example/custom.png';
-  assert.equal((await first('bob')).displayAvatarURL(), 'https://cdn.example/custom.png');
-  guild.members.avatars.carol = null;
-  assert.equal((await first('carol')).displayAvatarURL(), null);
-  guild.members.setMissing(true);
-  assert.equal(await first('alice'), undefined);
-  guild.members.setMissing(false);
+  const alice = await guild.members.fetch({ user: 'user-alice', force: true });
+  assert.equal(alice.user.username, 'alice');
+  assert.equal(alice.displayName, 'alice-display');
+  assert.equal(alice.displayAvatarURL(), 'https://cdn.example/avatars/alice.png');
+  await assert.rejects(guild.members.fetch({ user: 'nobody', force: true }), { code: 10007 });
+  const found = await guild.members.search({ query: 'ALI', limit: 5 });
+  assert.deepEqual([...found.values()].map((m) => m.user.username), ['alice']);
+  guild.members.add({ username: 'bobby' });
+  const prefix = await guild.members.search({ query: 'bob', limit: 1 });
+  assert.equal(prefix.size, 1);
+  guild.members.update('bob', { displayName: 'Bobbo', avatarURL: null });
+  const bob = await guild.members.fetch({ user: 'user-bob' });
+  assert.deepEqual([bob.displayName, bob.displayAvatarURL()], ['Bobbo', null]);
+  guild.members.remove('bob');
+  await assert.rejects(guild.members.fetch({ user: 'user-bob' }), { code: 10007 });
   guild.members.setFailing(true);
-  await assert.rejects(first('alice'));
-  assert.equal(guild.members.calls.length, 5);
+  await assert.rejects(guild.members.fetch({ user: 'user-alice' }), /member fetch failed/);
+  guild.members.setFailing(null);
+  assert.deepEqual(guild.members.calls.at(0), { method: 'fetch', args: { user: 'user-alice', force: true } });
   await assert.rejects(client.channels.fetch('unknown'));
   assert.equal((await client.channels.fetch(CHANNEL_ID)).id, CHANNEL_ID);
+});
+
+test('guild members: a hanging lookup never settles', async (t) => {
+  const world = await newWorld(t);
+  const { members } = world.discord.guild;
+  members.setHanging(true);
+  const outcome = await Promise.race([
+    members.fetch({ user: 'user-alice' }).then(() => 'settled'),
+    new Promise((resolve) => setImmediate(() => resolve('pending'))),
+  ]);
+  assert.equal(outcome, 'pending');
+  members.setHanging(false);
+});
+
+test('channel webhooks: fetch, create, send appends to history, failures and message urls', async (t) => {
+  const world = await newWorld(t);
+  const { channel } = world.discord;
+  assert.deepEqual([...(await channel.fetchWebhooks()).values()], []);
+  const created = await channel.createWebhook({ name: 'hook' });
+  assert.deepEqual([created.name, created.owner.id], ['hook', 'bot-user']);
+  const other = channel.webhooks.add({ name: 'x', ownerId: 'someone' });
+  assert.equal((await channel.fetchWebhooks()).size, 2);
+  assert.equal(channel.webhooks.list.get(other.id), other);
+  const message = await created.send({ content: 'hi', username: 'Bobbo', embeds: [] });
+  assert.deepEqual(created.sent.map((p) => p.content), ['hi']);
+  assert.equal(message.author.username, 'Bobbo');
+  assert.equal(message.author.bot, true);
+  assert.equal(message.webhookId, created.id);
+  assert.equal(message.reference, null);
+  assert.ok(channel.history.includes(message));
+  created.failSends(new Error('nope'), { times: 1 });
+  await assert.rejects(created.send({ content: 'x' }), /nope/);
+  await created.send({ content: 'again' });
+  channel.webhooks.failFetch(new Error('no fetch'));
+  await assert.rejects(channel.fetchWebhooks(), /no fetch/);
+  channel.webhooks.failCreate(new Error('no create'));
+  await assert.rejects(channel.createWebhook({ name: 'y' }), /no create/);
+  const human = world.addHistory({ content: 'hello there' });
+  assert.equal(human.url, `https://discord.test/channels/${channel.guildId}/${channel.id}/${human.id}`);
 });
 
 test('close restores globals and a later world still gets fake clients', async () => {

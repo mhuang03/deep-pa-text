@@ -20,6 +20,7 @@ const createFakes = (options) => {
     gifs: createFakeGifs(),
   };
   if (options.failHeartbeat) fakes.chroma.state.failHeartbeat(options.failHeartbeat);
+  options.users.forEach(({ username, id }) => fakes.discord.state.guild.members.add({ username, id }));
   return fakes;
 };
 

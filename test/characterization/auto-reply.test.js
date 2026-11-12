@@ -88,7 +88,9 @@ test('a reply is one message.reply with the processed content, a persona embed a
   assert.equal(author.name, 'bob');
   assert.equal(author.icon_url, 'https://cdn.example/avatars/bob.png');
   assert.equal(color, BLURPLE);
-  assert.deepEqual(world.discord.guild.members.calls, [{ query: 'bob', limit: 1 }]);
+  assert.deepEqual(world.discord.guild.members.calls, [
+    { method: 'search', args: { query: 'bob', limit: 100 } },
+  ]);
   assert.deepEqual(world.discord.channel.sent, []);
 });
 
