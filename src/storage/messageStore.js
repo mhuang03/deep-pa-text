@@ -18,6 +18,8 @@ export const createMessageStore = ({ db, config }) => {
   const insertFilteredSql = db.prepare(sql.INSERT_FILTERED);
   const insertRevisionSql = db.prepare(sql.INSERT_REVISION);
   const previousSql = db.prepare(sql.PREVIOUS_VISIBLE);
+  const hasRawSql = db.prepare(sql.HAS_RAW);
+  const pageSql = db.prepare(sql.PAGE_FILTERED);
   const rawByIdSql = db.prepare(sql.RAW_BY_ID);
   const newestRevisionSql = db.prepare(sql.NEWEST_REVISION);
   const anchoredSql = db.prepare(sql.ANCHORED_VISIBLE);
@@ -48,9 +50,26 @@ export const createMessageStore = ({ db, config }) => {
     resolveExplicit(record.reference) ?? (shouldInfer ? inferReference(record) : null);
 
   const insertRaw = (record) => {
-    insertRawSql.run(
+    const { changes } = insertRawSql.run(
       record.id, record.author, record.content, record.timestamp, record.reference ?? null,
     );
+    return Number(changes) > 0;
+  };
+
+  // Soft-deleted rows still exist, so a re-import does not resurrect them.
+  const hasRaw = (id) => hasRawSql.get(id) !== undefined;
+
+  // fn must be synchronous: the connection is shared, so awaiting inside would interleave other writes.
+  const transaction = (fn) => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const result = fn();
+      db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   };
 
   const insertCorpusRow = (record, { rowId, sourceId, shouldInfer }) => {
@@ -82,16 +101,19 @@ export const createMessageStore = ({ db, config }) => {
     return insertCorpusRow(filtered, { rowId: `${id}:${editedAt}`, sourceId: id, shouldInfer });
   };
 
-  const applyEdit = ({ inferReference: shouldInfer = true, ...edit }) => {
-    db.exec('BEGIN IMMEDIATE');
-    try {
-      const stored = applyInTransaction({ ...edit, inferReference: shouldInfer });
-      db.exec('COMMIT');
-      return stored;
-    } catch (error) {
-      db.exec('ROLLBACK');
-      throw error;
-    }
+  const applyEdit = ({ inferReference: shouldInfer = true, ...edit }) =>
+    transaction(() => applyInTransaction({ ...edit, inferReference: shouldInfer }));
+
+  const pageFiltered = ({ after = null, limit }) => {
+    const { timestamp, id } = after ?? { timestamp: null, id: null };
+    return pageSql.all(timestamp, timestamp, timestamp, id, limit).map((row) => ({
+      id: row.id,
+      author: row.author,
+      content: row.content,
+      timestamp: row.timestamp,
+      reference: row.reference,
+      hasGif: Boolean(row.has_gif),
+    }));
   };
 
   const randomMessages = ({ author, before = null, limit }) =>
@@ -144,6 +166,9 @@ export const createMessageStore = ({ db, config }) => {
 
   return {
     insertRaw,
+    hasRaw,
+    transaction,
+    pageFiltered,
     getRaw,
     countContents,
     getParents,

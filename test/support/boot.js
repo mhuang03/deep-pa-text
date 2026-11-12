@@ -110,5 +110,7 @@ export const bootBot = async (world) => {
     dispose();
     throw error;
   }
-  return { subject: buildSubject(container, config.context), sqlite: buildSqlite(container.db), dispose };
+  return {
+    subject: buildSubject(container, config.context), sqlite: buildSqlite(container.db), container, dispose,
+  };
 };

@@ -75,6 +75,45 @@ export const createVectorStore = ({ client, embeddingFunction, config }) => {
     });
   };
 
+  const named = async (name) => {
+    const target = (await collections())[name];
+    if (!target) throw new Error(`Unknown collection: ${name}`);
+    return target;
+  };
+
+  // Stored rows as Chroma holds them, so a repair can pass them back unchanged.
+  const getRecords = async (name, ids) => {
+    if (ids.length === 0) return new Map();
+    const found = await (await named(name)).get({ ids, include: ['documents', 'metadatas', 'embeddings'] });
+    return new Map(found.ids.map((id, i) => [id, {
+      document: found.documents?.[i],
+      metadata: found.metadatas?.[i],
+      embedding: found.embeddings?.[i],
+    }]));
+  };
+
+  // Only for adding a missing metadata key: records carry the row's existing document and embedding.
+  const fillMetadata = async (name, records) => {
+    if (records.length === 0) return;
+    await (await named(name)).upsert({
+      ids: records.map((r) => r.id),
+      documents: records.map((r) => r.document),
+      metadatas: records.map((r) => r.metadata),
+      embeddings: records.map((r) => r.embedding),
+    });
+  };
+
+  const addReplyRows = async (rows) => {
+    if (rows.length === 0) return;
+    const { replies } = await collections();
+    await replies.upsert({
+      ids: rows.map((r) => r.message.id),
+      documents: rows.map((r) => r.message.content),
+      metadatas: rows.map((r) => buildMetadata(r.message)),
+      embeddings: rows.map((r) => r.embedding),
+    });
+  };
+
   const upsertMessages = async (msgs) => {
     const { messages, replies } = await collections();
     await messages.upsert({
@@ -99,13 +138,14 @@ export const createVectorStore = ({ client, embeddingFunction, config }) => {
 
   const query = async (name, { embedding, text, where, limit }) => {
     const input = buildQueryInput({ embedding, text });
-    const target = (await collections())[name];
-    if (!target) throw new Error(`Unknown collection: ${name}`);
+    const target = await named(name);
     const result = await target.query({
       ...input, nResults: limit, where, include: QUERY_INCLUDE,
     });
     return toHits(result);
   };
 
-  return { connect, embed, upsertMessages, query, getEmbeddings };
+  return {
+    connect, embed, upsertMessages, query, getEmbeddings, getRecords, fillMetadata, addReplyRows,
+  };
 };

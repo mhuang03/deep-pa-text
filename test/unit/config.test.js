@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
+import { DEFAULTS, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -48,6 +48,7 @@ const EXPECTED_DEFAULTS = {
     msPerChar: 40, minDelayMs: 800, maxDelayMs: 4000, siblingWindowMs: 60000,
   },
   profiles: { refreshIntervalMs: 3600000, minCheckIntervalMs: 10000, lookupTimeoutMs: 5000, searchLimit: 100 },
+  backfill: { pageSize: 100, batchSize: 100, pageRetries: 3, retryDelayMs: 2000, pageTimeoutMs: 30000 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
@@ -198,5 +199,19 @@ test('assertProfiles accepts the boundaries and rejects values outside the range
   ];
   bad.forEach((override) => {
     assert.throws(() => assertProfiles({ ...ok, ...override }), /profiles\./, JSON.stringify(override));
+  });
+});
+
+test('assertBackfill accepts the boundaries and rejects values outside the ranges', () => {
+  const ok = { pageSize: 1, batchSize: 1, pageRetries: 0, retryDelayMs: 0, pageTimeoutMs: 1 };
+  assert.deepEqual(assertBackfill(ok), ok);
+  assert.equal(assertBackfill({ ...ok, pageSize: 100 }).pageSize, 100);
+  const bad = [
+    { pageSize: 0 }, { pageSize: 101 }, { pageSize: 1.5 }, { batchSize: 0 }, { batchSize: 2.5 },
+    { pageRetries: -1 }, { pageRetries: 1.5 }, { retryDelayMs: -1 }, { retryDelayMs: Number.NaN },
+    { pageTimeoutMs: 0 },
+  ];
+  bad.forEach((override) => {
+    assert.throws(() => assertBackfill({ ...ok, ...override }), /backfill\./, JSON.stringify(override));
   });
 });

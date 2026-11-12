@@ -220,3 +220,75 @@ test('getEmbeddings asks for the embeddings of all ids in one get', async () => 
   await store.getEmbeddings(['1', '2']);
   assert.deepEqual(calls, [{ ids: ['1', '2'], include: ['embeddings'] }]);
 });
+
+const seedRecord = (fake, name, id, extra = {}) => fake.state.collection(name).seed([{
+  id, document: `doc ${id}`, metadata: { author: 'a', timestamp: 1, has_gif: false }, ...extra,
+}]);
+
+test('getRecords returns document, metadata and embedding by id and omits unknown ids', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  seedRecord(fake, 'message_embeddings', '1');
+  const records = await store.getRecords('messages', ['1', 'nope']);
+  assert.deepEqual([...records.keys()], ['1']);
+  assert.equal(records.get('1').document, 'doc 1');
+  assert.deepEqual(records.get('1').metadata, { author: 'a', timestamp: 1, has_gif: false });
+  assert.deepEqual(records.get('1').embedding, fakeEmbed('doc 1'));
+});
+
+test('getRecords reads the replies collection by name and makes no call for no ids', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  seedRecord(fake, 'message_reply_embeddings', 'r1');
+  assert.deepEqual([...(await store.getRecords('replies', ['r1'])).keys()], ['r1']);
+  const collection = fake.state.collection('message_embeddings');
+  collection.setFailing(new Error('must not be called'));
+  assert.equal((await store.getRecords('messages', [])).size, 0);
+});
+
+test('getRecords rejects an unknown collection name', async () => {
+  const { store } = setup();
+  await assert.rejects(store.getRecords('nope', ['1']), /Unknown collection/);
+});
+
+test('fillMetadata upserts exactly the given document, embedding and metadata without embedding anything', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  const embedding = [0.5, 0.25];
+  seedRecord(fake, 'message_embeddings', '1', { embedding, metadata: { author: 'a', timestamp: 1 } });
+  await store.fillMetadata('messages', [{
+    id: '1', document: 'doc 1', embedding, metadata: { author: 'a', timestamp: 1, has_gif: true },
+  }]);
+  const row = fake.state.collection('message_embeddings').rows.get('1');
+  assert.deepEqual(row.embedding, embedding);
+  assert.equal(row.document, 'doc 1');
+  assert.deepEqual(row.metadata, { author: 'a', timestamp: 1, has_gif: true });
+  assert.equal(fake.state.embeddingCalls, 0);
+});
+
+test('fillMetadata does nothing for no records', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  await store.fillMetadata('replies', []);
+  assert.equal(fake.state.collection('message_reply_embeddings').upserts.length, 0);
+});
+
+test('addReplyRows upserts one row per message with the given embedding and the standard metadata', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  const embedding = [1, 0];
+  await store.addReplyRows([{ message: m('2', 'reply text', { reference: '1', hasGif: true }), embedding }]);
+  const replies = fake.state.collection('message_reply_embeddings');
+  assert.equal(replies.upserts.length, 1);
+  const row = replies.rows.get('2');
+  assert.deepEqual(row.embedding, embedding);
+  assert.equal(row.document, 'reply text');
+  assert.deepEqual(row.metadata, { author: 'a', timestamp: 10, has_gif: true });
+});
+
+test('addReplyRows does nothing for no rows', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  await store.addReplyRows([]);
+  assert.equal(fake.state.collection('message_reply_embeddings').upserts.length, 0);
+});

@@ -47,3 +47,23 @@ test('a failed fetch logs a warning and yields no messages', async () => {
   assert.equal(warnings.length, 1);
   assert.equal(warnings[0].at(-1), boom);
 });
+
+test('throwOnError rethrows a failed fetch instead of returning no messages', async () => {
+  const boom = new Error('rate limited');
+  const { history, channel, warnings } = setup(async () => {
+    throw boom;
+  });
+  await assert.rejects(history.fetchBefore(channel, { before: 'x', limit: 5, throwOnError: true }), boom);
+  assert.equal(warnings.length, 0);
+});
+
+test('passes the cache option to the channel only when given', async () => {
+  const calls = [];
+  const { history, channel } = setup(async (args) => {
+    calls.push(args);
+    return new Map();
+  });
+  await history.fetchBefore(channel, { before: 'x', limit: 5, cache: false });
+  await history.fetchBefore(channel, { before: 'x', limit: 5 });
+  assert.deepEqual(calls, [{ limit: 5, before: 'x', cache: false }, { limit: 5, before: 'x' }]);
+});

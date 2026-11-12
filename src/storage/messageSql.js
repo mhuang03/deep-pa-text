@@ -24,6 +24,15 @@ export const PREVIOUS_VISIBLE = `
 export const RAW_BY_ID = `
   SELECT id, author, content, timestamp, reference, deleted_at FROM messages WHERE id = ?
 `;
+export const HAS_RAW = 'SELECT 1 AS found FROM messages WHERE id = ?';
+// Keyset pagination over visible corpus rows; the (timestamp, id) cursor is exclusive.
+export const PAGE_FILTERED = `
+  SELECT id, author, content, timestamp, reference, has_gif FROM filtered_messages
+  WHERE deleted_at IS NULL
+    AND (? IS NULL OR timestamp > ? OR (timestamp = ? AND id > ?))
+  ORDER BY timestamp, id
+  LIMIT ?
+`;
 export const NEWEST_REVISION = `
   SELECT content FROM message_revisions WHERE message_id = ? ORDER BY edited_at DESC LIMIT 1
 `;

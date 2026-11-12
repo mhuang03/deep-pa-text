@@ -307,3 +307,72 @@ test('burstStats: the window is inclusive and equal timestamps are ordered by id
   assert.equal(burst(store, 'b').rate, 0);
   assert.equal(burst(store, 'a').samples, 5);
 });
+
+test('insertRaw returns true for a new row and false for a duplicate', () => {
+  const { store } = setup();
+  assert.equal(store.insertRaw(msg('1', 'a', 10)), true);
+  assert.equal(store.insertRaw(msg('1', 'a', 10)), false);
+});
+
+test('hasRaw is true for stored rows, including soft-deleted ones, and false otherwise', () => {
+  const { store } = setup();
+  store.insertRaw(msg('1', 'a', 10));
+  store.softDelete('1', 99);
+  assert.equal(store.hasRaw('1'), true);
+  assert.equal(store.hasRaw('2'), false);
+});
+
+test('transaction commits the work of fn and returns its result', () => {
+  const { db, store } = setup();
+  const result = store.transaction(() => {
+    store.insertRaw(msg('1', 'a', 10));
+    store.insertRaw(msg('2', 'a', 20));
+    return 'done';
+  });
+  assert.equal(result, 'done');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM messages').get().n, 2);
+});
+
+test('transaction rolls back and rethrows when fn throws', () => {
+  const { db, store } = setup();
+  const boom = new Error('boom');
+  assert.throws(() => store.transaction(() => {
+    store.insertRaw(msg('1', 'a', 10));
+    throw boom;
+  }), boom);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM messages').get().n, 0);
+  assert.equal(store.insertRaw(msg('1', 'a', 10)), true);
+});
+
+const seedCorpus = (store) => {
+  [['c', 30], ['a', 10], ['b', 10], ['d', 20]].forEach(([id, timestamp]) => {
+    store.insertFiltered(msg(id, 'x', timestamp, { content: id === 'd' ? 'gif <gif! cat>' : `text ${id}` }), { inferReference: false });
+  });
+};
+
+test('pageFiltered pages visible rows by (timestamp, id) with an exclusive cursor', () => {
+  const { store } = setup();
+  seedCorpus(store);
+  const first = store.pageFiltered({ limit: 2 });
+  assert.deepEqual(first.map((r) => r.id), ['a', 'b']);
+  const second = store.pageFiltered({ after: { timestamp: 10, id: 'b' }, limit: 2 });
+  assert.deepEqual(second.map((r) => r.id), ['d', 'c']);
+  assert.deepEqual(store.pageFiltered({ after: { timestamp: 30, id: 'c' }, limit: 2 }), []);
+});
+
+test('pageFiltered returns stored messages with a boolean hasGif and the stored reference', () => {
+  const { store } = setup();
+  seedCorpus(store);
+  const [row] = store.pageFiltered({ after: { timestamp: 10, id: 'b' }, limit: 1 });
+  assert.deepEqual(row, {
+    id: 'd', author: 'x', content: 'gif <gif! cat>', timestamp: 20, reference: null, hasGif: true,
+  });
+  assert.equal(store.pageFiltered({ limit: 1 })[0].hasGif, false);
+});
+
+test('pageFiltered leaves out soft-deleted rows', () => {
+  const { store } = setup();
+  seedCorpus(store);
+  store.softDelete('b', 50);
+  assert.deepEqual(store.pageFiltered({ limit: 10 }).map((r) => r.id), ['a', 'd', 'c']);
+});

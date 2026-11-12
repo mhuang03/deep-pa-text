@@ -26,7 +26,8 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
 | `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
-| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js` (see the npm scripts below). |
+| `src/backfill/` | History import and vector sync: argument parsing, the paged history reader, message classification, the importers for human and own-bot messages and the Chroma reconciliation. Imported only by `scripts/backfill.js` and the container. |
+| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js` (see the npm scripts below). |
 
 ## Setup
 
@@ -84,7 +85,7 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm start
    ```
 
-Other npm scripts: `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; a database from before the soft-delete columns is read through a migrated temporary copy and never written) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
+Other npm scripts: `npm run backfill` (see [Backfill](#backfill)), `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; a database from before the soft-delete columns is read through a migrated temporary copy and never written) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
 
 ### Configuration overrides
 
@@ -102,9 +103,29 @@ Everything else is defined in `src/config.js`. These optional environment variab
 | `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
 | `PERSONA_DISPLAY` | `embed` | `embed` or `webhook`; any other value stops startup with an error naming it. See [Persona display](#persona-display) |
 
+Backfill tunables in `src/config.js`: `backfill.pageSize` (100, 1 to 100), `backfill.batchSize` (100, 1 or more), `backfill.pageRetries` (3, 0 or more), `backfill.retryDelayMs` (2000) and `backfill.pageTimeoutMs` (30000, above 0). Values outside these ranges stop startup.
+
 Other tunables in `src/config.js` for this feature: `discord.webhookName` (`deep-pa-text`), `discord.webhookUsernameMax` (80), `discord.webhookReplyLink` (true), `profiles.refreshIntervalMs` (3600000, integer of 0 or more; `0` disables the refresh), `profiles.minCheckIntervalMs` (10000, 0 or more), `profiles.lookupTimeoutMs` (5000, above 0) and `profiles.searchLimit` (100, 1 to 1000). Values outside these ranges stop startup.
 
-The corpus is only filled by live messages (`ingest.recordMessage`). There is no history backfill script in this repo; the vector store accepts batches, but nothing calls it in bulk.
+The corpus is filled by live messages and by the [backfill](#backfill) script.
+
+### Backfill
+
+`npm run backfill -- [options]` imports the channel history into the existing database and repairs Chroma. Everything is additive and idempotent, and `--dry-run` writes nothing.
+
+| Option | Meaning |
+| --- | --- |
+| `--dry-run` | Report what would be written; write nothing to SQLite or Chroma |
+| `--skip-history` | Do not import from Discord (requires `--sync-vectors`) |
+| `--sync-vectors` | After importing, reconcile Chroma with SQLite |
+| `--before <id>` | Import only messages older than this Discord message id |
+| `--limit <n>` | Fetch at most n messages, newest first |
+
+An unknown option or invalid value prints the usage and exits 2. Without options the whole channel history is imported, skipping what is already stored. The import logs in to Discord without starting the bot (no handlers, so it never replies), pages backwards 100 messages at a time (each page has a timeout and is retried), and writes nothing until every page was read. Human messages go through the usual corpus filter in batches of `backfill.batchSize`, oldest first, so inferred reply references work; each batch makes one embedding request. The bot's own past messages (its user, its own webhooks, or ids already in `bot_messages`) are imported into `bot_messages` with trigger `imported`: the persona comes from the embed author, or for webhook messages from the one member whose username or a past display name equals the webhook name, and the reply-link line of webhook messages is removed. Messages with no attributable persona or no text are skipped and counted. Other bots and other applications' webhooks are dropped. A human reply to a bot message is stored without a reference, like a live one.
+
+`--sync-vectors` walks the visible corpus in pages and adds rows missing from Chroma, adds `has_gif` to Chroma rows that lack it (document and embedding are passed back unchanged, nothing is re-embedded) and adds missing reply rows for rows with a reference. Rows whose stored document or embedding is missing, and replies whose parent has no embedding, are skipped and counted. Nothing is removed. If a vector call fails during an import, the SQLite rows are already written; run `npm run backfill -- --skip-history --sync-vectors` to repair. In a dry run the sync cannot see rows the import would have added.
+
+Limits: a backfill only adds messages that are not stored yet. It does not re-filter existing raw rows, apply edits or deletions made while the bot was offline, or change stored references (a full re-import does). Stop the bot first: the script and the bot would write the same SQLite file concurrently. A channel with a few hundred thousand messages takes tens of minutes to fetch (Discord serves 100 per request) and a few hundred megabytes of memory, plus one embedding call per batch of kept messages.
 
 ## Triggers
 
@@ -130,7 +151,7 @@ A persona who often sends several short messages in a row may answer with a burs
 SQLite (`messages.db`):
 
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
-- `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
+- `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive`, `chain` or `imported`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
 - `user_profiles`: append-only observations of members' Discord profiles (`username`, `user_id`, `display_name`, `avatar_url`, `observed_at` ms; primary key `(username, observed_at)`). The newest row per user is their stored profile; every distinct display name ever seen stays available.
 - `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
 
@@ -220,4 +241,5 @@ If an auto reply cannot be sent (for example the message was deleted), the failu
 
 These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
 
-- There is no history backfill.
+
+None are open at the moment.

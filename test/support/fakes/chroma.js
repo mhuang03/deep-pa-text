@@ -64,8 +64,13 @@ const project = (entries, include) =>
       .map(([name, key]) => [name, entries.map((entry) => entry[key])]),
   );
 
-const createCollection = (name, embeddingFunction) => {
-  const embedder = embeddingFunction ?? { generate: async (texts) => texts.map(fakeEmbed) };
+const createCollection = (name, embeddingFunction, onEmbed) => {
+  const embedder = embeddingFunction ?? {
+    generate: async (texts) => {
+      onEmbed();
+      return texts.map(fakeEmbed);
+    },
+  };
   let failure = null;
   const guard = () => {
     if (failure) throw failure;
@@ -138,6 +143,8 @@ export const createFakeChroma = () => {
   const embeddingFunctions = [];
   const state = {
     constructed: [],
+    // Number of embedding-function generate calls, to prove a repair did not re-embed anything.
+    embeddingCalls: 0,
     embeddingFunctions,
     get embeddingFunctionOptions() {
       return embeddingFunctions.at(-1) ?? null;
@@ -157,6 +164,7 @@ export const createFakeChroma = () => {
     }
 
     async generate(texts) {
+      state.embeddingCalls += 1;
       return texts.map(fakeEmbed);
     }
   }
@@ -172,7 +180,9 @@ export const createFakeChroma = () => {
     }
 
     async getOrCreateCollection({ name, embeddingFunction }) {
-      if (!collections.has(name)) collections.set(name, createCollection(name, embeddingFunction));
+      if (!collections.has(name)) collections.set(name, createCollection(name, embeddingFunction, () => {
+        state.embeddingCalls += 1;
+      }));
       return collections.get(name);
     }
   }

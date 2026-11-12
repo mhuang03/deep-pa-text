@@ -18,3 +18,19 @@ test('constructs the client with Guilds, GuildMessages and MessageContent intent
     allowedMentions: { parse: [] },
   }]);
 });
+
+test('cacheMessages false builds the client with a message manager that caches nothing', () => {
+  const calls = [];
+  class FakeClient {
+    constructor(options) {
+      calls.push(options);
+    }
+  }
+  createDiscordClient(FakeClient, { cacheMessages: false });
+  createDiscordClient(FakeClient, { cacheMessages: true });
+  assert.equal(typeof calls[0].makeCache, 'function');
+  assert.equal('makeCache' in calls[1], false);
+  const manager = { name: 'MessageManager' };
+  const cache = calls[0].makeCache(manager, null, manager);
+  assert.equal(cache.maxSize, 0);
+});

@@ -31,13 +31,17 @@ const createFailer = () => {
 // Mirrors discord.js: a Collection (here a Map) ordered newest first.
 const createMessages = (history) => {
   let failure = null;
+  const failer = createFailer();
   const messages = {
     calls: [],
     setFailing: (error) => {
       failure = error ?? null;
     },
-    async fetch({ limit, before } = {}) {
-      messages.calls.push({ limit, before });
+    // One-shot by default: the next `times` fetches reject, then fetching works again.
+    failNext: failer.arm,
+    async fetch({ limit, before, cache } = {}) {
+      messages.calls.push({ limit, before, ...(cache === undefined ? {} : { cache }) });
+      failer.check();
       if (failure) throw failure;
       const index = history.findIndex((message) => message.id === before);
       const preceding = index === -1 ? history : history.slice(0, index);
@@ -152,10 +156,13 @@ export const createFakeDiscord = () => {
   const makeMessage = ({
     id = nextId(), author = 'alice', content = '', timestamp = Date.now(),
     reference = null, bot = false, channel: target = channel, guild: guildField = target.guild,
+    authorId = `user-${author}`, webhookId = null, embeds = [],
   } = {}) => {
     const message = {
       id,
-      author: { id: `user-${author}`, username: author, bot },
+      author: { id: authorId, username: author, bot },
+      webhookId,
+      embeds,
       content,
       createdTimestamp: timestamp,
       editedTimestamp: null,

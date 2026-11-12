@@ -519,3 +519,45 @@ test('the subject records edits and deletes', async (t) => {
   await world.subject.recordDelete('x1', BASE_TIME);
   assert.equal(world.sqlite.get('SELECT deleted_at FROM messages WHERE id = ?', 'x1').deleted_at, BASE_TIME);
 });
+
+test('fake messages carry webhookId (default null), authorId and embeds', async (t) => {
+  const world = await newWorld(t);
+  const plain = world.addHistory({ content: 'plain' });
+  assert.equal(plain.webhookId, null);
+  assert.deepEqual(plain.embeds, []);
+  const hook = world.addHistory({ author: 'Some Name', bot: true, authorId: 'hook-1', webhookId: 'hook-1' });
+  assert.equal(hook.webhookId, 'hook-1');
+  assert.equal(hook.author.id, 'hook-1');
+});
+
+test('channel.messages.fetch records the cache option and failNext rejects a set number of fetches', async (t) => {
+  const world = await newWorld(t);
+  world.addHistory({ id: 'h1', content: 'line' });
+  const { messages } = world.discord.channel;
+  await messages.fetch({ limit: 1, cache: false });
+  assert.equal(messages.calls[0].cache, false);
+  const boom = new Error('rate limited');
+  messages.failNext(boom, { times: 2 });
+  await assert.rejects(messages.fetch({ limit: 1 }), boom);
+  await assert.rejects(messages.fetch({ limit: 1 }), boom);
+  assert.equal((await messages.fetch({ limit: 1 })).size, 1);
+});
+
+test('the fake embedding function counts generate calls', async (t) => {
+  const world = await newWorld(t);
+  const before = world.chroma.embeddingCalls;
+  await world.seed([{ id: 'e1', author: 'alice', content: 'something long enough', timestamp: 1, reference: null }]);
+  assert.equal(world.chroma.embeddingCalls, before + 1);
+  const row = world.chroma.collection('message_embeddings').rows.get('e1');
+  await world.container.vectorStore.fillMetadata('messages', [{
+    id: 'e1', document: row.document, embedding: row.embedding, metadata: { ...row.metadata, extra: 1 },
+  }]);
+  assert.equal(world.chroma.embeddingCalls, before + 1);
+});
+
+test('the world exposes the container with the backfill services', async (t) => {
+  const world = await newWorld(t);
+  ['historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync'].forEach((name) => {
+    assert.equal(typeof world.container[name], 'object', name);
+  });
+});

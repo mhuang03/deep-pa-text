@@ -25,6 +25,7 @@ The SQLite database and the Chroma collections hold an irreplaceable message his
 - Additive, idempotent migrations run at startup: `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN` (nullable or with a default). Migrations must succeed on a database created by any earlier version, with existing rows untouched.
 - `UPDATE` only to set a soft-delete or marker column (for example `deleted_at`), or to fill a column that is currently `NULL`.
 - Chroma `upsert`/`add` of new ids. Re-upserting an id with identical content is tolerated for idempotency.
+- A metadata-only fill of a missing key on an existing Chroma row, with its document and embedding passed back unchanged.
 
 **Patterns to use instead of destruction:**
 
@@ -43,7 +44,7 @@ Runtime code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, 
 - **No import-time side effects.** Importing a module must not read files, open connections, read `process.env`, start timers, or log. Only entry points (`src/main.js`, `scripts/*.js`) do that. `src/container.js` is the only place services are wired together, and `src/vendor.js` is the only place real third-party constructors are collected.
 - **No module-level mutable state.** State lives in the closure of a factory instance so each test gets a fresh one.
 - **One source of configuration.** Every tunable, ID, model name, limit and probability is defined in `src/config.js`. No magic numbers or hardcoded IDs elsewhere. Only `config.js` and entry points read `process.env`.
-- **Layering.** Imports point downward only: entry points → `bot/` (triggers, handlers, orchestration) → use-case services (`ingest/`, `retrieval/`, `llm/`, `gifs/`, `context/`, `profiles/`) → adapters (`storage/`, `discord/`) and pure modules (`corpus/`, `config.js`), above `util/` (pure helpers with no project imports). Lower layers never import higher ones. Only `src/discord/`, `src/bot/`, `src/vendor.js` and entry points may import `discord.js`.
+- **Layering.** Imports point downward only: entry points → `backfill/` (history import and vector sync; imported only by scripts and the container) → `bot/` (triggers, handlers, orchestration) → use-case services (`ingest/`, `retrieval/`, `llm/`, `gifs/`, `context/`, `profiles/`) → adapters (`storage/`, `discord/`) and pure modules (`corpus/`, `config.js`), above `util/` (pure helpers with no project imports). Lower layers never import higher ones. Only `src/discord/`, `src/bot/`, `src/vendor.js` and entry points may import `discord.js`.
 - **One responsibility per module.** If a file needs "and" to describe it, split it. Prefer adding a small module over growing an existing one.
 - **Handlers are boundaries.** Event handlers and timers catch errors, log them with context, and never throw. Everything below them lets errors propagate.
 

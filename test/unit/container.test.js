@@ -14,6 +14,7 @@ const SERVICES = [
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
   'botMessageStore', 'botMessageResolver', 'contextBuilder', 'chainBuilder', 'burstProfile',
   'profileStore', 'memberProfiles', 'webhooks',
+  'historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync',
 ];
 
 const setup = (overrides = {}) => {

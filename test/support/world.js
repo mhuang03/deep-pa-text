@@ -166,7 +166,7 @@ export const createWorld = async (rawOptions) => {
     installPatches(world, random, undo);
     const booted = await bootBot(world);
     undo.push(booted.dispose);
-    Object.assign(world, { subject: booted.subject, sqlite: booted.sqlite });
+    Object.assign(world, { subject: booted.subject, sqlite: booted.sqlite, container: booted.container });
   } catch (error) {
     await finishClose(world, undo).catch(() => {});
     throw error;

@@ -227,6 +227,36 @@ const buildProfiles = () => assertProfiles({
   searchLimit: 100,
 });
 
+const MAX_PAGE_SIZE = 100;
+
+export const assertBackfill = (backfill) => {
+  const { pageSize, batchSize, pageRetries, retryDelayMs, pageTimeoutMs } = backfill;
+  if (!(Number.isInteger(pageSize) && pageSize >= 1 && pageSize <= MAX_PAGE_SIZE)) {
+    throw new Error(`backfill.pageSize must be an integer from 1 to ${MAX_PAGE_SIZE}`);
+  }
+  if (!(Number.isInteger(batchSize) && batchSize >= 1)) {
+    throw new Error('backfill.batchSize must be an integer of at least 1');
+  }
+  if (!(Number.isInteger(pageRetries) && pageRetries >= 0)) {
+    throw new Error('backfill.pageRetries must be an integer of at least 0');
+  }
+  if (!(Number.isFinite(retryDelayMs) && retryDelayMs >= 0)) {
+    throw new Error('backfill.retryDelayMs must be a number of at least 0');
+  }
+  if (!(Number.isFinite(pageTimeoutMs) && pageTimeoutMs > 0)) {
+    throw new Error('backfill.pageTimeoutMs must be a number greater than 0');
+  }
+  return backfill;
+};
+
+const buildBackfill = () => assertBackfill({
+  pageSize: 100,
+  batchSize: 100,
+  pageRetries: 3,
+  retryDelayMs: 2000,
+  pageTimeoutMs: 30000,
+});
+
 const buildLogging = () => ({
   locale: 'en-US',
   timeZone: 'America/Chicago',
@@ -255,6 +285,7 @@ const buildConfig = (env) => ({
   typing: buildTyping(),
   burst: buildBurst(env),
   profiles: buildProfiles(),
+  backfill: buildBackfill(),
   logging: buildLogging(),
 });
 

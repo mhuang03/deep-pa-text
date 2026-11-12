@@ -8,7 +8,8 @@ const setup = ({ kept = true, vectorError = null, duplicate = false } = {}) => {
   const calls = [];
   const filtered = { ...record, content: 'clean' };
   const messageStore = {
-    insertRaw: (r) => calls.push(['insertRaw', r]),
+    transaction: (fn) => fn(),
+    insertRaw: (r) => (calls.push(['insertRaw', r]), true),
     insertFiltered: (r, options) => {
       calls.push(['insertFiltered', r, options]);
       return duplicate ? null : { ...r, reference: 'resolved', hasGif: true };
@@ -87,7 +88,8 @@ const setupEdit = ({ raw = { content: 'old', deleted: false }, kept = true, stor
   const calls = [];
   const filtered = { id: '1', content: 'new' };
   const messageStore = {
-    insertRaw: (r) => calls.push(['insertRaw', r]),
+    transaction: (fn) => fn(),
+    insertRaw: (r) => (calls.push(['insertRaw', r]), true),
     insertFiltered: () => ({ id: '1' }),
     getRaw: (id) => (calls.push(['getRaw', id]), raw),
     applyEdit: (args) => (calls.push(['applyEdit', args]), stored),

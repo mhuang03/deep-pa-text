@@ -1,18 +1,43 @@
+import { markVectorError } from '../util/vectorError.js';
+
 export const createIngestService = ({ messageStore, vectorStore, messageFilter, botMessageStore }) => {
   // A reply to a bot message must not be linked to an unrelated human message.
   const prepare = (record, repliesToBot) => ({
     filtered: messageFilter.filter(record), inferReference: !repliesToBot,
   });
 
-  const recordMessage = async (record, { repliesToBot = false } = {}) => {
-    messageStore.insertRaw(record);
-    const { filtered, inferReference } = prepare(record, repliesToBot);
-    if (!filtered) return { filtered: null, stored: null };
-    const stored = messageStore.insertFiltered(filtered, { inferReference });
-    // A duplicate delivery must not re-resolve a reference or rewrite existing vectors.
-    if (stored) await vectorStore.upsertMessages([stored]);
-    return { filtered, stored };
+  const upsertVectors = async (storedMessages) => {
+    try {
+      await vectorStore.upsertMessages(storedMessages);
+    } catch (error) {
+      throw markVectorError(error);
+    }
   };
+
+  const ingestEntry = ({ record, repliesToBot = false }) => {
+    const inserted = messageStore.insertRaw(record);
+    const { filtered, inferReference } = prepare(record, repliesToBot);
+    const stored = filtered ? messageStore.insertFiltered(filtered, { inferReference }) : null;
+    return { inserted, result: { filtered, stored } };
+  };
+
+  // Entries are chronological so reference resolution sees the earlier ones. The SQLite writes are one
+  // atomic batch; a vector failure afterwards leaves them in place for the vector sync to repair.
+  const recordMessages = async (entries) => {
+    const outcomes = messageStore.transaction(() => entries.map(ingestEntry));
+    const results = outcomes.map((outcome) => outcome.result);
+    const storedMessages = results.map((result) => result.stored).filter(Boolean);
+    // Chroma rejects empty id lists, and a duplicate delivery must not rewrite existing vectors.
+    if (storedMessages.length > 0) await upsertVectors(storedMessages);
+    return {
+      results,
+      insertedRaw: outcomes.filter((outcome) => outcome.inserted).length,
+      kept: storedMessages.length,
+    };
+  };
+
+  const recordMessage = async (record, options = {}) =>
+    (await recordMessages([{ record, ...options }])).results[0];
 
   // Discord also emits updates for link previews and pins, so unchanged content is not an edit.
   const recordEdit = async (record, { repliesToBot = false } = {}) => {
@@ -35,5 +60,5 @@ export const createIngestService = ({ messageStore, vectorStore, messageFilter, 
     botMessageStore.softDelete(id, at);
   };
 
-  return { recordMessage, recordEdit, recordDelete };
+  return { recordMessage, recordMessages, recordEdit, recordDelete };
 };

@@ -38,6 +38,10 @@ import { createReplyCommandHandler } from './bot/handlers/replyCommand.js';
 import { createReviveTick } from './bot/handlers/reviveTick.js';
 import { createProfileRefresh } from './bot/handlers/profileRefresh.js';
 import { createBot } from './bot/bot.js';
+import { createHistoryReader } from './backfill/historyReader.js';
+import { createBotMessageImporter } from './backfill/botMessageImporter.js';
+import { createHistoryImporter } from './backfill/historyImporter.js';
+import { createVectorSync } from './backfill/vectorSync.js';
 
 // Lazy wrappers: global mocks of Date, Math.random and setInterval are honoured at call time.
 export const defaultClock = () => {
@@ -149,11 +153,25 @@ const buildDelivery = ({ config, client, memberProfiles, logger }) => {
   return { delivery, webhooks };
 };
 
+const buildBackfill = ({ config, clock, logger, client, core, channelHistory, webhooks }) => {
+  const { messageStore, botMessageStore, profileStore, userDirectory, messageFilter, ingest, vectorStore } = core;
+  const historyReader = createHistoryReader({ channelHistory, config, clock, logger });
+  const botMessageImporter = createBotMessageImporter({
+    botMessageStore, profileStore, userDirectory, config, logger,
+  });
+  const historyImporter = createHistoryImporter({
+    historyReader, botMessageImporter, ingest, messageStore, botMessageStore, messageFilter, webhooks,
+    getBotUserId: () => client.user?.id, config, logger,
+  });
+  const vectorSync = createVectorSync({ messageStore, vectorStore, logger, config });
+  return { historyReader, botMessageImporter, historyImporter, vectorSync };
+};
+
 export const buildContainer = ({
-  config, vendor, data, clock = defaultClock(), logger = createLogger(),
+  config, vendor, data, clock = defaultClock(), logger = createLogger(), cacheMessages = true,
 }) => {
   const core = buildCore({ config, vendor, data, clock, logger });
-  const client = createDiscordClient(vendor.Client);
+  const client = createDiscordClient(vendor.Client, { cacheMessages });
   const gifResolver = buildGifResolver({ config, vendor, clock, logger });
   const composer = createComposer({ generator: core.generator, gifResolver, config });
   const { botMessageStore, userDirectory, profileStore } = core;
@@ -179,8 +197,9 @@ export const buildContainer = ({
     botMessageResolver, chainBuilder,
   });
   const bot = createBot({ client, config, handlers, clock, logger });
+  const backfill = buildBackfill({ config, clock, logger, client, core, channelHistory, webhooks });
   return {
     bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder,
-    chainBuilder, memberProfiles, webhooks, ...core,
+    chainBuilder, memberProfiles, webhooks, ...backfill, ...core,
   };
 };
