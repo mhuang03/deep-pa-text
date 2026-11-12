@@ -1,4 +1,5 @@
 import { toMessageRecord } from '../../discord/messageRecord.js';
+import { sendDetached } from '../detachedSend.js';
 import {
   formatReceived, formatNoReply, formatNotReplyable, formatReply, joinLines,
 } from '../logLines.js';
@@ -11,10 +12,9 @@ export const createMessageCreateHandler = (deps) => {
   const isHandled = (message) =>
     message.channel.id === config.discord.channelId && !message.author.bot;
 
-  // Not awaited (spec 02 change 7): a failed send is logged, never unhandled.
-  const sendLogged = (message, payload) =>
-    Promise.resolve(message.reply(payload)).catch((error) =>
-      logger.error('Error sending reply:', error));
+  const sendLogged = (message, payload) => sendDetached({
+    send: () => message.reply(payload), logger, errorLabel: 'Error sending reply:',
+  });
 
   const reply = async (message, target) => {
     activity.noteBot();

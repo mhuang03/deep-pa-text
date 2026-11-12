@@ -5,9 +5,16 @@
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "index.js",
+  "main": "src/main.js",
+  "engines": {
+    "node": ">=22.18"
+  },
   "scripts": {
-    "test": "node --experimental-test-module-mocks --test \"test/**/*.test.js\""
+    "start": "node src/main.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "register": "node scripts/registerCommands.js",
+    "inspect": "node scripts/inspectDb.js",
+    "gif-smoke": "node scripts/gifSmoke.js"
   },
   "dependencies": {
     "@chroma-core/openai": "^0.1.10",

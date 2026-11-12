@@ -1,6 +1,5 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { createWorld } from '../support/world.js';
 import { createFakeChroma, fakeEmbed } from '../support/fakes/chroma.js';
 import { BASE_TIME, CHANNEL_ID, ENV } from '../support/fixtures.js';
@@ -166,33 +165,24 @@ test('guild members controls and channel lookup', async (t) => {
   assert.equal((await client.channels.fetch(CHANNEL_ID)).id, CHANNEL_ID);
 });
 
-test('close restores globals and the temp directory and keeps module mocks', async () => {
-  process.env.KLIPY_API_KEY = 'sentinel';
+test('close restores globals and a later world still gets fake clients', async () => {
   const before = {
-    cwd: process.cwd(),
     random: Math.random,
     now: Date.now,
     fetch: globalThis.fetch,
     log: console.log,
   };
   const world = await createWorld();
-  const dir = process.cwd();
-  assert.notEqual(dir, before.cwd);
-  assert.equal(process.env.KLIPY_API_KEY, ENV.KLIPY_API_KEY);
   await world.close();
   await world.close();
-  assert.equal(process.cwd(), before.cwd);
-  assert.equal(process.env.KLIPY_API_KEY, 'sentinel');
   assert.equal(Math.random, before.random);
   assert.equal(Date.now, before.now);
   assert.equal(globalThis.fetch, before.fetch);
   assert.equal(console.log, before.log);
-  assert.equal(fs.existsSync(dir), false);
-  delete process.env.KLIPY_API_KEY;
 
   const again = await createWorld();
   try {
-    assert.equal(again.llm.constructed.length, 2);
+    assert.equal(again.llm.constructed.length, 1);
   } finally {
     await again.close();
   }

@@ -5,7 +5,7 @@ A Discord bot that imitates the members of one group chat. It records every mess
 ## How it works
 
 ```
-Discord message ──► filter.js ──► SQLite (messages, filtered_messages)
+Discord message ──► corpus filter ──► SQLite (messages, filtered_messages)
                                 └► Chroma (message_embeddings, message_reply_embeddings)
 
 trigger (random reply / revive timer / "reply" context menu)
@@ -13,21 +13,24 @@ trigger (random reply / revive timer / "reply" context menu)
        └► resolve <gif! ...> tokens to GIF URLs ──► post with an embed showing the persona's name + avatar
 ```
 
-| File | Role |
+Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in `docs/specs/`. Development rules are in `CLAUDE.md`; behaviour and design changes start from a spec in `docs/specs/`.
+
+| Path | Role |
 | --- | --- |
-| `bot.js` | Entry point. Discord client, the three triggers, posting. All tunables are constants at the top. |
-| `db.js` | SQLite schema and inserts, Chroma collections, retrieval (`semanticSearch`, `randomSearch`, `searchLikelyRepliers`). Run directly (`node db.js`) to dump the latest rows. |
-| `filter.js` | Content transformers and keep/drop filters applied before a message enters the corpus. |
-| `api.js` | LLM calls (`getRAGResponse`, `getRandomResponse`) and GIF resolution (`processGIFs`). |
-| `prompt.js` | System prompt and the two user-prompt templates. |
-| `data.js` | Loads `data/users.json` and `data/ping_caches.json`. |
-| `register.js` | One-off script that registers the `reply` message context-menu command for the guild. |
-| `test.js` | Manual smoke script for `processGIFs` (hits the real GIF APIs; not an automated test). |
-| `index.js` | Empty placeholder. |
+| `src/main.js` | Entry point (`npm start`): loads `.env`, config and data files, builds the container, connects Chroma, starts the bot. |
+| `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
+| `src/config.js` | Every tunable, ID, model name and limit, with environment overrides. |
+| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply and revive policies, activity tracker, composer, `bot.js`. |
+| `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
+| `src/storage/` | SQLite schema, migrations and queries; the Chroma vector store. |
+| `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/` | Recording a message, retrieval and persona choice, prompts and the chat client, GIF resolution. |
+| `src/discord/` | Discord client construction, payloads, embeds, the reply modal and the command definition. |
+| `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
+| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js` (see the npm scripts below). |
 
 ## Setup
 
-Requirements: Node 22.18+ (uses `node:sqlite`, `process.loadEnvFile`, `Set.prototype.difference`, `import.meta.main`), a Chroma server, and a Discord application with the **Message Content** privileged intent.
+Requirements: Node 22.18+ (uses `node:sqlite` and `process.loadEnvFile`), a Chroma server, and a Discord application with the **Message Content** privileged intent.
 
 All paths (`.env`, `data/`, `messages.db`) are relative to the working directory, so run everything from the repo root.
 
@@ -37,12 +40,12 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm install
    ```
 
-2. Create `.env`. The file must exist; every module calls `loadEnvFile('.env')`.
+2. Create `.env`. The file must exist; the entry points call `loadEnvFile('.env')`.
 
    | Variable | Used for |
    | --- | --- |
    | `DISCORD_BOT_TOKEN` | Bot login and command registration |
-   | `DISCORD_CLIENT_ID` | Command registration (`register.js`) |
+   | `DISCORD_CLIENT_ID` | Command registration (`npm run register`) |
    | `OPENAI_API_KEY` | Embeddings (`text-embedding-3-small`, 512 dims, via Chroma's embedding function) |
    | `DEEPSEEK_API_KEY` | Chat completions (`deepseek-v4-flash`, thinking enabled) |
    | `KLIPY_API_KEY`, `GIPHY_API_KEY`, `HUMOR_API_KEY` | GIF search, tried in that order |
@@ -61,7 +64,7 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    { "users": { "<id>": "name" }, "roles": { "<id>": "name" }, "channels": { "<id>": "name" } }
    ```
 
-4. Start Chroma on port 7429 (hardcoded in `db.js`).
+4. Start Chroma on port 7429 (override with `CHROMA_PORT`).
 
    ```bash
    npx chroma run --port 7429 --path ./data/chroma
@@ -70,30 +73,42 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
 5. Register the context-menu command (once, or whenever commands change).
 
    ```bash
-   node register.js
+   npm run register
    ```
 
 6. Run the bot.
 
    ```bash
-   node bot.js
+   npm start
    ```
 
-The channel ID (`PATEXT_CHANNEL_ID` in `bot.js`) and guild ID (`GUILD_ID` in `register.js`) are hardcoded. Change both to run against another server.
+Other npm scripts: `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, opened read-only, no Chroma needed) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
 
-The corpus is only filled by live messages (`recordMessage`). There is no history backfill script in this repo; `insertEmbeddings` accepts batches, but nothing calls it in bulk.
+### Configuration overrides
+
+Everything else is defined in `src/config.js`. These optional environment variables (in `.env` or the shell) override the defaults:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `PATEXT_CHANNEL_ID` | `704837777564500149` | The one channel the bot reads and posts in |
+| `GUILD_ID` | `478743674826784769` | Guild for command registration and member lookups |
+| `CHROMA_PORT` | `7429` | Chroma server port (must be a number) |
+| `REPLY_OVERRIDE` | off | `true` replies to every message, ignoring randomness and the rate limit (testing) |
+| `REVIVE_OVERRIDE` | off | `true` checks every minute and revives regardless of idle time (testing) |
+
+The corpus is only filled by live messages (`ingest.recordMessage`). There is no history backfill script in this repo; the vector store accepts batches, but nothing calls it in bulk.
 
 ## Triggers
 
-All three only act on `PATEXT_CHANNEL_ID`, and bot-authored messages are ignored.
+All three only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-authored messages are ignored.
 
 | Trigger | When | Persona | Posts as |
 | --- | --- | --- | --- |
-| Auto reply | A human message that passes the content filters, at least `MIN_REPLY_INTERVAL` (5 min) after the last bot reply, with probability `REPLY_PROBABILITY` (0.1). After 10 consecutive random misses the chance rises 0.05 per miss until a reply happens. | Random pick from the authors of the 20 nearest entries in `message_reply_embeddings` (people who replied to similar messages, excluding the message's author); falls back to a random user. | Discord reply to the message |
+| Auto reply | A human message that passes the content filters, at least 5 min after the last bot reply, with probability 0.1. After 10 consecutive random misses the chance rises 0.05 per miss until a reply happens. | Random pick from the authors of the 20 nearest entries in `message_reply_embeddings` (people who replied to similar messages, excluding the message's author); falls back to a random user. | Discord reply to the message |
 | Revive | Checked every 10 min. Fires only when the last activity in the channel was a human message (not a bot reply or revive, and not a fresh start) and it is more than 3 h old during 10:00–22:59 Central, or more than 12 h old otherwise. The bot therefore never revives twice in a row. | Random user | Plain channel message |
 | `reply` context menu | A user right-clicks a message, then **Apps → reply**, and picks a persona (or `random`, which uses the auto-reply selection) in a modal. Skips the probability and rate limit. | Chosen in the modal | Interaction reply (not a Discord reply to the target) |
 
-`REPLY_OVERRIDE` and `REVIVE_OVERRIDE` in `bot.js` remove the randomness and timers for testing.
+`REPLY_OVERRIDE` and `REVIVE_OVERRIDE` remove the randomness and timers for testing.
 
 ## Storage
 
@@ -105,40 +120,41 @@ SQLite (`messages.db`):
 Chroma:
 
 - `message_embeddings`: one entry per filtered message, embedded on its own content. Metadata: `author`, `timestamp`, `has_gif`.
-- `message_reply_embeddings`: one entry per filtered message that has a reference, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
+- `message_reply_embeddings`: one entry per filtered message that has a (Discord) reference, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
 
 ## Retrieval and prompting
 
-For a reply (`semanticSearch`), four buckets are fetched, all restricted to the persona's messages older than the target message:
+For a reply (`retrieveForReply`), four buckets are fetched, all restricted to the persona's messages older than the target message:
 
 1. 10 nearest from `message_reply_embeddings` (their replies to similar messages)
 2. 20 nearest from `message_embeddings` (their own similar messages)
 3. 10 nearest from `message_embeddings` with `has_gif`
 4. 10 random rows from `filtered_messages`
 
-Buckets are deduplicated by exact content, with earlier buckets taking precedence. `ragInput` puts the persona's username, real name, the target message's content, and the four buckets into one user message.
+Buckets are deduplicated by exact content, with earlier buckets taking precedence. `buildReplyPrompt` puts the persona's username, real name, the target message's content, and the four buckets into one user message.
 
-For a revive (`randomSearch`), the prompt is just 50 random messages from the persona (`contextlessInput`). No channel context is included.
+For a revive (`retrieveForRevive`), the prompt is just 50 random messages from the persona (`buildRevivePrompt`). No channel context is included.
 
 ## Filtering
 
-`filter(msg)` mutates `msg.content` in place and returns the message or `null`. `filterAnyAuthor` is the same without the approved-author check (it relies on `approvedAuthors` being the first key of `FILTERS`).
+`messageFilter.filter(record)` returns a new record with transformed content, or `null`; the input is not modified. `filterAnyAuthor` is the same without the `approvedAuthors` predicate (excluded by name).
 
 Transformers, in order: resolve mentions through the ping cache (mention-only messages become empty), turn Tenor links into `<gif! search terms>`, strip URLs (markdown links keep their text), reduce custom emoji to `:name:`, drop Discord timestamps, soundboard tags and invite links, trim.
 
-Filters: approved author, non-empty, 5–200 characters, no bot-command prefix (`! $ # % & - + p!`), no Connections/Wordle/Strands shares.
+Predicates: approved author, non-empty, 5–200 characters, no bot-command prefix (`! $ # % & - + p!`), no Connections/Wordle/Strands shares.
 
 ## GIFs
 
-`<gif! terms>` is the corpus representation of a GIF. When the LLM emits one, `processGIFs` searches Klipy, then Giphy, then Humor API with the first 50 characters of the terms and takes the first hit. Resolved GIFs are removed from the text and attached as image embeds; unresolved ones are left as `<INSERT GIF: terms>`.
+`<gif! terms>` is the corpus representation of a GIF. When the LLM emits one, the GIF resolver searches Klipy, then Giphy, then Humor API with the first 50 characters of the terms and takes the first hit. Resolved GIFs are removed from the text and attached as image embeds; unresolved ones are left as `<INSERT GIF: terms>`.
 
 ## Known issues
 
-- `bot.js:69` references an undefined `guilds` (should be `client.guilds`); only reached when `channel.guild` is missing.
-- `db.js` writes `has_gif: m.hasGif` to Chroma, but the message object has no `hasGif` field, so live messages never match the GIF bucket.
-- The inferred (previous-message) reference is saved to SQLite but not passed to `insertEmbedding`, so live messages only enter `message_reply_embeddings` when they are explicit Discord replies.
+These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
+
+- Live messages are stored in Chroma with `has_gif: undefined` (the stored message is not passed on), so they never match the GIF bucket.
+- The inferred (previous-message) reference is saved to SQLite but not passed to the vector store, so live messages only enter `message_reply_embeddings` when they are explicit Discord replies.
 - `awaitModalSubmit` has no filter, so two users with the modal open at once can receive each other's submission. A dismissed modal logs a timeout error after 2 min.
-- `message.reply` and `channel.send` are not awaited, so send failures surface as unhandled rejections.
 - A GIF API that throws (rather than returning no results) fails the whole response.
 - The bot's own messages are not stored, so there is no record of which persona wrote a given bot message.
-- `fetchEmbedding`/`fetchEmbeddings` in `api.js` and `BOTTESTING_CHANNEL_ID` in `bot.js` are unused. There are no automated tests or `npm start` script.
+- There is no history backfill.
+- `message.reply` and `channel.send` are not awaited: a failed send is logged, but the bot's state is updated as if it had succeeded. There are no timeouts on external calls.
