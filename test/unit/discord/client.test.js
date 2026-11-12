@@ -14,5 +14,6 @@ test('constructs the client with Guilds, GuildMessages and MessageContent intent
   assert.ok(client instanceof FakeClient);
   assert.deepEqual(calls, [{
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+    allowedMentions: { parse: [] },
   }]);
 });

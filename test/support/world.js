@@ -80,7 +80,7 @@ const createDriver = (world) => {
 const isFakeMessage = (x) => x && typeof x === 'object' && 'createdTimestamp' in x;
 
 const buildWorld = (options, random) => {
-  const world = { options, env: { ...ENV }, fakes: null, logs: { log: [], warn: [], error: [] } };
+  const world = { options, env: { ...ENV, ...options.env }, fakes: null, logs: { log: [], warn: [], error: [] } };
   const driver = createDriver(world);
   const discordState = () => world.fakes.discord.state;
   const now = () => Date.now();

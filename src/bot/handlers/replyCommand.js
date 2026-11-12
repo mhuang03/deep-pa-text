@@ -1,15 +1,16 @@
 import { MessageFlags } from 'discord.js';
+import { withSafeMentions, SAFE_MENTIONS } from '../../discord/payload.js';
 import { toMessageRecord } from '../../discord/messageRecord.js';
 import { REPLY_COMMAND_NAME } from '../../discord/commands.js';
 import {
   buildReplyModal, buildModalId, readSelectedAuthor, isModalTimeout, RANDOM_AUTHOR,
-  NOT_REPLYABLE_MESSAGE, WRONG_CHANNEL_MESSAGE, MODAL_TIMEOUT_LOG,
+  NOT_REPLYABLE_MESSAGE, WRONG_CHANNEL_MESSAGE, MODAL_TIMEOUT_LOG, GENERATION_FAILED_MESSAGE,
 } from '../../discord/replyModal.js';
 import { formatCommandRequest, formatReply } from '../logLines.js';
 
 export const createReplyCommandHandler = (deps) => {
   const {
-    client, config, users, messageFilter, personaSelector, composer,
+    client, config, users, messageFilter, personaSelector, responder,
     authorEmbeds, replyPolicy, activity, logger,
   } = deps;
 
@@ -17,7 +18,7 @@ export const createReplyCommandHandler = (deps) => {
     interaction.isMessageContextMenuCommand() && interaction.commandName === REPLY_COMMAND_NAME;
 
   const refuse = (interaction, content) =>
-    interaction.reply({ content, flags: MessageFlags.Ephemeral });
+    interaction.reply({ content, flags: MessageFlags.Ephemeral, allowedMentions: SAFE_MENTIONS });
 
   const chooseReplier = (modalInteraction, target) => {
     const selected = readSelectedAuthor(modalInteraction);
@@ -36,12 +37,39 @@ export const createReplyCommandHandler = (deps) => {
     }
   };
 
+  // Best effort: the placeholder must not stay on "thinking..." when the reply fails.
+  const notifyFailure = async (modalInteraction) => {
+    try {
+      await modalInteraction.editReply({
+        content: GENERATION_FAILED_MESSAGE, embeds: [], allowedMentions: SAFE_MENTIONS,
+      });
+    } catch (error) {
+      logger.error('Could not report the failed reply:', error);
+    }
+  };
+
+  const deliverReply = async ({ modalInteraction, persona, target, guild }) => {
+    const { response } = await responder.respond({
+      trigger: 'command',
+      persona,
+      target,
+      guild,
+      via: { type: 'interaction', interaction: modalInteraction },
+    });
+    return response;
+  };
+
   const answer = async ({ interaction, modalInteraction, target, guild }) => {
     const persona = await chooseReplier(modalInteraction, target);
     const thinking = await authorEmbeds.make(persona, guild, { thinking: true });
-    await modalInteraction.reply({ embeds: [thinking] });
-    const { response, payload } = await composer.composeReply({ persona, record: target, guild });
-    await modalInteraction.editReply(payload);
+    await modalInteraction.reply(withSafeMentions({ embeds: [thinking] }));
+    let response;
+    try {
+      response = await deliverReply({ modalInteraction, persona, target, guild });
+    } catch (error) {
+      await notifyFailure(modalInteraction);
+      throw error;
+    }
     logger.info(formatCommandRequest({
       requester: interaction.user.username, record: target, logging: config.logging,
     }));

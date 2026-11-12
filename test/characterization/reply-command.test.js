@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageFlags } from 'discord.js';
 import { createWorld } from '../support/world.js';
+import { GENERATION_FAILED_MESSAGE } from '../../src/discord/replyModal.js';
 import { BASE_TIME, OTHER_CHANNEL_ID, GUILD_ID, USERS } from '../support/fixtures.js';
 
 const HOUR = 3_600_000;
@@ -231,12 +232,14 @@ test('looks up the guild before checking the channel', async (t) => {
   assert.equal(interaction.replies[0].content, 'This command can only be used in the #pa-text channel.');
 });
 
-test('LLM failure after submit leaves the thinking reply, sends no edit and logs no handler error', async (t) => {
+test('LLM failure after submit replaces the thinking reply with a failure notice and logs no handler error', async (t) => {
   const world = await newWorld(t);
   world.llm.respondWith(new Error('llm down'));
   const { submitted } = await openAndSubmit(world, 'bob');
   assert.equal(submitted.replies.length, 1);
-  assert.equal(submitted.edits.length, 0);
+  assert.equal(submitted.edits.length, 1);
+  assert.equal(submitted.edits[0].content, GENERATION_FAILED_MESSAGE);
+  assert.deepEqual(submitted.edits[0].embeds, []);
   assert.equal(world.errors.length, 0);
 });
 

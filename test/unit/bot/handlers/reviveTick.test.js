@@ -20,11 +20,13 @@ const setup = ({ env = {}, activity = { lastMessageTime: BASE_TIME - 4 * HOUR, l
     config: loadConfig(env),
     activity: { get: () => activity, noteBot: () => events.push('noteBot') },
     personaSelector: { pickRandomUser: () => (events.push('pick'), 'dave') },
-    composer: {
-      composeRevive: async ({ persona, guild }) => {
-        events.push(['compose', persona, guild === discord.state.guild]);
+    responder: {
+      respond: async (request) => {
+        events.push(['respond', request.trigger, request.persona, request.target, request.guild === discord.state.guild]);
         if (failCompose) throw new Error('llm down');
-        return { response: 'resp', payload: { content: 'c', embeds: [] } };
+        if (request.via.type !== 'channel') throw new Error('unexpected via');
+        const message = await request.via.channel.send({ content: 'c', embeds: [] });
+        return { response: 'resp', message };
       },
     },
     clock: { now: () => BASE_TIME },
@@ -45,11 +47,11 @@ test('does nothing when the bot spoke last', async () => {
   assert.deepEqual(events, []);
 });
 
-test('revives: claims activity first, sends the payload, claims again, logs', async () => {
+test('revives: claims activity first, responds through the channel, claims again, logs', async () => {
   const { tick, events, logs, discord } = setup();
   await tick();
   assert.deepEqual(events, [
-    'noteBot', ['fetch', '704837777564500149'], 'pick', ['compose', 'dave', true], 'noteBot',
+    'noteBot', ['fetch', '704837777564500149'], 'pick', ['respond', 'revive', 'dave', null, true], 'noteBot',
   ]);
   assert.deepEqual(discord.state.channel.sent, [{ content: 'c', embeds: [] }]);
   assert.deepEqual(logs.info, ['[REVIVE] dave: resp']);
@@ -79,15 +81,13 @@ test('generation failure keeps the claim, sends nothing and logs', async () => {
   assert.equal(logs.error.length, 1);
 });
 
-test('does not await channel.send and logs a rejected send', async () => {
+test('a rejected send is logged, never thrown, and the second claim is skipped', async () => {
   const { tick, events, logs, discord } = setup();
-  let rejectSend;
-  discord.state.channel.send = () => new Promise((_, reject) => { rejectSend = reject; });
+  discord.state.channel.failSends(new Error('send failed'));
   await tick();
-  assert.equal(events.at(-1), 'noteBot');
-  rejectSend(new Error('send failed'));
-  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(events.filter((e) => e === 'noteBot').length, 1);
   assert.equal(logs.error.length, 1);
+  assert.deepEqual(logs.info, []);
 });
 
 test('a channel fetch failure is logged and never throws', async () => {

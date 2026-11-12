@@ -28,9 +28,29 @@ const createGuild = () => {
   return { id: GUILD_ID, members };
 };
 
+// One-shot by default: the next `times` calls of the guarded method reject with `error`.
+const createFailer = () => {
+  let error = null;
+  let left = 0;
+  return {
+    arm: (failure, { times = 1 } = {}) => {
+      error = failure;
+      left = times;
+    },
+    check: () => {
+      if (left <= 0) return;
+      left -= 1;
+      throw error;
+    },
+  };
+};
+
 const createChannel = (id, guild, nextId) => {
   const channel = { id, guild, guildId: guild.id, sent: [], sentMessages: [] };
+  const failer = createFailer();
+  channel.failSends = failer.arm;
   channel.send = async (payload) => {
+    failer.check();
     channel.sent.push(payload);
     const message = makeBotMessage(nextId(), payload, channel);
     channel.sentMessages.push(message);
@@ -39,11 +59,12 @@ const createChannel = (id, guild, nextId) => {
   return channel;
 };
 
-const makeBotMessage = (id, payload, channel) => ({
+const makeBotMessage = (id, payload, channel, reference = null) => ({
   id,
   author: BOT,
   content: payload?.content,
   embeds: payload?.embeds,
+  reference,
   createdTimestamp: Date.now(),
   channel,
 });
@@ -125,9 +146,12 @@ export const createFakeDiscord = () => {
       guildId: target.guildId,
       replies: [],
     };
+    const failer = createFailer();
+    message.failReplies = failer.arm;
     message.reply = async (payload) => {
+      failer.check();
       message.replies.push(payload);
-      return makeBotMessage(nextId(), payload, target);
+      return makeBotMessage(nextId(), payload, target, { messageId: id });
     };
     return message;
   };
@@ -149,23 +173,24 @@ export const createFakeDiscord = () => {
   };
 
   const makeModalSubmit = ({ customId, user, author }) => {
-    let editError = null;
+    const replyFailer = createFailer();
+    const editFailer = createFailer();
     const submit = {
       customId,
       user,
       fields: { getStringSelectValues: () => [author] },
       replies: [],
       edits: [],
-      failEdits: (error) => {
-        editError = error;
-      },
+      failReply: replyFailer.arm,
+      failEdits: editFailer.arm,
     };
     submit.reply = async (payload) => {
+      replyFailer.check();
       submit.replies.push(payload);
       return makeBotMessage(nextId(), payload, channel);
     };
     submit.editReply = async (payload) => {
-      if (editError) throw editError;
+      editFailer.check();
       submit.edits.push(payload);
       return makeBotMessage(nextId(), payload, channel);
     };
@@ -208,10 +233,14 @@ export const createFakeDiscord = () => {
         pendingWaits.push(wait);
       });
     };
+    // `failReply` / `failEdits` are `{ error, times }` and arm the submission before any handler sees it.
     interaction.submit = async ({
       author, customId = interaction.modal?.custom_id, user: submitter = interaction.user,
+      failReply = null, failEdits = null,
     }) => {
       const submitted = makeModalSubmit({ customId, user: submitter, author });
+      if (failReply) submitted.failReply(failReply.error, failReply);
+      if (failEdits) submitted.failEdits(failEdits.error, failEdits);
       [...pendingWaits]
         .filter((wait) => !wait.filter || wait.filter(submitted))
         .forEach((wait) => {

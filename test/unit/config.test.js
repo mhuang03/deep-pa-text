@@ -13,6 +13,7 @@ const EXPECTED_DEFAULTS = {
     modalTimeoutMs: 120000,
     maxMessageLength: 2000,
     truncateLookbackChars: 200,
+    pingRepliedUser: true,
   },
   reply: {
     probability: 0.1, minIntervalMs: 300000, escalateAfterMisses: 10, escalationStep: 0.05, override: false,
@@ -81,6 +82,13 @@ test('boolean overrides are true only for the string true', () => {
     const config = loadConfig({ REPLY_OVERRIDE: value, REVIVE_OVERRIDE: value });
     assert.equal(config.reply.override, false, value);
     assert.equal(config.revive.override, false, value);
+  });
+});
+
+test('PING_REPLIED_USER disables the reply ping only when it is the string false', () => {
+  assert.equal(loadConfig({ PING_REPLIED_USER: 'false' }).discord.pingRepliedUser, false);
+  ['true', 'TRUE', '', '0', 'no'].forEach((value) => {
+    assert.equal(loadConfig({ PING_REPLIED_USER: value }).discord.pingRepliedUser, true, value);
   });
 });
 

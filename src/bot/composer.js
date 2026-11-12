@@ -1,26 +1,21 @@
-import { buildPayload } from '../discord/payload.js';
 import { truncateForDiscord } from '../llm/sanitize.js';
 
-export const createComposer = ({ generator, gifResolver, authorEmbeds, config }) => {
+export const createComposer = ({ generator, gifResolver, config }) => {
   const { maxMessageLength, truncateLookbackChars } = config.discord;
 
-  // The single place that runs generate -> resolve GIFs -> author embed -> payload.
-  const compose = async ({ persona, guild, generate }) => {
-    const response = await generate();
+  const generate = ({ persona, target }) =>
+    (target === null ? generator.generateRevive(persona) : generator.generateReply(persona, target));
+
+  // The single place that runs generate -> resolve GIFs -> shorten to the limit. A null target is a revive.
+  const compose = async ({ persona, target }) => {
+    const response = await generate({ persona, target });
     const resolved = await gifResolver.resolve(response);
     const content = truncateForDiscord(resolved.content, {
       maxLength: maxMessageLength,
       lookback: truncateLookbackChars,
     });
-    const authorEmbed = await authorEmbeds.make(persona, guild);
-    return { response, payload: buildPayload({ content, gifLinks: resolved.gifLinks, authorEmbed }) };
+    return { response, content, gifLinks: resolved.gifLinks };
   };
 
-  const composeReply = ({ persona, record, guild }) =>
-    compose({ persona, guild, generate: () => generator.generateReply(persona, record) });
-
-  const composeRevive = ({ persona, guild }) =>
-    compose({ persona, guild, generate: () => generator.generateRevive(persona) });
-
-  return { composeReply, composeRevive };
+  return { compose };
 };

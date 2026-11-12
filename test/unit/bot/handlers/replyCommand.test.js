@@ -4,10 +4,11 @@ import { MessageFlags } from 'discord.js';
 import { createReplyCommandHandler } from '../../../../src/bot/handlers/replyCommand.js';
 import { loadConfig } from '../../../../src/config.js';
 import { createFakeDiscord } from '../../../support/fakes/discord.js';
+import { GENERATION_FAILED_MESSAGE } from '../../../../src/discord/replyModal.js';
 import { USERS } from '../../../support/fixtures.js';
 
 const setup = ({ target = null, failCompose = false } = {}) => {
-  const events = [];
+    const events = [];
   const logs = { info: [], error: [] };
   const discord = createFakeDiscord();
   const message = target ?? discord.makeMessage({ author: 'bob', content: 'a replyable message' });
@@ -17,11 +18,12 @@ const setup = ({ target = null, failCompose = false } = {}) => {
     users: USERS,
     messageFilter: { filterAnyAuthor: (record) => (record.content.length < 5 ? null : record) },
     personaSelector: { pickReplier: async () => (events.push('pickReplier'), 'carol') },
-    composer: {
-      composeReply: async ({ persona }) => {
-        events.push(['compose', persona]);
+    responder: {
+      respond: async (request) => {
+        events.push(['respond', request.trigger, request.persona, request.target.content]);
         if (failCompose) throw new Error('llm down');
-        return { response: 'resp', payload: { content: 'c', embeds: ['final'] } };
+        const message = await request.via.interaction.editReply({ content: 'c', embeds: ['final'] });
+        return { response: 'resp', message };
       },
     },
     authorEmbeds: { make: async (author, guild, opts) => ({ author, thinking: opts.thinking }) },
@@ -53,7 +55,7 @@ test('refuses an unreplyable target with an ephemeral message', async () => {
   const discord0 = createFakeDiscord();
   const { handler, command, events } = setup({ target: discord0.makeMessage({ content: 'hi' }) });
   await (await run(handler, command)).done;
-  assert.deepEqual(command.replies, [{ content: 'The selected message is not replyable.', flags: MessageFlags.Ephemeral }]);
+  assert.deepEqual(command.replies, [{ content: 'The selected message is not replyable.', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }]);
   assert.equal(command.modal, null);
   assert.deepEqual(events, []);
 });
@@ -64,7 +66,7 @@ test('refuses a target in another channel after fetching the guild', async () =>
   const { handler, command, events } = setup({ target });
   await (await run(handler, command)).done;
   assert.deepEqual(events, [['guildFetch', target.guildId]]);
-  assert.deepEqual(command.replies, [{ content: 'This command can only be used in the #pa-text channel.', flags: MessageFlags.Ephemeral }]);
+  assert.deepEqual(command.replies, [{ content: 'This command can only be used in the #pa-text channel.', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }]);
   assert.equal(command.modal, null);
 });
 
@@ -81,9 +83,9 @@ test('submitting a chosen author thinks, edits the reply, then updates state', a
   const { handler, command, events, logs } = setup();
   await run(handler, command);
   const submitted = await command.submit({ author: 'bob' });
-  assert.deepEqual(submitted.replies, [{ embeds: [{ author: 'bob', thinking: true }] }]);
+  assert.deepEqual(submitted.replies, [{ embeds: [{ author: 'bob', thinking: true }], allowedMentions: { parse: [] } }]);
   assert.deepEqual(submitted.edits, [{ content: 'c', embeds: ['final'] }]);
-  assert.deepEqual(events, [['compose', 'bob'], ['noteReply', { resetMisses: false }], 'noteBot']);
+  assert.deepEqual(events, [['respond', 'command', 'bob', 'a replyable message'], ['noteReply', { resetMisses: false }], 'noteBot']);
   assert.equal(logs.info.length, 2);
   assert.match(logs.info[0], /^\[REQUEST REPLY from dave\] \[.*\] bob: a replyable message$/);
   assert.equal(logs.info[1], '    [REPLY] bob: resp');
@@ -93,21 +95,50 @@ test('random author uses the persona selector', async () => {
   const { handler, command, events } = setup();
   await run(handler, command);
   const submitted = await command.submit({ author: 'random' });
-  assert.deepEqual(events.slice(0, 2), ['pickReplier', ['compose', 'carol']]);
+  assert.deepEqual(events.slice(0, 2), ['pickReplier', ['respond', 'command', 'carol', 'a replyable message']]);
   assert.equal(submitted.replies[0].embeds[0].author, 'carol');
 });
 
-test('touches no state when generation fails after the thinking reply', async () => {
+test('replaces the thinking reply with a failure notice when generation fails, touching no state', async () => {
   const { handler, command, events, logs } = setup({ failCompose: true });
   await run(handler, command);
   const submitted = await command.submit({ author: 'bob' });
   assert.equal(submitted.replies.length, 1);
-  assert.deepEqual(submitted.edits, []);
-  assert.deepEqual(events, [['compose', 'bob']]);
+  assert.deepEqual(submitted.edits, [{ content: GENERATION_FAILED_MESSAGE, embeds: [], allowedMentions: { parse: [] } }]);
+  assert.deepEqual(events, [['respond', 'command', 'bob', 'a replyable message']]);
   assert.equal(logs.error.length, 1);
 });
 
-test('touches no state when editReply fails', async () => {
+test('only logs when the failure notice itself cannot be sent', async () => {
+  const { handler, command, events, logs } = setup({ failCompose: true });
+  const taken = command.awaitModalSubmit;
+  command.awaitModalSubmit = async (options) => {
+    const modal = await taken(options);
+    modal.failEdits(new Error('edit failed'), { times: 2 });
+    return modal;
+  };
+  await run(handler, command);
+  const submitted = await command.submit({ author: 'bob' });
+  assert.deepEqual(submitted.edits, []);
+  assert.deepEqual(events, [['respond', 'command', 'bob', 'a replyable message']]);
+  assert.equal(logs.error.length, 2);
+});
+
+test('does not try to edit when the placeholder itself could not be sent', async () => {
+  const { handler, command, logs } = setup();
+  const taken = command.awaitModalSubmit;
+  command.awaitModalSubmit = async (options) => {
+    const modal = await taken(options);
+    modal.failReply(new Error('reply failed'));
+    return modal;
+  };
+  await run(handler, command);
+  const submitted = await command.submit({ author: 'bob' });
+  assert.deepEqual(submitted.edits, []);
+  assert.equal(logs.error.length, 1);
+});
+
+test('touches no state and sends a failure notice when editReply fails', async () => {
   const { handler, command, events, logs } = setup();
   const taken = command.awaitModalSubmit;
   command.awaitModalSubmit = async (options) => {
@@ -116,8 +147,10 @@ test('touches no state when editReply fails', async () => {
     return modal;
   };
   await run(handler, command);
-  await command.submit({ author: 'bob' });
-  assert.deepEqual(events, [['compose', 'bob']]);
+  const submitted = await command.submit({ author: 'bob' });
+  assert.deepEqual(events, [['respond', 'command', 'bob', 'a replyable message']]);
+  assert.equal(submitted.edits.length, 1);
+  assert.equal(submitted.edits[0].content, GENERATION_FAILED_MESSAGE);
   assert.equal(logs.error.length, 1);
 });
 

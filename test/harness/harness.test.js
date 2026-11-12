@@ -244,3 +244,58 @@ test('fake gifs setResult accepts strings, arrays, null, errors, hang, status, b
   const found = await new GiphyFetch('k').search('cat', { limit: 2 });
   assert.equal(found.data.length, 2);
 });
+
+test('fake bot messages carry a reference for replies only and a timestamp from the mocked clock', async (t) => {
+  const world = await newWorld(t);
+  const target = world.discord.makeMessage({ content: 'hello there friends' });
+  const reply = await target.reply({ content: 'r' });
+  assert.deepEqual(reply.reference, { messageId: target.id });
+  assert.equal(reply.createdTimestamp, BASE_TIME);
+  await world.advance(MINUTE);
+  const sent = await world.discord.channel.send({ content: 's' });
+  assert.equal(sent.reference, null);
+  assert.equal(sent.createdTimestamp, BASE_TIME + MINUTE);
+  const command = world.discord.makeInteraction();
+  assert.equal((await command.reply({ content: 'i' })).reference, null);
+});
+
+test('message.failReplies and channel.failSends reject one call by default, then recover', async (t) => {
+  const world = await newWorld(t);
+  const boom = new Error('boom');
+  const message = world.discord.makeMessage({ content: 'hello there friends' });
+  message.failReplies(boom);
+  await assert.rejects(message.reply({ content: 'a' }), boom);
+  await message.reply({ content: 'b' });
+  assert.deepEqual(message.replies, [{ content: 'b' }]);
+  const { channel } = world.discord;
+  channel.failSends(boom, { times: 2 });
+  await assert.rejects(channel.send({ content: 'a' }), boom);
+  await assert.rejects(channel.send({ content: 'b' }), boom);
+  await channel.send({ content: 'c' });
+  assert.deepEqual(channel.sent, [{ content: 'c' }]);
+});
+
+test('modal-submit failReply and failEdits honour times, and submit can arm them up front', async (t) => {
+  const world = await newWorld(t);
+  const boom = new Error('boom');
+  const command = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  const submitted = await command.submit({
+    author: 'bob', failReply: { error: boom }, failEdits: { error: boom, times: 2 },
+  });
+  assert.deepEqual(submitted.replies, []);
+  assert.deepEqual(submitted.edits, []);
+  await assert.rejects(submitted.reply({ content: 'x' }), boom.constructor);
+  await submitted.reply({ content: 'x' });
+  submitted.failEdits(boom);
+  await assert.rejects(submitted.editReply({ content: 'y' }), boom);
+  await submitted.editReply({ content: 'z' });
+  assert.deepEqual(submitted.edits, [{ content: 'z' }]);
+});
+
+test('createWorld env option overrides the environment the bot boots with', async (t) => {
+  const world = await newWorld(t, { random: 0, env: { PING_REPLIED_USER: 'false' } });
+  assert.equal(world.env.PING_REPLIED_USER, 'false');
+  assert.equal(world.env.DISCORD_BOT_TOKEN, ENV.DISCORD_BOT_TOKEN);
+  const message = await world.emitMessage({ content: 'hello there friends' });
+  assert.equal(message.replies[0].allowedMentions.repliedUser, false);
+});

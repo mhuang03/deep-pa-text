@@ -1,21 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createComposer } from '../../../src/bot/composer.js';
-import { createAuthorEmbeds } from '../../../src/discord/authorEmbed.js';
 import { loadConfig } from '../../../src/config.js';
-import { createFakeDiscord } from '../../support/fakes/discord.js';
 
-const setup = ({ links = [], text = 'hello' } = {}) => {
-  const { state } = createFakeDiscord();
+const setup = ({ links = [], text = 'hello', generate = null } = {}) => {
   const calls = [];
   const generator = {
     generateReply: async (persona, record) => {
       calls.push(['reply', persona, record]);
-      return `reply ${text}`;
+      return generate ?? `reply ${text}`;
     },
     generateRevive: async (persona) => {
       calls.push(['revive', persona]);
-      return `revive ${text}`;
+      return generate ?? `revive ${text}`;
     },
   };
   const gifResolver = {
@@ -24,81 +21,63 @@ const setup = ({ links = [], text = 'hello' } = {}) => {
       return { content: `resolved ${response}`, gifLinks: links };
     },
   };
-  const authorEmbeds = createAuthorEmbeds({ config: loadConfig({}), logger: { warn: () => {} } });
-  const composer = createComposer({ generator, gifResolver, authorEmbeds, config: loadConfig({}) });
-  return { composer, calls, guild: state.guild };
+  const config = loadConfig({});
+  return { composer: createComposer({ generator, gifResolver, config }), calls, config };
 };
 
-const json = (embed) => JSON.parse(JSON.stringify(embed.toJSON()));
-
-test('composeReply generates, resolves GIFs, then builds the payload', async () => {
-  const { composer, calls, guild } = setup({ links: [{ match: '<gif! a>', url: 'https://g.example/a.gif' }] });
-  const record = { id: '1', author: 'alice', content: 'hi there', timestamp: 5, reference: null };
-  const { response, payload } = await composer.composeReply({ persona: 'bob', record, guild });
-  assert.equal(response, 'reply hello');
-  assert.deepEqual(calls, [['reply', 'bob', record], ['resolve', 'reply hello']]);
-  assert.equal(payload.content, 'resolved reply hello');
-  assert.equal(payload.embeds.length, 2);
-  assert.equal(json(payload.embeds[0]).image.url, 'https://g.example/a.gif');
-  assert.equal(json(payload.embeds[1]).author.name, 'bob');
-  assert.equal(json(payload.embeds[1]).footer, undefined);
+test('compose with a target generates a reply, resolves GIFs, then returns the parts', async () => {
+  const links = [{ match: '<gif! a>', url: 'https://g.example/a.gif' }];
+  const { composer, calls } = setup({ links });
+  const target = { id: '1', author: 'alice', content: 'hi there', timestamp: 5, reference: null };
+  const result = await composer.compose({ persona: 'bob', target });
+  assert.deepEqual(result, { response: 'reply hello', content: 'resolved reply hello', gifLinks: links });
+  assert.deepEqual(calls, [['reply', 'bob', target], ['resolve', 'reply hello']]);
 });
 
-test('composeReply omits unresolved links and keeps only the author embed', async () => {
-  const { composer, guild } = setup({ links: [{ match: '<gif! a>', url: '' }] });
-  const { payload } = await composer.composeReply({ persona: 'bob', record: {}, guild });
-  assert.equal(payload.embeds.length, 1);
-});
-
-test('composeRevive uses the revive generator and the persona embed', async () => {
-  const { composer, calls, guild } = setup();
-  const { response, payload } = await composer.composeRevive({ persona: 'carol', guild });
+test('compose with a null target generates a revive', async () => {
+  const { composer, calls } = setup();
+  const { response, content } = await composer.compose({ persona: 'carol', target: null });
   assert.equal(response, 'revive hello');
+  assert.equal(content, 'resolved revive hello');
   assert.deepEqual(calls, [['revive', 'carol'], ['resolve', 'revive hello']]);
-  assert.equal(json(payload.embeds.at(-1)).author.name, 'carol');
-  assert.deepEqual(guild.members.calls, [{ query: 'carol', limit: 1 }]);
+});
+
+test('returns unresolved links untouched for the delivery layer to filter', async () => {
+  const links = [{ match: '<gif! a>', url: '' }];
+  const { composer } = setup({ links });
+  const { gifLinks } = await composer.compose({ persona: 'bob', target: {} });
+  assert.deepEqual(gifLinks, links);
 });
 
 test('propagates generator errors without resolving GIFs', async () => {
-  const { composer, calls, guild } = setup();
-  const failing = createComposer({
+  const calls = [];
+  const composer = createComposer({
     generator: { generateReply: async () => { throw new Error('llm down'); } },
     gifResolver: { resolve: async () => calls.push('resolve') },
-    authorEmbeds: { make: async () => calls.push('embed') },
     config: loadConfig({}),
   });
-  await assert.rejects(failing.composeReply({ persona: 'bob', record: {}, guild }), /llm down/);
+  await assert.rejects(composer.compose({ persona: 'bob', target: {} }), /llm down/);
   assert.deepEqual(calls, []);
 });
 
-const truncationSetup = (text, links = []) => {
-  const config = loadConfig({});
-  const composer = createComposer({
-    generator: { generateReply: async () => text },
-    gifResolver: { resolve: async (response) => ({ content: response, gifLinks: links }) },
-    authorEmbeds: { make: async () => null },
-    config,
-  });
-  return { composer, max: config.discord.maxMessageLength };
-};
-
 test('truncates only the delivered content, not the returned response', async () => {
   const text = 'a'.repeat(2500);
-  const { composer, max } = truncationSetup(text);
-  const { response, payload } = await composer.composeReply({ persona: 'bob', record: {}, guild: {} });
+  const composer = createComposer({
+    generator: { generateReply: async () => text },
+    gifResolver: { resolve: async (response) => ({ content: response, gifLinks: [] }) },
+    config: loadConfig({}),
+  });
+  const { response, content } = await composer.compose({ persona: 'bob', target: {} });
   assert.equal(response, text);
-  assert.equal(payload.content.length, max);
+  assert.equal(content.length, loadConfig({}).discord.maxMessageLength);
 });
 
 test('truncates after GIF processing', async () => {
-  const text = `<gif! cat>${'a'.repeat(1995)}`;
-  const gifResolver = { resolve: async () => ({ content: 'a'.repeat(1995), gifLinks: [] }) };
   const composer = createComposer({
-    generator: { generateReply: async () => text },
-    gifResolver,
-    authorEmbeds: { make: async () => null },
+    generator: { generateReply: async () => `<gif! cat>${'a'.repeat(1995)}` },
+    gifResolver: { resolve: async () => ({ content: 'a'.repeat(1995), gifLinks: [] }) },
     config: loadConfig({}),
   });
-  const { payload } = await composer.composeReply({ persona: 'bob', record: {}, guild: {} });
-  assert.equal(payload.content.length, 1995);
+  const { content } = await composer.compose({ persona: 'bob', target: {} });
+  assert.equal(content.length, 1995);
 });

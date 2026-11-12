@@ -14,9 +14,11 @@ import { createKlipyEngine, createGiphyEngine, createHumorEngine } from './gifs/
 import { createGifResolver } from './gifs/gifResolver.js';
 import { createDiscordClient } from './discord/client.js';
 import { createAuthorEmbeds } from './discord/authorEmbed.js';
+import { createEmbedDelivery } from './discord/delivery.js';
 import { createActivityTracker } from './bot/activityTracker.js';
 import { createReplyPolicy } from './bot/replyPolicy.js';
 import { createComposer } from './bot/composer.js';
+import { createResponder } from './bot/responder.js';
 import { createMessageCreateHandler } from './bot/handlers/messageCreate.js';
 import { createReplyCommandHandler } from './bot/handlers/replyCommand.js';
 import { createReviveTick } from './bot/handlers/reviveTick.js';
@@ -77,20 +79,20 @@ const buildCore = ({ config, vendor, data, clock }) => {
   };
 };
 
-const buildHandlers = ({ config, data, clock, logger, client, core, composer, authorEmbeds }) => {
+const buildHandlers = ({ config, data, clock, logger, client, core, responder, authorEmbeds }) => {
   const activity = createActivityTracker({ now: clock.now });
   const replyPolicy = createReplyPolicy({ config, now: clock.now, random: clock.random });
   const { ingest, messageFilter, personaSelector } = core;
   return {
     messageCreate: createMessageCreateHandler({
-      config, activity, ingest, messageFilter, replyPolicy, personaSelector, composer, logger,
+      config, activity, ingest, messageFilter, replyPolicy, personaSelector, responder, logger,
     }),
     replyCommand: createReplyCommandHandler({
-      client, config, users: data.users, messageFilter, personaSelector, composer,
+      client, config, users: data.users, messageFilter, personaSelector, responder,
       authorEmbeds, replyPolicy, activity, logger,
     }),
     reviveTick: createReviveTick({
-      client, config, activity, personaSelector, composer, clock: { now: clock.now }, logger,
+      client, config, activity, personaSelector, responder, clock: { now: clock.now }, logger,
     }),
   };
 };
@@ -102,8 +104,10 @@ export const buildContainer = ({
   const client = createDiscordClient(vendor.Client);
   const gifResolver = buildGifResolver({ config, vendor, clock, logger });
   const authorEmbeds = createAuthorEmbeds({ config, logger });
-  const composer = createComposer({ generator: core.generator, gifResolver, authorEmbeds, config });
-  const handlers = buildHandlers({ config, data, clock, logger, client, core, composer, authorEmbeds });
+  const composer = createComposer({ generator: core.generator, gifResolver, config });
+  const delivery = createEmbedDelivery({ authorEmbeds, config });
+  const responder = createResponder({ composer, delivery, logger });
+  const handlers = buildHandlers({ config, data, clock, logger, client, core, responder, authorEmbeds });
   const bot = createBot({ client, config, handlers, clock, logger });
-  return { bot, client, logger, gifResolver, composer, ...core };
+  return { bot, client, logger, gifResolver, composer, delivery, responder, ...core };
 };

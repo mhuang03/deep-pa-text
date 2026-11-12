@@ -8,6 +8,7 @@ const buildDiscord = (env) => ({
   modalTimeoutMs: 120000,
   maxMessageLength: 2000,
   truncateLookbackChars: 200,
+  pingRepliedUser: env.PING_REPLIED_USER !== 'false',
 });
 
 const buildReply = (env) => ({

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EmbedBuilder } from 'discord.js';
-import { buildPayload } from '../../../src/discord/payload.js';
+import { buildPayload, withSafeMentions, SAFE_MENTIONS } from '../../../src/discord/payload.js';
 
 const author = new EmbedBuilder().setAuthor({ name: 'bob' });
 
@@ -35,4 +35,28 @@ test('does not mutate the gifLinks input', () => {
   const gifLinks = [{ match: 'a', url: 'https://x/u.gif' }];
   buildPayload({ content: 'c', gifLinks, authorEmbed: author });
   assert.deepEqual(gifLinks, [{ match: 'a', url: 'https://x/u.gif' }]);
+});
+
+test('SAFE_MENTIONS parses nothing', () => {
+  assert.deepEqual(SAFE_MENTIONS, { parse: [] });
+});
+
+test('withSafeMentions adds a non-parsing allowedMentions with the repliedUser flag', () => {
+  [true, false].forEach((repliedUser) => {
+    const payload = withSafeMentions({ content: 'hi' }, { repliedUser });
+    assert.deepEqual(payload, { content: 'hi', allowedMentions: { parse: [], repliedUser } });
+  });
+});
+
+test('withSafeMentions leaves out repliedUser when none is given', () => {
+  assert.deepEqual(withSafeMentions({ content: 'hi' }).allowedMentions, { parse: [] });
+  assert.equal('repliedUser' in withSafeMentions({}, {}).allowedMentions, false);
+});
+
+test('withSafeMentions does not mutate its input and replaces an existing allowedMentions', () => {
+  const input = { content: 'hi', allowedMentions: { parse: ['everyone'] } };
+  const output = withSafeMentions(input, { repliedUser: true });
+  assert.deepEqual(input, { content: 'hi', allowedMentions: { parse: ['everyone'] } });
+  assert.notEqual(output, input);
+  assert.deepEqual(output.allowedMentions.parse, []);
 });

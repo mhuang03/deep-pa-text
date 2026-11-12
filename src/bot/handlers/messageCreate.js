@@ -1,28 +1,33 @@
 import { toMessageRecord } from '../../discord/messageRecord.js';
-import { sendDetached } from '../detachedSend.js';
+import { DELIVERY_STAGE } from '../responder.js';
 import {
   formatReceived, formatNoReply, formatNotReplyable, formatReply, joinLines,
 } from '../logLines.js';
 
 export const createMessageCreateHandler = (deps) => {
   const {
-    config, activity, ingest, messageFilter, replyPolicy, personaSelector, composer, logger,
+    config, activity, ingest, messageFilter, replyPolicy, personaSelector, responder, logger,
   } = deps;
 
   const isHandled = (message) =>
     message.channel.id === config.discord.channelId && !message.author.bot;
 
-  const sendLogged = (message, payload) => sendDetached({
-    send: () => message.reply(payload), logger, errorLabel: 'Error sending reply:',
-  });
+  // A failed send arms the rate limit so a persistent failure costs one LLM call per window.
+  const respond = async (message, target, persona) => {
+    try {
+      return await responder.respond({
+        trigger: 'auto', persona, target, guild: message.guild, via: { type: 'reply', message },
+      });
+    } catch (error) {
+      if (error?.stage === DELIVERY_STAGE) replyPolicy.noteReply({ resetMisses: false });
+      throw error;
+    }
+  };
 
   const reply = async (message, target) => {
     activity.noteBot();
     const persona = await personaSelector.pickReplier(target);
-    const { response, payload } = await composer.composeReply({
-      persona, record: target, guild: message.guild,
-    });
-    sendLogged(message, payload);
+    const { response } = await respond(message, target, persona);
     replyPolicy.noteReply({ resetMisses: true });
     activity.noteBot();
     return formatReply({ persona, response });

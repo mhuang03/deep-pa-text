@@ -13,6 +13,7 @@ export const AUTHOR_PLACEHOLDER = 'Select an author';
 export const RANDOM_DESCRIPTION = 'Reply as a random user';
 export const NOT_REPLYABLE_MESSAGE = 'The selected message is not replyable.';
 export const MODAL_TIMEOUT_LOG = 'reply modal dismissed or timed out';
+export const GENERATION_FAILED_MESSAGE = 'Could not generate a reply.';
 export const WRONG_CHANNEL_MESSAGE = 'This command can only be used in the #pa-text channel.';
 
 const buildUserOption = (user) =>
