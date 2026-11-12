@@ -88,3 +88,10 @@ test('a followUp delivery sends through interaction.followUp with safe mentions 
   assert.equal(sent[0].content, 'two');
   assert.deepEqual(sent[0].allowedMentions, { parse: [] });
 });
+
+test('placeholder returns the thinking embed payload with safe mentions', async () => {
+  const { delivery, makeCalls } = setup();
+  const payload = await delivery.placeholder({ persona: 'bob', guild: { id: 'g' } });
+  assert.deepEqual(payload, { embeds: [AUTHOR], allowedMentions: { parse: [] } });
+  assert.deepEqual(makeCalls, [['bob', { id: 'g' }, { thinking: true }]]);
+});

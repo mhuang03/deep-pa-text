@@ -110,3 +110,22 @@ test('defaultClock wraps the globals lazily', (t) => {
   t.mock.timers.tick(100);
   assert.deepEqual(fired, ['on time']);
 });
+
+test('the default persona display wires the embed delivery and never touches webhooks', () => {
+  const { container } = setup();
+  assert.equal(container.delivery.deliver.length, 1);
+  assert.equal(typeof container.delivery.placeholder, 'function');
+  assert.equal(typeof container.webhooks.forChannel, 'function');
+  container.db.close();
+});
+
+test('PERSONA_DISPLAY=webhook wires the webhook delivery', async () => {
+  const embed = setup();
+  const hook = setup({ PERSONA_DISPLAY: 'webhook' });
+  const placeholder = await hook.container.delivery.placeholder({ persona: 'bob', guild: {} });
+  assert.equal(placeholder.content, 'Replying as bob…');
+  const embedPlaceholder = await embed.container.delivery.placeholder({ persona: 'bob', guild: hook.fakes.discord.state.guild });
+  assert.equal(embedPlaceholder.embeds.length, 1);
+  embed.container.db.close();
+  hook.container.db.close();
+});

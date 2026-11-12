@@ -60,3 +60,10 @@ test('withSafeMentions does not mutate its input and replaces an existing allowe
   assert.notEqual(output, input);
   assert.deepEqual(output.allowedMentions.parse, []);
 });
+
+test('buildPayload without an author embed returns only the GIF embeds', () => {
+  const payload = buildPayload({ content: 'x', gifLinks: [{ match: 'm', url: 'https://x/a.gif' }, { match: 'n', url: null }] });
+  assert.equal(payload.embeds.length, 1);
+  assert.equal(payload.embeds[0].data.image.url, 'https://x/a.gif');
+  assert.deepEqual(buildPayload({ content: 'x', gifLinks: [] }).embeds, []);
+});

@@ -55,8 +55,10 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    `data/users.json` lists the members the bot may imitate. Only their messages enter the corpus.
 
    ```json
-   [{ "username": "discord_username", "name": "Real Name" }]
+   [{ "username": "discord_username", "name": "Real Name", "id": "optional Discord user id" }]
    ```
+
+   The optional `id` makes member lookups exact from the first use (see [Member profiles](#member-profiles)); without it the id is learned from the first successful search.
 
    `data/ping_caches.json` maps Discord IDs to display text, used to rewrite mentions.
 
@@ -98,6 +100,9 @@ Everything else is defined in `src/config.js`. These optional environment variab
 | `CHAIN_REPLIES` | on | `false` turns off chain replies (replies to a bot message). Such replies then get no answer at all, not even a random one |
 | `BURSTS` | on | `false` turns off multi-message bursts: the model is not told it may split, and any `<split>` marker in its output becomes a newline in a single message |
 | `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
+| `PERSONA_DISPLAY` | `embed` | `embed` or `webhook`; any other value stops startup with an error naming it. See [Persona display](#persona-display) |
+
+Other tunables in `src/config.js` for this feature: `discord.webhookName` (`deep-pa-text`), `discord.webhookUsernameMax` (80), `discord.webhookReplyLink` (true), `profiles.refreshIntervalMs` (3600000, integer of 0 or more; `0` disables the refresh), `profiles.minCheckIntervalMs` (10000, 0 or more), `profiles.lookupTimeoutMs` (5000, above 0) and `profiles.searchLimit` (100, 1 to 1000). Values outside these ranges stop startup.
 
 The corpus is only filled by live messages (`ingest.recordMessage`). There is no history backfill script in this repo; the vector store accepts batches, but nothing calls it in bulk.
 
@@ -126,12 +131,25 @@ SQLite (`messages.db`):
 
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
 - `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
+- `user_profiles`: append-only observations of members' Discord profiles (`username`, `user_id`, `display_name`, `avatar_url`, `observed_at` ms; primary key `(username, observed_at)`). The newest row per user is their stored profile; every distinct display name ever seen stays available.
 - `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
 
 Chroma:
 
 - `message_embeddings`: one entry per filtered message, embedded on its own content. Metadata: `author`, `timestamp`, `has_gif`.
 - `message_reply_embeddings`: one entry per filtered message whose resolved reference (explicit Discord reply, else the inferred previous message) has an embedding in `message_embeddings`, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
+
+## Member profiles
+
+A user's display name and avatar are read from Discord every time a message is about to be sent in that user's name, and every directory user is re-checked hourly (`profiles.refreshIntervalMs`, also once at startup without delaying it), so what the bot shows stays current. Lookups use REST only (by id with `force`, else a username search that accepts only an exact username match, so `bobby` or a nickname `bob` is never taken for `bob`); no privileged intent is needed. Sends and burst parts within `profiles.minCheckIntervalMs` (10 s) of a successful check share its result, and concurrent sends share one lookup.
+
+**Guarantee:** the profile used at send time was read from Discord within the last 10 s. It can be older only when Discord could not be reached (error, `profiles.lookupTimeoutMs` of 5 s, or the member left): then the last stored profile is used, one warning is logged per user per refresh interval, and the message is still sent. With nothing stored the username and no avatar are used.
+
+Each change of id, display name or avatar is appended to the `user_profiles` table (see Storage); nothing is overwritten. Messages already sent keep the name and avatar they were sent with.
+
+## Persona display
+
+`PERSONA_DISPLAY=embed` (default) posts as the bot with an author embed naming the persona (the persona's current avatar as its icon). `PERSONA_DISPLAY=webhook` posts through a channel webhook named `discord.webhookName` that the bot creates or reuses (it needs the Manage Webhooks permission; a channel holds at most 15 webhooks), with the member's current display name and avatar and only the GIF embeds. Webhook messages cannot be native replies, so an auto or chain reply starts with a small line `-# ↪ <jump link>` to the message being answered (`discord.webhookReplyLink`); the stored text has no such line. Display names are cut to 80 code points; Discord rejects names containing `clyde` or `discord`, so such a name is replaced by the username, and if that fails too the message goes out in embed form. If the webhook cannot be obtained or the send fails, the message is delivered in embed form (a failed webhook lookup is retried on the next send; a webhook deleted behind the bot's back is looked up again). Messages are never duplicated except when a send times out after Discord accepted it. For the `reply` command the ephemeral placeholder reads `Replying as <persona>…` and is edited to `Sent as <persona>.`; the persona message itself goes to the channel. Old messages keep the name and avatar they were sent with.
 
 ## Retrieval and prompting
 
