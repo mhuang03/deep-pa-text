@@ -31,14 +31,14 @@ const failingMessage = (world, error = SEND_FAILED) => {
 };
 
 
-const handlerErrors = (world) => world.logs.error.filter((args) => args[1] instanceof Error);
+const handlerErrors = (world) => world.logs.error.filter((args) => /^Error: /.test(String(args[1])));
 
 test('a rejected message.reply is logged once, nothing throws and no reply is recorded', async (t) => {
   const world = await newWorld(t);
   const message = failingMessage(world);
   await emitPrepared(world, message);
   assert.equal(handlerErrors(world).length, 1);
-  assert.equal(handlerErrors(world)[0][1], SEND_FAILED);
+  assert.match(handlerErrors(world)[0][1], /Unknown Message/);
   assert.deepEqual(world.errors, []);
   assert.deepEqual(message.replies, []);
 });
@@ -101,7 +101,7 @@ test('a rejected channel.send during a revive is logged and nothing throws', asy
   world.discord.channel.failSends(SEND_FAILED);
   await world.advanceTo(BASE_TIME + 3 * HOUR + 30 * 60_000);
   assert.equal(handlerErrors(world).length, 1);
-  assert.equal(handlerErrors(world)[0][1], SEND_FAILED);
+  assert.match(handlerErrors(world)[0][1], /Unknown Message/);
   assert.deepEqual(world.errors, []);
   assert.deepEqual(world.discord.channel.sent, []);
 });

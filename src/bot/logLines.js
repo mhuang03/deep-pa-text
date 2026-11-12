@@ -26,3 +26,18 @@ export const joinLines = (lines) => lines.join('\n');
 
 export const formatChainDecision = ({ persona, botTurns, decision }) =>
   `    [CHAIN: ${persona}, ${botTurns} bot turns, ${decision.reason}${decision.reply ? '' : ', no reply'}]`;
+
+const TRIGGER_LABELS = {
+  auto: 'auto reply', chain: 'chain reply', command: 'command reply', revive: 'revive',
+};
+
+// The label of a handler-level error log: which work failed, for whom and where.
+export const formatFailure = ({ what, messageId, trigger, persona, stage }) => {
+  const label = trigger ? (TRIGGER_LABELS[trigger] ?? trigger) : null;
+  const details = [
+    label && persona ? `${label} as ${persona}` : label ?? (persona ? `as ${persona}` : null),
+    stage ? `stage ${stage}` : null,
+  ].filter(Boolean);
+  const subject = messageId ? `${what} ${messageId}` : what;
+  return `${subject}${details.length > 0 ? ` (${details.join(', ')})` : ''}:`;
+};

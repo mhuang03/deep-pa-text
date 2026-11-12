@@ -18,6 +18,7 @@ export const buildDiscord = (env) => ({
   webhookUsernameMax: 80,
   webhookReplyLink: true,
   modalPreviewChars: 1000,
+  maxEmbeds: 10,
 });
 
 export const buildReply = (env) => ({
@@ -67,8 +68,12 @@ export const buildChroma = (env) => ({
   batchTimeoutMs: 120000,
 });
 
-export const buildEmbedding = () => ({
-  apiKeyEnvVar: 'OPENAI_API_KEY',
+const EMBEDDING_KEY_VARIABLE = 'OPENAI_API_KEY';
+
+// The embedding function reads the key itself by variable name; the value is kept here only so it can be redacted from logs.
+export const buildEmbedding = (env) => ({
+  apiKeyEnvVar: EMBEDDING_KEY_VARIABLE,
+  apiKey: readVariable(env, EMBEDDING_KEY_VARIABLE),
   modelName: 'text-embedding-3-small',
   dimensions: 512,
 });

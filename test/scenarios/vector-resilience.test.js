@@ -46,7 +46,7 @@ const tickStuck = async (ms) => {
 
 const count = (world, table) => world.sqlite.get(`SELECT COUNT(*) AS n FROM ${table}`).n;
 // Node's own experimental-feature notices also land in the error log; handler errors carry an Error.
-const errors = (world) => world.logs.error.filter((args) => args.some((a) => a instanceof Error));
+const errors = (world) => world.logs.error.filter((args) => args.some((a) => /^\w*Error: /.test(String(a))));
 const warnings = (world) => world.logs.warn.map((args) => String(args[0]));
 const missingWarnings = (world) => warnings(world).filter((text) => /repaired automatically/.test(text));
 const ids = (world, name) => [...world.chroma.collection(name).rows.keys()].sort();
@@ -162,7 +162,7 @@ test('retrieval timing out mid-reply fails closed: nothing is sent, the error is
   await world.settle();
   assert.deepEqual(stuck.replies, []);
   assert.deepEqual(world.discord.channel.sent, []);
-  assert.ok(errors(world).some((args) => args.some((a) => /timed out/.test(a.message))));
+  assert.ok(errors(world).some((args) => args.some((a) => /timed out/.test(String(a)))));
   world.chroma.hang(false);
   await world.advance(FAILURE_COOLDOWN_MS);
   const later = await world.emitMessage({ id: 'm2', author: 'carol', content: 'a later message here' });

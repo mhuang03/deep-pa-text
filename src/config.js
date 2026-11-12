@@ -6,6 +6,7 @@ import * as checkFeature from './config/validateFeatures.js';
 export { DEFAULT_BUSY_TIMEOUT_MS } from './config/sections.js';
 export { PERSONA_DISPLAYS } from './config/parse.js';
 export { assertRequired, buildGifKeyWarning } from './config/requirements.js';
+export { secretsOf } from './config/secrets.js';
 export { createConfigError, isConfigError } from './config/errors.js';
 export {
   assertGifs, assertLlm, assertReply, assertRevive, assertDiscord, assertFilter, assertStorage, assertRetrieval, assertPersona, assertChroma,
@@ -25,7 +26,7 @@ const buildConfig = (env) => ({
   filter: check.assertFilter(base.buildFilter()),
   storage: check.assertStorage(base.buildStorage()),
   chroma: check.assertChroma(base.buildChroma(env)),
-  embedding: base.buildEmbedding(),
+  embedding: base.buildEmbedding(env),
   retrieval: check.assertRetrieval(base.buildRetrieval()),
   persona: check.assertPersona(base.buildPersona()),
   llm: check.assertLlm(feature.buildLlm(env)),

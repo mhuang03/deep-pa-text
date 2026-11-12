@@ -23,7 +23,9 @@ export const createEmbedDelivery = ({ authorEmbeds, config }) => {
   const deliver = async ({ via, persona, guild, content, gifLinks }) => {
     const sender = resolveSender(via);
     const authorEmbed = await authorEmbeds.make(persona, guild);
-    const payload = withSafeMentions(buildPayload({ content, gifLinks, authorEmbed }), sender.mentions);
+    const payload = withSafeMentions(buildPayload({
+      content, gifLinks, authorEmbed, maxEmbeds: config.discord.maxEmbeds,
+    }), sender.mentions);
     return sender.send({ ...payload, ...sender.extras });
   };
 

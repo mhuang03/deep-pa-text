@@ -139,7 +139,7 @@ test('a failing second part is logged, the first stays and the reply state is al
   assert.equal(message.replies.length, 1);
   assert.deepEqual(world.discord.channel.sent, []);
   assert.equal(botRows(world).length, 1);
-  assert.equal(world.logs.error.some((args) => args.some((a) => a instanceof Error && /Missing/.test(a.message))), true);
+  assert.equal(world.logs.error.some((args) => args.some((a) => /Missing Permissions/.test(String(a)))), true);
   const next = await world.emitMessage({ author: 'carol', content: 'another replyable message' });
   assert.equal(next.replies.length, 0);
 });

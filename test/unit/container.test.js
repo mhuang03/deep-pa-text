@@ -14,6 +14,8 @@ import { createFakeOpenAI } from '../support/fakes/llm.js';
 import { createFakeGifs } from '../support/fakes/gifs.js';
 import { ENV, PING_CACHE, USERS } from '../support/fixtures.js';
 
+const SILENT_LOGGER = { info: () => {}, warn: () => {}, error: () => {} };
+
 const SERVICES = [
   'bot', 'lifecycle', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
@@ -37,7 +39,7 @@ const setup = (overrides = {}, databasePath = ':memory:', env = ENV) => {
   const config = loadConfig({ ...env, ...overrides });
   const storage = { ...config.storage, databasePath };
   const container = buildContainer({
-    config: { ...config, storage }, vendor, data: { users: USERS, pingCache: PING_CACHE },
+    config: { ...config, storage }, vendor, data: { users: USERS, pingCache: PING_CACHE }, logger: SILENT_LOGGER,
   });
   return { fakes, container, config };
 };
@@ -53,7 +55,11 @@ test('exposes the listed services', () => {
 test('constructs each third-party client once with the configured options', () => {
   const { fakes, config, container } = setup({ CHROMA_PORT: '9000' });
   assert.deepEqual(fakes.chroma.state.constructed, [{ port: 9000 }]);
-  assert.deepEqual(fakes.chroma.state.embeddingFunctionOptions, { ...config.embedding });
+  assert.deepEqual(fakes.chroma.state.embeddingFunctionOptions, {
+    apiKeyEnvVar: config.embedding.apiKeyEnvVar,
+    modelName: config.embedding.modelName,
+    dimensions: config.embedding.dimensions,
+  });
   assert.deepEqual(fakes.llm.state.constructed, [
     { apiKey: ENV.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com', timeout: 120000, maxRetries: 1 },
   ]);
@@ -173,7 +179,7 @@ test('uses a given Discord client instead of creating one', () => {
   const config = loadConfig(ENV);
   const container = buildContainer({
     config: { ...config, storage: { ...config.storage, databasePath: ':memory:' } },
-    vendor, data: { users: USERS, pingCache: PING_CACHE }, client,
+    vendor, data: { users: USERS, pingCache: PING_CACHE }, client, logger: SILENT_LOGGER,
   });
   assert.equal(container.client, client);
   assert.deepEqual(fakes.discord.state.clientOptions, { given: true }, 'no second client was constructed');
@@ -194,7 +200,7 @@ const KEY_SUBSETS = [
 test('buildGifResolver builds and calls only the engines whose key is set', async () => {
   for (const { keys, called } of KEY_SUBSETS) {
     const fakes = createFakeGifs();
-    const resolver = buildGifResolver({ config: loadConfig(keys), vendor: gifVendor(fakes) });
+    const resolver = buildGifResolver({ config: loadConfig(keys), vendor: gifVendor(fakes), logger: SILENT_LOGGER });
     await resolver.resolve('<gif! cat>');
     const seen = ['klipy', 'giphy', 'humor'].filter((name) => fakes.state[name].calls.length > 0);
     assert.deepEqual(seen, called, JSON.stringify(keys));
@@ -203,7 +209,7 @@ test('buildGifResolver builds and calls only the engines whose key is set', asyn
 });
 
 test('with no GIF key a token stays unresolved as placeholder text', async () => {
-  const resolver = buildGifResolver({ config: loadConfig({}), vendor: gifVendor(createFakeGifs()) });
+  const resolver = buildGifResolver({ config: loadConfig({}), vendor: gifVendor(createFakeGifs()), logger: SILENT_LOGGER });
   const { content, gifLinks } = await resolver.resolve('hi <gif! cat>');
   assert.equal(content, 'hi <INSERT GIF:  cat>');
   assert.deepEqual(gifLinks, [{ match: '<gif! cat>', url: '' }]);

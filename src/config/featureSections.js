@@ -26,6 +26,7 @@ export const buildGifs = (env) => ({
   humorUrl: 'https://api.humorapi.com/gif/search',
   candidates: 5,
   timeoutMs: 5000,
+  maxPerMessage: 2,
 });
 
 export const buildContext = () => ({

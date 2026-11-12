@@ -1,7 +1,7 @@
 import { MessageFlags } from 'discord.js';
 import { buildPayload, SAFE_MENTIONS } from './payload.js';
 import { toWebhookName } from './webhookName.js';
-import { truncateForDiscord } from '../llm/sanitize.js';
+import { truncateForDiscord } from '../util/text.js';
 
 export const REPLY_LINK_PREFIX = '-# ↪ ';
 
@@ -12,7 +12,9 @@ const EPHEMERAL_VIAS = ['interaction', 'followUp'];
 const isWebhookGone = (error) => error?.code === UNKNOWN_WEBHOOK_CODE || error?.status === NOT_FOUND_STATUS;
 
 export const createWebhookDelivery = ({ webhooks, memberProfiles, fallback, config, logger }) => {
-  const { maxMessageLength, truncateLookbackChars, webhookReplyLink, webhookUsernameMax } = config.discord;
+  const {
+    maxMessageLength, truncateLookbackChars, webhookReplyLink, webhookUsernameMax, maxEmbeds,
+  } = config.discord;
   const warned = new Set();
 
   const warnOnce = (channel, error) => {
@@ -40,7 +42,7 @@ export const createWebhookDelivery = ({ webhooks, memberProfiles, fallback, conf
       content: withReplyLink(content, via),
       username: name,
       avatarURL: profile.avatarURL ?? undefined,
-      embeds: buildPayload({ content, gifLinks }).embeds,
+      embeds: buildPayload({ content, gifLinks, maxEmbeds }).embeds,
       allowedMentions: SAFE_MENTIONS,
     });
   };

@@ -1,9 +1,11 @@
+import { truncateCodePoints } from '../util/text.js';
+
 const ELLIPSIS = '…';
 
 const clean = (text) => text.replace(/\r?\n/g, ' ').trim();
 
 export const truncateEntry = (text, maxEntryChars) =>
-  (text.length > maxEntryChars ? `${text.slice(0, maxEntryChars)}${ELLIPSIS}` : text);
+  truncateCodePoints(text, maxEntryChars, { ellipsis: ELLIPSIS });
 
 // Bot messages we cannot attribute to a persona, and other bots, carry no usable speaker.
 const speakerAndContent = (message, { resolveBot, transform }) => {

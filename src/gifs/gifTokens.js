@@ -1,8 +1,21 @@
+import { truncateCodePoints } from '../util/text.js';
+
+const TOKEN_PATTERN = /<gif!(.*?)>/g;
+
 export const findGifTokens = (text, maxQueryLength) =>
-  [...text.matchAll(/<gif!(.*?)>/g)].map((match) => ({
+  [...text.matchAll(TOKEN_PATTERN)].map((match) => ({
     match: match[0],
-    query: match[1].trim().slice(0, maxQueryLength),
+    query: truncateCodePoints(match[1].trim(), maxQueryLength),
   }));
+
+// Keeps the first `max` tokens and removes the rest outright: no placeholder for what was never asked for.
+export const limitGifTokens = (text, max) => {
+  let seen = 0;
+  return text.replace(TOKEN_PATTERN, (token) => {
+    seen += 1;
+    return seen > max ? '' : token;
+  });
+};
 
 const PLACEHOLDER_PREFIX = '<INSERT GIF: ';
 const TOKEN_PREFIX_LENGTH = '<gif!'.length;

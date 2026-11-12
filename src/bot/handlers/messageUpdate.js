@@ -1,4 +1,5 @@
 import { toMessageRecord } from '../../discord/messageRecord.js';
+import { formatFailure } from '../logLines.js';
 
 export const createMessageUpdateHandler = ({ config, ingest, botMessageStore, clock, logger }) => {
   const isHandled = (message) => message.channelId === config.discord.channelId;
@@ -21,7 +22,7 @@ export const createMessageUpdateHandler = ({ config, ingest, botMessageStore, cl
       if (fetched.author.bot) return;
       await record(fetched);
     } catch (error) {
-      logger.error('Error processing message edit:', error);
+      logger.error(formatFailure({ what: 'Error processing message edit', messageId: newMessage?.id }), error);
     }
   };
 

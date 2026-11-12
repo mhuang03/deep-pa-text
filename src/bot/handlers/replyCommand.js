@@ -8,7 +8,7 @@ import {
   NOT_REPLYABLE_MESSAGE, WRONG_CHANNEL_MESSAGE, MODAL_TIMEOUT_LOG, GENERATION_FAILED_MESSAGE,
 } from '../../discord/replyModal.js';
 import { COMMAND_REFUSALS } from '../commandLimiter.js';
-import { formatCommandRequest, formatReply } from '../logLines.js';
+import { formatCommandRequest, formatReply, formatFailure } from '../logLines.js';
 
 export const createReplyCommandHandler = (deps) => {
   const {
@@ -152,7 +152,13 @@ export const createReplyCommandHandler = (deps) => {
       if (!isReplyCommand(interaction)) return;
       await run(interaction);
     } catch (error) {
-      logger.error('Error handling reply command:', error);
+      logger.error(formatFailure({
+        what: 'Error handling reply command',
+        messageId: interaction.targetMessage?.id,
+        trigger: error?.trigger,
+        persona: error?.persona,
+        stage: error?.stage,
+      }), error);
     }
   };
 };

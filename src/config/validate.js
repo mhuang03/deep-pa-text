@@ -5,6 +5,7 @@ export { checkRules } from './rules.js';
 
 export const assertGifs = (gifs) => checkRules('gifs', gifs, {
   candidates: integer(1),
+  maxPerMessage: integer(0),
   timeoutMs: above(0),
 });
 
@@ -27,6 +28,7 @@ export const assertRevive = (revive) => checkRules('revive', revive, {
 
 export const assertDiscord = (discord) => checkRules('discord', discord, {
   modalPreviewChars: integer(0),
+  maxEmbeds: integer(1),
 });
 
 export const assertFilter = (filter) => {

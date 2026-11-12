@@ -67,3 +67,18 @@ test('buildPayload without an author embed returns only the GIF embeds', () => {
   assert.equal(payload.embeds[0].data.image.url, 'https://x/a.gif');
   assert.deepEqual(buildPayload({ content: 'x', gifLinks: [] }).embeds, []);
 });
+
+const gifs = (count) => Array.from({ length: count }, (_, i) => ({ match: `m${i}`, url: `https://x/${i}.gif` }));
+
+test('never carries more embeds than the maximum: the author embed keeps its slot', () => {
+  const payload = buildPayload({ content: 'c', gifLinks: gifs(12), authorEmbed: author, maxEmbeds: 10 });
+  assert.equal(payload.embeds.length, 10);
+  assert.equal(payload.embeds.at(-1), author);
+  assert.equal(payload.embeds.filter((e) => e.data.image).length, 9);
+});
+
+test('without an author embed all ten slots can hold images, and the default maximum is ten', () => {
+  assert.equal(buildPayload({ content: 'c', gifLinks: gifs(12), authorEmbed: null }).embeds.length, 10);
+  assert.equal(buildPayload({ content: 'c', gifLinks: gifs(12), authorEmbed: null, maxEmbeds: 3 }).embeds.length, 3);
+  assert.equal(buildPayload({ content: 'c', gifLinks: gifs(2), authorEmbed: author, maxEmbeds: 1 }).embeds.length, 1);
+});

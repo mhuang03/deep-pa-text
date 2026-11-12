@@ -1,6 +1,6 @@
 import { shouldRevive } from '../revivePolicy.js';
 import { TRIGGERS } from '../triggers.js';
-import { formatRevive } from '../logLines.js';
+import { formatRevive, formatFailure } from '../logLines.js';
 
 export const createReviveTick = (deps) => {
   const { client, config, activity, personaSelector, responder, clock, logger } = deps;
@@ -47,7 +47,9 @@ export const createReviveTick = (deps) => {
       await revive();
     } catch (error) {
       cooldownUntil = clock.now() + config.revive.failureCooldownMs;
-      logger.error('Error in revive interval:', error);
+      logger.error(formatFailure({
+        what: 'Error in revive interval', trigger: error?.trigger, persona: error?.persona, stage: error?.stage,
+      }), error);
     }
   };
 };

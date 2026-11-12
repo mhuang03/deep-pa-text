@@ -99,3 +99,12 @@ test('midnight formats as 00:05, never 24:05', () => {
 test('an empty transcript formats as an empty string', () => {
   assert.equal(formatTranscript([], { timeZone: 'UTC' }), '');
 });
+
+test('an entry is cut by code points so an emoji at the boundary is kept whole or dropped whole', () => {
+  const content = `${'a'.repeat(299)}\u{1F600}${'b'.repeat(5)}`;
+  const [kept] = build([msg('1', 'alice', content)]);
+  assert.equal(kept.content, `${'a'.repeat(299)}\u{1F600}…`);
+  const [cut] = build([msg('2', 'alice', content)], { maxEntryChars: 299 });
+  assert.equal(cut.content, `${'a'.repeat(299)}…`);
+  assert.doesNotMatch(cut.content, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+});

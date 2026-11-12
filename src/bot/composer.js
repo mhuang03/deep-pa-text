@@ -1,4 +1,4 @@
-import { truncateForDiscord } from '../llm/sanitize.js';
+import { truncateForDiscord } from '../util/text.js';
 
 export const createComposer = ({ generator, gifResolver, config }) => {
   const { maxMessageLength, truncateLookbackChars } = config.discord;

@@ -2,6 +2,7 @@ import {
   ModalBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   LabelBuilder, TextDisplayBuilder,
 } from 'discord.js';
+import { truncateCodePoints } from '../util/text.js';
 
 export const REPLY_MODAL_PREFIX = 'replyModal';
 export const AUTHOR_SELECT_ID = 'authorSelect';
@@ -43,8 +44,7 @@ export const selectModalUsers = (users, defaultAuthor) => {
 
 // Cut by code points so an emoji is never split.
 export const truncatePreview = (content, maxChars) => {
-  const points = [...content];
-  return points.length <= maxChars ? content : `${points.slice(0, maxChars).join('')}${PREVIEW_ELLIPSIS}`;
+  return truncateCodePoints(content, maxChars, { ellipsis: PREVIEW_ELLIPSIS });
 };
 
 const buildAuthorLabel = (users, defaultAuthor) => {

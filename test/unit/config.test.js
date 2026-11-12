@@ -21,6 +21,7 @@ const EXPECTED_DEFAULTS = {
     webhookUsernameMax: 80,
     webhookReplyLink: true,
     modalPreviewChars: 1000,
+    maxEmbeds: 10,
   },
   reply: {
     probability: 0.1, minIntervalMs: 300000, escalateAfterMisses: 10, escalationStep: 0.05, override: false,
@@ -41,7 +42,7 @@ const EXPECTED_DEFAULTS = {
     port: 7429, messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings',
     timeoutMs: 30000, connectTimeoutMs: 10000, batchTimeoutMs: 120000,
   },
-  embedding: { apiKeyEnvVar: 'OPENAI_API_KEY', modelName: 'text-embedding-3-small', dimensions: 512 },
+  embedding: { apiKeyEnvVar: 'OPENAI_API_KEY', apiKey: undefined, modelName: 'text-embedding-3-small', dimensions: 512 },
   retrieval: {
     replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 30, likelyRepliers: 20,
     shortMessageChars: 25, queryContextMessages: 2,
@@ -72,7 +73,7 @@ const EXPECTED_DEFAULTS = {
     klipyApiKey: undefined, giphyApiKey: undefined, humorApiKey: undefined, maxQueryLength: 50,
     klipyBaseUrl: 'https://api.klipy.com/api/v1', klipyPerPage: 8, klipyCustomerId: 'deep-pa-text',
     klipyLocale: 'us', klipyContentFilter: 'off', klipyFormatFilter: 'gif',
-    humorUrl: 'https://api.humorapi.com/gif/search', candidates: 5, timeoutMs: 5000,
+    humorUrl: 'https://api.humorapi.com/gif/search', candidates: 5, timeoutMs: 5000, maxPerMessage: 2,
   },
   logging: { locale: 'en-US', timeZone: 'America/Chicago' },
 };
@@ -270,6 +271,8 @@ test('assertGifs requires candidates >= 1 (integer) and a positive timeout', () 
   failsFor(assertGifs, ok, 'timeoutMs', [0, NaN, Infinity, -1, undefined]);
   passesFor(assertGifs, ok, 'candidates', [1, 7]);
   passesFor(assertGifs, ok, 'timeoutMs', [0.5, 1]);
+  failsFor(assertGifs, ok, 'maxPerMessage', [-1, 1.5, NaN, Infinity, undefined]);
+  passesFor(assertGifs, ok, 'maxPerMessage', [0, 2, 10]);
 });
 
 test('assertLlm requires a positive timeout and non-negative integer retries', () => {
@@ -386,6 +389,8 @@ test('assertDiscord requires a non-negative integer preview length and assertLlm
   const discord = loadConfig({}).discord;
   failsFor(assertDiscord, discord, 'modalPreviewChars', [-1, 1.5, NaN, Infinity]);
   passesFor(assertDiscord, discord, 'modalPreviewChars', [0, 1000]);
+  failsFor(assertDiscord, discord, 'maxEmbeds', [0, -1, 1.5, NaN, Infinity, undefined]);
+  passesFor(assertDiscord, discord, 'maxEmbeds', [1, 10]);
   failsFor(assertLlm, loadConfig({}).llm, 'postProcessRetries', [-1, 1.5, NaN]);
   passesFor(assertLlm, loadConfig({}).llm, 'postProcessRetries', [0, 2]);
 });

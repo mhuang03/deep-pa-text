@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sanitizeResponse, truncateForDiscord } from '../../../src/llm/sanitize.js';
+import { sanitizeResponse, unwrapQuotes } from '../../../src/llm/sanitize.js';
 
 const TABLE = [
   ['"hello there"', 'hello there'],
@@ -29,8 +29,44 @@ for (const [input, expected] of TABLE) {
   });
 }
 
-test('unwraps at most three layers of quotes', () => {
-  assert.equal(sanitizeResponse('\'\'\'\'x\'\'\'\''), "'x'");
+test('unwraps nested quotes of different kinds', () => {
+  assert.equal(sanitizeResponse('"\'x\'"'), 'x');
+  assert.equal(sanitizeResponse('“"x"”'), 'x');
+});
+
+test('a single-quoted text with an apostrophe is not unwrapped', () => {
+  assert.equal(sanitizeResponse("'it's fine'"), "'it's fine'");
+});
+
+test('two quoted units are not one wrapped text', () => {
+  assert.equal(sanitizeResponse('"yes" or "no"'), '"yes" or "no"');
+  assert.equal(sanitizeResponse('“a” and “b”'), '“a” and “b”');
+});
+
+test('escaped inner quotes still count as one wrapped text', () => {
+  assert.equal(sanitizeResponse('"she said \\"hi\\""'), 'she said "hi"');
+});
+
+test('a doubled backslash before a quote is settled to a fixed point', () => {
+  assert.equal(sanitizeResponse('"a\\\\"b"'), 'a"b');
+});
+
+const FIXED_POINT_INPUTS = [
+  '"a\\\\"b"', '"a\\\\"', '\\\\"', '\\\\\\"', '"\\"\\""', '"\'x\'"', '“"x"”', '""', '"""', '\\n\\n',
+  '"\\\\n"', "''x''", '"a" "b"', '"a\\\\\\"b"', '\\"x\\"', '"\\\\"x\\\\""', "'\"x\"'", '"\\\\\\\\"',
+];
+
+for (const input of FIXED_POINT_INPUTS) {
+  test(`sanitizeResponse is a fixed point for ${JSON.stringify(input)}`, () => {
+    const once = sanitizeResponse(input);
+    assert.equal(sanitizeResponse(once), once);
+  });
+}
+
+test('unwrapQuotes only unwraps and does not replace stray escapes', () => {
+  assert.equal(unwrapQuotes('"a"'), 'a');
+  assert.equal(unwrapQuotes('no way\\nreally'), 'no way\\nreally');
+  assert.equal(unwrapQuotes('"yes" or "no"'), '"yes" or "no"');
 });
 
 test('a double-quoted text that is not valid JSON is stripped of its outer quotes', () => {
@@ -40,42 +76,4 @@ test('a double-quoted text that is not valid JSON is stripped of its outer quote
 test('text that only starts or ends with a quote is left alone', () => {
   assert.equal(sanitizeResponse('"hi" he said'), '"hi" he said');
   assert.equal(sanitizeResponse('he said "hi"'), 'he said "hi"');
-});
-
-const OPTIONS = { maxLength: 2000, lookback: 200 };
-
-test('truncateForDiscord leaves short content unchanged', () => {
-  assert.equal(truncateForDiscord('a'.repeat(2000), OPTIONS), 'a'.repeat(2000));
-});
-
-test('truncateForDiscord cuts to the limit when there is no whitespace', () => {
-  assert.equal(truncateForDiscord('a'.repeat(2500), OPTIONS).length, 2000);
-});
-
-test('truncateForDiscord cuts at whitespace inside the lookback', () => {
-  const text = `${'a'.repeat(1950)} ${'b'.repeat(549)}`;
-  assert.equal(truncateForDiscord(text, OPTIONS), 'a'.repeat(1950));
-});
-
-test('truncateForDiscord ignores whitespace outside the lookback', () => {
-  const text = `${'a'.repeat(1700)} ${'b'.repeat(799)}`;
-  assert.equal(truncateForDiscord(text, OPTIONS).length, 2000);
-});
-
-test('truncateForDiscord does not split a surrogate pair', () => {
-  const text = `${'a'.repeat(1999)}\u{1F600}${'b'.repeat(500)}`;
-  const result = truncateForDiscord(text, OPTIONS);
-  assert.equal(result.length, 1999);
-  assert.equal(result, 'a'.repeat(1999));
-});
-
-test('truncateForDiscord does not cut at whitespace that would leave nothing', () => {
-  const text = ` ${'a'.repeat(2500)}`;
-  const result = truncateForDiscord(text, { maxLength: 2000, lookback: 2000 });
-  assert.equal(result.length > 0, true);
-});
-
-test('truncateForDiscord trims trailing whitespace', () => {
-  const text = `${'a'.repeat(1990)}     ${'b'.repeat(600)}`;
-  assert.equal(truncateForDiscord(text, { maxLength: 1995, lookback: 0 }), 'a'.repeat(1990));
 });

@@ -114,6 +114,7 @@ test('a delivery failure is logged once, arms the rate limit without a failure c
   assert.equal(events.includes('noteFailure'), false);
   assert.deepEqual(events.slice(-2), ['undo', 'release']);
   assert.equal(logs.error.length, 1);
+  assert.match(logs.error[0][0], /^Error processing message \S+ \(.*stage delivery\):$/);
   assert.match(logs.error[0][1].message, /send failed/);
   assert.equal(logs.info.length, 0);
 });

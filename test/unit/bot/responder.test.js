@@ -95,27 +95,38 @@ test('a revive context failure is logged as a warning and the revive is still co
   const { responder, events, logs } = setup({ failContext: new Error('history down') });
   await responder.respond({ ...REQUEST, trigger: 'revive', target: null });
   assert.deepEqual(events.map(([name]) => name), ['reviveContext', 'compose', 'deliver']);
-  assert.deepEqual(events[1], ['compose', { persona: 'bob', target: null, context: undefined }]);
+  assert.deepEqual(events[1], ['compose', { persona: 'bob', target: null, context: {} }]);
+  assert.equal(logs.length, 1);
   assert.equal(logs[0][0], 'warn');
 });
 
-test('a generation failure propagates unmarked and nothing is delivered', async () => {
+test('a generation failure is rethrown as a new error with the generation stage, persona and trigger', async () => {
   const boom = new Error('llm down');
   const { responder, events } = setup({ failCompose: boom });
-  await assert.rejects(responder.respond(REQUEST), (error) => error === boom && error.stage === undefined);
+  await assert.rejects(responder.respond(REQUEST), (error) => (
+    error !== boom && error.message === 'llm down' && error.cause === boom
+    && error.stage === 'generation' && error.persona === 'bob' && error.trigger === 'auto'
+  ));
+  assert.equal(boom.stage, undefined, 'the caught error is not mutated');
   assert.deepEqual(events.map(([name]) => name), ['context', 'compose']);
 });
 
-test('a context failure propagates and nothing is composed or delivered', async () => {
-  const { responder, events } = setup({ failContext: new Error('history down') });
-  await assert.rejects(responder.respond(REQUEST), /history down/);
-  assert.deepEqual(events, [['context', { channel: channelStub, target: { id: '1' } }]]);
+test('a reply context failure is a warning: the reply is composed without a transcript and sent', async () => {
+  const { responder, events, logs } = setup({ failContext: new Error('history down') });
+  await responder.respond(REQUEST);
+  assert.deepEqual(events.map(([name]) => name), ['context', 'compose', 'deliver']);
+  assert.deepEqual(events[1], ['compose', { persona: 'bob', target: { id: '1' }, context: { transcript: [] } }]);
+  assert.deepEqual(logs.map(([level]) => level), ['warn']);
 });
 
-test('a delivery failure propagates marked with the delivery stage', async () => {
+test('a delivery failure is rethrown as a new error with the delivery stage, persona and trigger', async () => {
   const boom = new Error('unknown message');
   const { responder } = setup({ failDeliver: boom });
-  await assert.rejects(responder.respond(REQUEST), (error) => error === boom && error.stage === DELIVERY_STAGE);
+  await assert.rejects(responder.respond(REQUEST), (error) => (
+    error !== boom && error.cause === boom && error.stage === DELIVERY_STAGE
+    && error.persona === 'bob' && error.trigger === 'auto'
+  ));
+  assert.equal(boom.stage, undefined);
   assert.equal(DELIVERY_STAGE, 'delivery');
 });
 

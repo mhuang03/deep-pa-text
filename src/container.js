@@ -1,5 +1,4 @@
 // The only place services are wired together.
-import { createLogger } from './logger.js';
 import { createConfigError } from './config/errors.js';
 import { buildUserDirectory } from './userData/loadData.js';
 import { createMessageFilter } from './corpus/messageFilter.js';
@@ -76,7 +75,7 @@ const buildGifEngines = ({ config, vendor }) => {
   ].filter(Boolean);
 };
 
-export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logger = createLogger() }) => {
+export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logger }) => {
   const engines = buildGifEngines({ config, vendor });
   return createGifResolver({ engines, config, random: clock.random, logger, clock });
 };
@@ -205,7 +204,7 @@ const buildStartupTasks = ({ core, activity, replyPolicy, catchUp, clock }) => (
 });
 
 export const buildContainer = ({
-  config, vendor, data, clock = defaultClock(), logger = createLogger(), cacheMessages = true, client: given = null,
+  config, vendor, data, clock = defaultClock(), logger, cacheMessages = true, client: given = null,
   exit = () => {}, closeDatabase = null,
 }) => {
   const core = buildCore({ config, vendor, data, clock, logger });

@@ -3,7 +3,7 @@ import { TRIGGERS } from '../triggers.js';
 import { DELIVERY_STAGE } from '../responder.js';
 import { createBotParentFinder } from '../botParent.js';
 import {
-  formatReceived, formatNoReply, formatNotReplyable, formatReply, formatChainDecision, joinLines,
+  formatReceived, formatNoReply, formatNotReplyable, formatReply, formatChainDecision, formatFailure, joinLines,
 } from '../logLines.js';
 
 export const createMessageCreateHandler = (deps) => {
@@ -108,7 +108,13 @@ export const createMessageCreateHandler = (deps) => {
       activity.noteHuman({ timestamp: message.createdTimestamp, author: record.author });
       await handleMessage(message, record);
     } catch (error) {
-      logger.error('Error processing message:', error);
+      logger.error(formatFailure({
+        what: 'Error processing message',
+        messageId: message.id,
+        trigger: error?.trigger,
+        persona: error?.persona,
+        stage: error?.stage,
+      }), error);
     }
   };
 };

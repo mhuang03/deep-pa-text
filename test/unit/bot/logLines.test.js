@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReceived, formatNoReply, formatNotReplyable, formatReply, formatRevive,
-  formatCommandRequest, formatChainDecision, joinLines,
+  formatCommandRequest, formatChainDecision, formatFailure, joinLines,
 } from '../../../src/bot/logLines.js';
 
 const logging = { locale: 'en-US', timeZone: 'America/Chicago' };
@@ -47,4 +47,19 @@ test('formats chain decisions with persona, bot turns and reason', () => {
     formatChainDecision({ persona: 'bob', botTurns: 1, decision: { reply: true, reason: 'chain-guaranteed' } }),
     '    [CHAIN: bob, 1 bot turns, chain-guaranteed]',
   );
+});
+
+test('formatFailure names the work, message, trigger, persona and stage', () => {
+  assert.equal(
+    formatFailure({ what: 'Error processing message', messageId: '123', trigger: 'auto', persona: 'bob', stage: 'delivery' }),
+    'Error processing message 123 (auto reply as bob, stage delivery):',
+  );
+});
+
+test('formatFailure leaves out what is unknown', () => {
+  assert.equal(formatFailure({ what: 'Error in revive interval' }), 'Error in revive interval:');
+  assert.equal(formatFailure({ what: 'Error', trigger: 'revive', persona: 'bob' }), 'Error (revive as bob):');
+  assert.equal(formatFailure({ what: 'Error', messageId: '9', stage: 'generation' }), 'Error 9 (stage generation):');
+  assert.equal(formatFailure({ what: 'Error', persona: 'bob' }), 'Error (as bob):');
+  assert.equal(formatFailure({ what: 'Error', trigger: 'chain' }), 'Error (chain reply):');
 });

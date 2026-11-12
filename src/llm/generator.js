@@ -13,7 +13,9 @@ export const createGenerator = ({
     const request = turns ? { system, user, turns } : { system, user };
     for (let attempt = 0; ; attempt += 1) {
       try {
-        return postProcess(await chatClient.complete(request), { burst: config.burst });
+        return postProcess(await chatClient.complete(request), {
+          burst: config.burst, maxGifsPerMessage: config.gifs.maxPerMessage,
+        });
       } catch (error) {
         if (!error.isEmptyOutput || attempt >= config.llm.postProcessRetries) throw error;
         logger?.warn?.('Model output was empty after cleaning; requesting a new completion');

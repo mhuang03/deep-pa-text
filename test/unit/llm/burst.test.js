@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitBurst, burstDelay } from '../../../src/llm/burst.js';
+import { splitBurst, capParts, burstDelay } from '../../../src/llm/burst.js';
 
 const ON = { maxMessages: 3, enabled: true };
 
@@ -12,14 +12,15 @@ test('without a marker the trimmed text is the only part', () => {
   assert.deepEqual(splitBurst('  hello  ', ON), ['hello']);
 });
 
-test('drops empty parts', () => {
-  assert.deepEqual(splitBurst('<split>one<split> <split>two<split>', ON), ['one', 'two']);
-  assert.deepEqual(splitBurst('<split>', ON), []);
+test('keeps empty parts and never merges overflow: the caller cleans then caps', () => {
+  assert.deepEqual(splitBurst('a<split>b<split>c<split>d<split>e', ON), ['a', 'b', 'c', 'd', 'e']);
+  assert.deepEqual(splitBurst('<split>one<split>', ON), ['', 'one', '']);
 });
 
 test('extra parts are joined onto the last allowed part with newlines', () => {
-  assert.deepEqual(splitBurst('a<split>b<split>c<split>d<split>e', ON), ['a', 'b', 'c\nd\ne']);
-  assert.deepEqual(splitBurst('a<split>b', { maxMessages: 1, enabled: true }), ['a\nb']);
+  assert.deepEqual(capParts(['a', 'b', 'c', 'd', 'e'], 3), ['a', 'b', 'c\nd\ne']);
+  assert.deepEqual(capParts(['a', 'b'], 1), ['a\nb']);
+  assert.deepEqual(capParts(['a', 'b'], 3), ['a', 'b']);
 });
 
 test('a disabled burst is one part with every marker replaced by a newline', () => {

@@ -1,11 +1,25 @@
-const MAX_UNWRAPS = 3;
 const MIN_WRAPPED_LENGTH = 2;
 const QUOTE_PAIRS = { '"': '"', "'": "'", '“': '”' };
 const STRAY_ESCAPES = [[/\\n/g, '\n'], [/\\"/g, '"'], [/\\t/g, '\t']];
-const SURROGATE_RANGE = { high: [0xD800, 0xDBFF], low: [0xDC00, 0xDFFF] };
 
-const isWrapped = (text) =>
-  text.length >= MIN_WRAPPED_LENGTH && QUOTE_PAIRS[text[0]] === text.at(-1);
+// A quote is escaped when an odd number of backslashes precede it.
+const hasUnescapedQuote = (inner, quotes) => {
+  let backslashes = 0;
+  for (const char of inner) {
+    if (char === '\\') backslashes += 1;
+    else {
+      if (quotes.includes(char) && backslashes % 2 === 0) return true;
+      backslashes = 0;
+    }
+  }
+  return false;
+};
+
+// Only a single quoted unit is unwrapped: `"yes" or "no"` is two units and stays as written.
+const isWrapped = (text) => {
+  if (text.length < MIN_WRAPPED_LENGTH || QUOTE_PAIRS[text[0]] !== text.at(-1)) return false;
+  return !hasUnescapedQuote(text.slice(1, -1), [text[0], text.at(-1)]);
+};
 
 const parseJsonString = (text) => {
   try {
@@ -21,37 +35,24 @@ const unwrapOnce = (text) => {
   return (parsed ?? text.slice(1, -1)).trim();
 };
 
-const unwrapQuotes = (text) => {
+// Each unwrap shortens the text, so the loop ends.
+export const unwrapQuotes = (text) => {
   let current = text;
-  for (let i = 0; i < MAX_UNWRAPS && isWrapped(current); i += 1) current = unwrapOnce(current);
+  while (isWrapped(current)) current = unwrapOnce(current);
   return current;
 };
 
 const replaceStrayEscapes = (text) =>
   STRAY_ESCAPES.reduce((acc, [pattern, replacement]) => acc.replace(pattern, replacement), text);
 
-export const sanitizeResponse = (text) =>
-  replaceStrayEscapes(unwrapQuotes(text.trim())).trim();
+const clean = (text) => replaceStrayEscapes(unwrapQuotes(text.trim())).trim();
 
-const isInRange = (code, [low, high]) => code >= low && code <= high;
-
-const splitsSurrogatePair = (text, cut) =>
-  isInRange(text.charCodeAt(cut - 1), SURROGATE_RANGE.high)
-  && isInRange(text.charCodeAt(cut), SURROGATE_RANGE.low);
-
-const findWhitespaceCut = (cutText, lookback) => {
-  const from = Math.max(0, cutText.length - lookback);
-  for (let i = cutText.length - 1; i >= from; i -= 1) {
-    if (/\s/.test(cutText[i])) return i;
+// Repeats until nothing changes (every change shortens the text), so the result is a fixed point.
+export const sanitizeResponse = (text) => {
+  let current = text.trim();
+  for (;;) {
+    const next = clean(current);
+    if (next === current) return current;
+    current = next;
   }
-  return -1;
-};
-
-export const truncateForDiscord = (content, { maxLength, lookback }) => {
-  if (content.length <= maxLength) return content;
-  const cut = splitsSurrogatePair(content, maxLength) ? maxLength - 1 : maxLength;
-  const cutText = content.slice(0, cut);
-  const space = findWhitespaceCut(cutText, lookback);
-  const result = space >= 0 && cutText.slice(0, space).trim() !== '' ? cutText.slice(0, space) : cutText;
-  return result.trimEnd();
 };

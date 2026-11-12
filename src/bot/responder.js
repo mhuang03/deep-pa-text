@@ -1,15 +1,18 @@
 import { startTyping } from '../discord/typing.js';
 import { burstDelay } from '../llm/burst.js';
 import { TRIGGERS } from './triggers.js';
+import { formatFailure } from './logLines.js';
 
 export const DELIVERY_STAGE = 'delivery';
+export const GENERATION_STAGE = 'generation';
 
 const NO_TYPING = Object.freeze({ pulse: () => {}, stop: () => {} });
 
-// Lets handlers tell a send failure (arm the rate limit) from a generation failure.
-const markDelivery = (error) => {
-  const marked = error instanceof Error ? error : new Error(String(error), { cause: error });
-  return Object.assign(marked, { stage: DELIVERY_STAGE });
+// Lets handlers tell a send failure (arm the rate limit) from a generation failure, and say whose work failed.
+// The caught error is wrapped, never mutated.
+const tagFailure = (error, { stage, persona, trigger }) => {
+  const message = error instanceof Error ? error.message : String(error);
+  return Object.assign(new Error(message, { cause: error }), { stage, persona, trigger });
 };
 
 export const createResponder = ({
@@ -41,14 +44,24 @@ export const createResponder = ({
     try {
       return await contextBuilder.forRevive({ channel, nowMs: now() });
     } catch (error) {
-      logger.warn('Could not build revive context:', error);
-      return undefined;
+      logger.warn('Could not build revive context; continuing without it:', error);
+      return {};
     }
   };
 
-  const contextFor = ({ channel, target, chain }) => {
-    if (chain) return { chain };
-    return target === null ? reviveContext(channel) : contextBuilder.forReply({ channel, target });
+  // A failed transcript degrades to none, like a failed history fetch: the reply is still sent.
+  const replyContext = async ({ channel, target }) => {
+    try {
+      return await contextBuilder.forReply({ channel, target });
+    } catch (error) {
+      logger.warn(`Could not build the transcript for ${target.id}; continuing without it:`, error);
+      return { transcript: [] };
+    }
+  };
+
+  const contextFor = (request) => {
+    if (request.chain) return { chain: request.chain };
+    return request.target === null ? reviveContext(request.channel) : replyContext(request);
   };
 
   // The interaction shows its own placeholder, so the command trigger does not type.
@@ -61,19 +74,20 @@ export const createResponder = ({
   const laterVia = ({ trigger, via, channel }) =>
     (trigger === TRIGGERS.COMMAND ? { type: 'followUp', interaction: via.interaction } : { type: 'channel', channel });
 
-  const send = async ({ via, persona, guild, channel, part }) => {
+  const send = async ({ via, request, part }) => {
+    const { persona, guild, channel, trigger } = request;
     try {
       return await delivery.deliver({
         via, persona, guild, channel, content: part.content, gifLinks: part.gifLinks,
       });
     } catch (error) {
-      throw markDelivery(error);
+      throw tagFailure(error, { stage: DELIVERY_STAGE, persona, trigger });
     }
   };
 
   const deliverPart = async (request, via, part) => {
-    const { persona, guild, channel, target, trigger } = request;
-    const message = await send({ via, persona, guild, channel, part });
+    const { persona, target, trigger } = request;
+    const message = await send({ via, request, part });
     record({ message, text: part.text, persona, target, trigger });
     return message;
   };
@@ -90,7 +104,12 @@ export const createResponder = ({
     try {
       for (const part of parts) messages.push(await deliverLater(request, part, typing));
     } catch (error) {
-      logger.error(`Could not deliver a later part of the burst (${request.trigger}):`, error);
+      logger.error(formatFailure({
+        what: 'Could not deliver a later part of the burst',
+        trigger: request.trigger,
+        persona: request.persona,
+        stage: DELIVERY_STAGE,
+      }), error);
     }
     return messages;
   };
@@ -102,13 +121,19 @@ export const createResponder = ({
     return [message, ...await deliverRest(request, rest, typing)];
   };
 
+  const generate = async (request) => {
+    try {
+      const context = await contextFor(request);
+      return await composer.compose({ persona: request.persona, target: request.target, context });
+    } catch (error) {
+      throw tagFailure(error, { stage: GENERATION_STAGE, persona: request.persona, trigger: request.trigger });
+    }
+  };
+
   const respond = async (request) => {
     const typing = beginTyping(request);
     try {
-      const context = await contextFor(request);
-      const { response, parts } = await composer.compose({
-        persona: request.persona, target: request.target, context,
-      });
+      const { response, parts } = await generate(request);
       const messages = await deliverAll(request, parts, typing);
       return { response, messages };
     } finally {

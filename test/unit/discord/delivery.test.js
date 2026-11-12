@@ -114,3 +114,12 @@ test('deferOptions is public: no ephemeral flag', () => {
   const { delivery } = setup();
   assert.deepEqual(delivery.deferOptions(), {});
 });
+
+const MANY_GIFS = Array.from({ length: 12 }, (_, i) => ({ match: `m${i}`, url: `https://x/${i}.gif` }));
+
+test('a delivery never carries more embeds than discord.maxEmbeds: nine images plus the author embed', async () => {
+  const { delivery, sent, send } = setup();
+  await delivery.deliver({ ...request({ type: 'channel', channel: { send } }), gifLinks: MANY_GIFS });
+  assert.equal(sent[0].embeds.length, 10);
+  assert.equal(sent[0].embeds.at(-1), AUTHOR);
+});

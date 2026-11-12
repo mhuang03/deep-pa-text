@@ -7,6 +7,7 @@ import { loadData } from '../src/userData/loadData.js';
 import { buildContainer, defaultClock } from '../src/container.js';
 import { createVendor } from '../src/vendor.js';
 import { createLogger } from '../src/logger.js';
+import { secretsOf } from '../src/config/secrets.js';
 import { openDatabase } from '../src/storage/database.js';
 import { createMetaStore } from '../src/storage/metaStore.js';
 import { createDiscordClient } from '../src/discord/client.js';
@@ -29,12 +30,7 @@ const parseOrExit = () => {
   }
 };
 
-const main = async (options) => {
-  console.log(`${WARNING}\n`);
-  loadEnvIfPresent();
-  const config = loadConfig(process.env);
-  assertRequired(config, process.env, 'reimport');
-  const logger = createLogger();
+const run = async (options, config, logger) => {
   const reimporter = createReimporter({
     config,
     vendor: createVendor(),
@@ -52,10 +48,28 @@ const main = async (options) => {
   formatReport(await reimporter.run(options)).forEach((line) => console.log(line));
 };
 
+const reportFailure = (error, logger) => {
+  logger.error(isConfigError(error) ? error.message : `Re-import failed: ${error.message}`);
+  process.exitCode = 1;
+};
+
+const main = async (options) => {
+  console.log(`${WARNING}\n`);
+  loadEnvIfPresent();
+  const config = loadConfig(process.env);
+  assertRequired(config, process.env, 'reimport');
+  const logger = createLogger(console, { secrets: secretsOf(config) });
+  try {
+    await run(options, config, logger);
+  } catch (error) {
+    reportFailure(error, logger);
+  }
+};
+
 const options = parseOrExit();
 try {
   await main(options);
 } catch (error) {
-  console.error(isConfigError(error) ? error.message : `Re-import failed: ${error.message}`);
-  process.exitCode = 1;
+  // Nothing is configured yet, so there is no secret to redact.
+  reportFailure(error, createLogger(console));
 }

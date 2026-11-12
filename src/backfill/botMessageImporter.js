@@ -1,8 +1,7 @@
 import { readPersonaFromEmbeds } from '../discord/botPersona.js';
 import { REPLY_LINK_PREFIX } from '../discord/webhookDelivery.js';
 import { TRIGGERS } from '../bot/triggers.js';
-
-const cutToCodePoints = (text, max) => Array.from(text).slice(0, max).join('');
+import { truncateCodePoints } from '../util/text.js';
 
 // Webhook delivery puts a link to the replied-to message on the first line.
 export const splitReplyLink = (message) => {
@@ -19,7 +18,7 @@ export const createBotMessageImporter = ({ botMessageStore, profileStore, userDi
   const { webhookUsernameMax } = config.discord;
 
   const namesOfUser = ({ username }) =>
-    [username, ...profileStore.namesOf(username)].map((name) => cutToCodePoints(name, webhookUsernameMax));
+    [username, ...profileStore.namesOf(username)].map((name) => truncateCodePoints(name, webhookUsernameMax));
 
   // Display names are not unique, so an ambiguous name is never guessed.
   const personaFromWebhookName = (message) => {

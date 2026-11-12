@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyGifResults, findGifTokens } from '../../../src/gifs/gifTokens.js';
+import { applyGifResults, findGifTokens, limitGifTokens } from '../../../src/gifs/gifTokens.js';
 
 test('findGifTokens returns nothing when there is no token', () => {
   assert.deepEqual(findGifTokens('no gifs here', 50), []);
@@ -61,4 +61,20 @@ test('applyGifResults inserts replacement text literally', () => {
 test('applyGifResults returns the text when a match is absent or there are no links', () => {
   assert.equal(applyGifResults('text', []), 'text');
   assert.equal(applyGifResults('text', [{ match: '<gif! z>', url: 'u' }]), 'text');
+});
+
+test('findGifTokens cuts the query by code points, never inside an emoji', () => {
+  const [token] = findGifTokens(`<gif! ${'x'.repeat(49)}\u{1F600}\u{1F600}>`, 50);
+  assert.equal(token.query, `${'x'.repeat(49)}\u{1F600}`);
+});
+
+test('limitGifTokens keeps the first max tokens and removes the rest without a placeholder', () => {
+  const text = 'a <gif! 1> b <gif! 2> c <gif! 3> d <gif! 4> e <gif! 5>';
+  assert.equal(limitGifTokens(text, 2), 'a <gif! 1> b <gif! 2> c  d  e ');
+});
+
+test('limitGifTokens leaves text with fewer tokens alone and removes all at max 0', () => {
+  assert.equal(limitGifTokens('x <gif! a>', 2), 'x <gif! a>');
+  assert.equal(limitGifTokens('no tokens', 2), 'no tokens');
+  assert.equal(limitGifTokens('x <gif! a>', 0), 'x ');
 });

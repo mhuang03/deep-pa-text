@@ -206,3 +206,10 @@ test('deferOptions makes the acknowledgement ephemeral', () => {
   const { delivery } = setup();
   assert.deepEqual(delivery.deferOptions(), { flags: MessageFlags.Ephemeral });
 });
+
+test('a webhook message carries at most discord.maxEmbeds image embeds', async () => {
+  const { delivery, events } = setup();
+  const gifLinks = Array.from({ length: 12 }, (_, i) => ({ match: `m${i}`, url: `https://x/${i}.gif` }));
+  await delivery.deliver(request({ type: 'channel', channel: CHANNEL }, { gifLinks }));
+  assert.equal(sentPayload(events).embeds.length, 10);
+});
