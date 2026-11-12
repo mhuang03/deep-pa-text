@@ -59,9 +59,9 @@ After the channel/bot check and `activity.noteHuman`:
 2. If `parent`: `chainTarget = messageFilter.filterForChain(record)`; `chain = chainTarget && chainBuilder.build(chainTarget, parent)`.
 3. If `chain`:
    - `decision = chainPolicy.decide(chain)`; not `reply` → log the reason and **return** (the message does not fall through to the random policy; a different persona butting into the thread would be wrong);
-   - `chainPolicy.begin()`; `activity.noteBot()`; `await responder.respond({ trigger: TRIGGERS.CHAIN, persona: chain.persona, target: chainTarget, chain, channel, guild, via: { type: 'reply', message } })`; `chainPolicy.end()` in a `finally`;
-   - on success `replyPolicy.noteReply({ resetMisses: false })` and `activity.noteBot()`; failure handling as for auto replies (spec 12).
-   The global rate limit and probability do not apply to chain replies.
+   - `chainPolicy.begin()`; `await responder.respond({ trigger: TRIGGERS.CHAIN, persona: chain.persona, target: chainTarget, chain, channel, guild, via: { type: 'reply', message } })`; `chainPolicy.end()` in a `finally`;
+   - on success `replyPolicy.noteReply({ resetMisses: false })`; failure handling as for auto replies (spec 12).
+   The global rate limit and probability do not apply to chain replies, and a chain reply never touches the activity tracker (see "Revive blocking" below).
 4. Otherwise (no parent, unknown persona, or empty chain target) continue with the existing flow (`filterAnyAuthor`, `replyPolicy.decide`, `pickReplier`).
 
 The log line for a chain decision states the persona, `botTurns`, and the reason.
@@ -82,6 +82,16 @@ The log line for a chain decision states the persona, `botTurns`, and the reason
 - consecutive messages with the same role are merged, joined by a blank line (so the preamble merges with a leading user turn, and the list always starts system, user and ends with a user message).
 
 `chatClient.complete({ system, user, turns = [] })` sends `buildChatMessages(...)`; with no turns the request is unchanged.
+
+### Revive blocking (maintainer decision)
+
+The rule "the bot spoke last, so no revive until a human speaks" stays, together with the 10:00–22:59 daytime window, but it applies only to **naturally spawned** bot messages: auto replies and revives. Chain replies and command replies are responses someone asked for; they must not delay or block a revive.
+
+- Only the auto-reply path of `messageCreate` and `reviveTick` call `activity.noteBot()`.
+- The chain branch does not call it (above).
+- The reply-command handler stops calling `activity.noteBot()`; it no longer needs the `activity` dependency. It still calls `replyPolicy.noteReply({ resetMisses: false })`.
+
+Idle time for a revive therefore keeps running from the last human message, whatever chain or command replies came after it.
 
 ### Reply command
 
@@ -112,6 +122,9 @@ Anyone can keep a thread going up to the cap, and the first three replies are gu
 - A 20-message alternating thread: `botTurns` is 10 (counted over the whole walk) → `chain-limit`; the prompt would have held only the last 12 turns.
 - A second reply to the bot while a chain reply is being generated → `chain-busy`, no LLM call.
 - Chain reply updates the reply time (an unrelated message 1 minute later is rate-limited) but not the miss counter.
+- Revive after a chain: `ready()`; a human replies to a bot message at T and gets a chain reply; with no further human message, a revive fires at the first check after T + 3 h (daytime).
+- Revive after a command reply: `ready()`, human message at T, command reply, then a revive fires at the first check after T + 3 h.
+- An auto reply still blocks revives until the next human message (unchanged).
 - Parent only resolvable through the embed fallback → chain of two turns; one `fetchReference` call. A reply to a human message that is in `messages` → no `fetchReference` call.
 - Short incoming message: the embedded query text is the previous turns' text plus the message, with the message appearing once.
 - `CHAIN_REPLIES=false` → no chain replies; the corpus rule for replies to bot messages still applies.
@@ -122,12 +135,12 @@ Anyone can keep a thread going up to the cap, and the first three replies are gu
 
 - Unit: `chainBuilder` (each walk rule, context cap vs whole-walk count, incoming turn always last, fallback parent, unknown persona, skipped empty turns, cycle guard); `chainPolicy` (table of `botTurns` 0–8 with rolls, busy state); `filterForChain`; `buildChatMessages` (merging, role mapping, leading assistant, ends with user); `chatClient` with turns; generator chain branch (sections, query text); ingest `repliesToBot`; `getRaw`; modal default option; handler branches.
 - Scenario (`test/scenarios/chains.test.js`): every edge case above, asserting the LLM request `messages` array and the persona on the reply embed.
-- Existing tests: none should change; the flow is untouched for messages that are not replies to bot messages. If one fails, the implementation is wrong.
+- Existing tests: the characterization test that pins "a command reply counts as bot activity for revive" is inverted (a revive now fires), and the reply-command unit tests drop the `activity` expectations. Nothing else changes; the flow is untouched for messages that are not replies to bot messages.
 
 ## Docs
 
-README triggers table: add the chain trigger and `CHAIN_REPLIES`.
+README triggers table: add the chain trigger and `CHAIN_REPLIES`; state in the revive row that only auto replies and revives count as the bot speaking last.
 
 ## Acceptance
 
-`npm test` passes with no change to existing test assertions.
+`npm test` passes; the only existing assertions that change are the command-reply activity ones named above.

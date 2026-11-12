@@ -62,6 +62,6 @@ Each line is a wave; specs on one line touch disjoint areas and may be implement
 
 Most later specs extend the same pipeline (responder, generator, prompts, message store), so they are implemented one at a time.
 
-## Suggestions deliberately not specified
+## Maintainer decisions
 
-- **Revive after a bot reply.** Since the 10 AM–10 PM change, a bot reply as the last message blocks revives until a human speaks. Whether that is intended is a product decision for the maintainer, so no spec changes it.
+- **Revive blocking.** A bot message as the last activity blocks revives until a human speaks, within the 10 AM–10 PM rules. This is intended, but only for naturally spawned messages (auto replies and revives). Chain replies and command replies do not count. Specified in spec 21.
