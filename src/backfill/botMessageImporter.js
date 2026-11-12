@@ -14,6 +14,8 @@ export const splitReplyLink = (message) => {
   return { text, reference: segment || null };
 };
 
+const UNATTRIBUTED_SAMPLE = 5;
+
 export const createBotMessageImporter = ({ botMessageStore, profileStore, userDirectory, config, logger }) => {
   const { webhookUsernameMax } = config.discord;
 
@@ -44,8 +46,16 @@ export const createBotMessageImporter = ({ botMessageStore, profileStore, userDi
     };
   };
 
+  // One line for the whole run: a large history can hold thousands of these.
+  const reportUnattributed = (ids) => {
+    if (ids.length === 0) return;
+    const sample = ids.slice(0, UNATTRIBUTED_SAMPLE).join(', ');
+    logger.info(`${ids.length} bot messages have no attributable persona and were skipped; first ids: ${sample}.`);
+  };
+
   const run = (ownBot, { lookup = () => null, dryRun = false } = {}) => {
     const counts = { imported: 0, alreadyStored: 0, unattributed: 0, skippedEmpty: 0 };
+    const unattributedIds = [];
     ownBot.forEach((message) => {
       if (botMessageStore.getById(message.id)) {
         counts.alreadyStored += 1;
@@ -55,7 +65,7 @@ export const createBotMessageImporter = ({ botMessageStore, profileStore, userDi
       const persona = findPersona(message, known);
       if (!persona) {
         counts.unattributed += 1;
-        logger.info(`Bot message ${message.id} has no attributable persona; skipped.`);
+        unattributedIds.push(message.id);
         return;
       }
       const row = buildRow(message, known, persona);
@@ -66,6 +76,7 @@ export const createBotMessageImporter = ({ botMessageStore, profileStore, userDi
       if (!dryRun) botMessageStore.insert(row);
       counts.imported += 1;
     });
+    reportUnattributed(unattributedIds);
     return counts;
   };
 

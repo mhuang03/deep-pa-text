@@ -241,10 +241,46 @@ test('a starter after a deleted message becomes a starter when its neighbour dis
   assert.deepEqual(store.randomStarters({ author: 'b', minGapMs: HOUR, limit: 10 }), ['content 4']);
 });
 
-test('a reference to a message whose original was never in the corpus is not stored', () => {
+test('a message that entered the corpus through an edit gets an anchor row, so replies keep their reference', () => {
   const { db, store } = setup();
-  store.insertRaw(msg('1', 'a', 10));
-  store.applyEdit({ id: '1', content: 'now kept', editedAt: 20, filtered: msg('1', 'a', 10, { content: 'now kept' }) });
-  add(store, msg('2', 'b', 30, { reference: '1' }));
-  assert.equal(rows(db).find((r) => r.id === '2').reference, null);
+  store.insertRaw(msg('1', 'a', 10, { content: 'https://example.com' }));
+  const stored = store.applyEdit({
+    id: '1', content: 'finally got it working', editedAt: 20, filtered: msg('1', 'a', 10, { content: 'finally got it working' }),
+  });
+  assert.equal(stored.id, '1');
+  const [anchor] = rows(db);
+  assert.equal(anchor.id, '1');
+  assert.equal(anchor.source_id, null);
+  const reply = add(store, msg('2', 'b', 30, { reference: '1' }));
+  assert.equal(reply.reference, '1');
+  assert.equal(rows(db).find((r) => r.id === '2').reference, '1');
+  edit(store, '1', 'second edit', 40, msg('1', 'a', 10));
+  const all = rows(db);
+  assert.equal(all.find((r) => r.id === '1:40').source_id, '1');
+  assert.equal(all.find((r) => r.id === '1').deleted_at, 40);
+});
+
+test('an edit keeps the reference of the previous corpus row and never infers one', () => {
+  const { db, store } = setup();
+  add(store, msg('1', 'a', 10));
+  add(store, msg('2', 'b', 20));
+  add(store, msg('3', 'a', 30, { reference: '1' }), { inferReference: false });
+  add(store, msg('4', 'b', 40), { inferReference: false });
+  edit(store, '3', 'changed', 50, msg('3', 'a', 30, { reference: '2' }));
+  edit(store, '4', 'changed', 60, msg('4', 'b', 40));
+  const byId = Object.fromEntries(rows(db).map((r) => [r.id, r]));
+  assert.equal(byId['3:50'].reference, '1');
+  assert.equal(byId['4:60'].reference, null);
+});
+
+test('an edit of a message that never had a corpus row keeps a resolvable explicit reference only', () => {
+  const { db, store } = setup();
+  add(store, msg('1', 'a', 10));
+  store.insertRaw(msg('2', 'b', 20));
+  edit(store, '2', 'kept now', 30, msg('2', 'b', 20, { reference: '1' }));
+  store.insertRaw(msg('3', 'b', 40));
+  edit(store, '3', 'kept too', 50, msg('3', 'b', 40, { reference: 'ghost' }));
+  const byId = Object.fromEntries(rows(db).map((r) => [r.id, r]));
+  assert.equal(byId['2'].reference, '1');
+  assert.equal(byId['3'].reference, null);
 });

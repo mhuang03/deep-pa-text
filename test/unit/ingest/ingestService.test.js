@@ -112,14 +112,8 @@ test('recordEdit applies the edit and upserts the new corpus row', async () => {
   const { ingest, calls, filtered } = setupEdit();
   assert.deepEqual(await ingest.recordEdit(edited), { changed: true, vectorFailed: false });
   assert.deepEqual(calls.map((c) => c[0]), ['getRaw', 'filter', 'applyEdit', 'upsert']);
-  assert.deepEqual(calls[2][1], { id: '1', content: 'new', editedAt: 9, filtered, inferReference: true });
+  assert.deepEqual(calls[2][1], { id: '1', content: 'new', editedAt: 9, filtered });
   assert.deepEqual(calls[3][1], [{ id: '1:9' }]);
-});
-
-test('recordEdit passes inferReference false for replies to the bot', async () => {
-  const { ingest, calls } = setupEdit();
-  await ingest.recordEdit(edited, { repliesToBot: true });
-  assert.equal(calls.find((c) => c[0] === 'applyEdit')[1].inferReference, false);
 });
 
 test('recordEdit of an unknown message records it as new', async () => {

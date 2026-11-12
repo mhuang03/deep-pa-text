@@ -79,3 +79,15 @@ test('a channel without webhook support rejects', async () => {
   await assert.rejects(provider.forChannel(thread), { message: 'channel does not support webhooks' });
   await assert.rejects(provider.ownedIds(thread), { message: 'channel does not support webhooks' });
 });
+
+test('without a bot user id forChannel and ownedIds reject and nothing is created or cached', async () => {
+  const { state } = createFakeDiscord();
+  let botUserId;
+  const provider = createWebhookProvider({ getBotUserId: () => botUserId, config: loadConfig({}) });
+  await assert.rejects(provider.forChannel(state.channel), { message: 'bot user id is not known yet' });
+  await assert.rejects(provider.ownedIds(state.channel), { message: 'bot user id is not known yet' });
+  assert.equal((await state.channel.fetchWebhooks()).size, 0);
+  botUserId = 'bot-user';
+  const webhook = await provider.forChannel(state.channel);
+  assert.equal(webhook.name, 'deep-pa-text');
+});

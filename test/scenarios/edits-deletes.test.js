@@ -203,3 +203,35 @@ test('a deleted bot message leaves the avoid-repeats list and a reply to it star
   await world.emitMessage({ author: 'alice', content: 'replying to a removed one', reference: row.id });
   assert.equal(world.sqlite.all("SELECT id FROM bot_messages WHERE trigger = 'chain'").length, 0);
 });
+
+const replyRows = (world) => [...world.chroma.collection('message_reply_embeddings').rows.keys()];
+
+test('a message dropped by the filter and kept through an edit gets an anchor row that replies can reference', async (t) => {
+  const world = await newWorld(t);
+  const link = await world.emitMessage({ author: 'alice', content: 'https://example.com', timestamp: T0 });
+  assert.deepEqual(filtered(world), []);
+  await world.emitEdit(link, { content: 'finally got it working', editedTimestamp: T0 + 1000 });
+  const [anchor] = filtered(world);
+  assert.deepEqual([anchor.id, anchor.source_id, anchor.deleted_at], [link.id, null, null]);
+  await world.emitMessage({ author: 'bob', content: 'nice one that is great', timestamp: T0 + 2000, reference: link.id });
+  const reply = world.sqlite.get('SELECT reference FROM filtered_messages WHERE content = ?', 'nice one that is great');
+  assert.equal(reply.reference, link.id);
+  assert.ok(replyRows(world).length > 0, 'the reply row exists');
+  await world.emitEdit(link, { content: 'finally got it working, really', editedTimestamp: T0 + 3000 });
+  const rows = filtered(world).filter((r) => r.content.startsWith('finally'));
+  assert.deepEqual(rows.map((r) => [r.id, r.source_id, r.deleted_at === null]), [
+    [link.id, null, false], [`${link.id}:${T0 + 3000}`, link.id, true],
+  ]);
+});
+
+test('an edit keeps the reference of the message, including none for a reply to a bot message', async (t) => {
+  const world = await newWorld(t);
+  const first = await world.emitMessage({ author: 'alice', content: 'does anyone want lunch today', timestamp: T0 });
+  const reply = await world.emitMessage({
+    author: 'bob', content: 'sure where should we go', timestamp: T0 + 1000, reference: first.id,
+  });
+  await world.emitMessage({ author: 'carol', content: 'something else entirely now', timestamp: T0 + 2000 });
+  await world.emitEdit(reply, { content: 'sure where do we go', editedTimestamp: T0 + 3000 });
+  const edited = world.sqlite.get('SELECT reference FROM filtered_messages WHERE content = ?', 'sure where do we go');
+  assert.equal(edited.reference, first.id);
+});

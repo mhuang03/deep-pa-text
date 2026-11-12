@@ -58,16 +58,17 @@ export const createIngestService = ({
   };
 
   // Discord also emits updates for link previews and pins, so unchanged content is not an edit.
-  const recordEdit = async (record, { repliesToBot = false, tolerateVectorErrors = false } = {}) => {
+  // An edit never infers a reference (see messageStore.applyEdit), so it needs no bot-parent lookup.
+  const recordEdit = async (record, { tolerateVectorErrors = false } = {}) => {
     const { editedAt, ...message } = record;
     const raw = messageStore.getRaw(message.id);
     if (!raw) {
-      const { vectorFailed } = await recordMessage(message, { repliesToBot, tolerateVectorErrors });
+      const { vectorFailed } = await recordMessage(message, { repliesToBot: true, tolerateVectorErrors });
       return { changed: true, vectorFailed };
     }
     if (raw.deleted || message.content === raw.content) return { changed: false, vectorFailed: false };
     const stored = messageStore.applyEdit({
-      id: message.id, content: message.content, editedAt, ...prepare(message, repliesToBot),
+      id: message.id, content: message.content, editedAt, filtered: messageFilter.filter(message),
     });
     const vectorFailed = await writeVectorsTolerant(stored ? [stored] : [], tolerateVectorErrors);
     return { changed: true, vectorFailed };

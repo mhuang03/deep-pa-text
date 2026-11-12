@@ -23,7 +23,7 @@ const seedOld = (file) => {
   db.close();
 };
 
-const setup = (t, { status = { state: 'ready', reason: null }, historyError = null } = {}) => {
+const setup = (t, { status = { state: 'ready', reason: null }, historyError = null, verifyError = null } = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dpt-reimport-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const databasePath = path.join(dir, 'messages.db');
@@ -64,6 +64,7 @@ const setup = (t, { status = { state: 'ready', reason: null }, historyError = nu
     prepare: (db, options) => { events.push('prepare'); calls.prepare = options; },
     backup: () => events.push('backup'),
     swap: () => events.push('swap'),
+    verifyBackup: () => { events.push('verify'); if (verifyError) throw verifyError; },
   };
   const reimporter = createReimporter({
     config: { ...config, storage: { ...config.storage, databasePath } },
@@ -173,11 +174,23 @@ test('resume requires an interrupted state and refuses ready', async (t) => {
 test('resuming before the swap only swaps; resuming in progress switches nothing', async (t) => {
   const swap = setup(t, { status: { state: 'interrupted-before-swap', reason: null } });
   await swap.reimporter.run({ yes: true, resume: true });
-  assert.deepEqual(swap.events.slice(0, 3), ['inspect', 'swap', 'build']);
+  // Spec 32: the backup is verified right after inspect and again immediately before the swap.
+  assert.deepEqual(swap.events.slice(0, 5), ['inspect', 'verify', 'verify', 'swap', 'build']);
   const progress = setup(t, { status: { state: 'in-progress', reason: null } });
   const report = await progress.reimporter.run({ yes: true, resume: true });
   assert.deepEqual(progress.events.slice(0, 2), ['inspect', 'build']);
   assert.equal(report.state, 'in-progress');
+});
+
+test('resuming before the swap refuses an unverifiable backup and swaps nothing', async (t) => {
+  const verifyError = new Error('The backup messages.db.old is not identical to messages.db (it may be truncated); it was not trusted.');
+  const swap = setup(t, { status: { state: 'interrupted-before-swap', reason: null }, verifyError });
+  await assert.rejects(
+    swap.reimporter.run({ yes: true, resume: true }),
+    /not trusted\. The original database is intact\. Move .*messages\.db\.old away and run again without --resume/,
+  );
+  assert.deepEqual(swap.events, ['inspect', 'verify']);
+  assert.equal(swap.discord.state.client, null, 'never connected to Discord');
 });
 
 test('a failing sync leaves the run incomplete', async (t) => {

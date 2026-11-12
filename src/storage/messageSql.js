@@ -43,6 +43,10 @@ export const ANCHORED_VISIBLE = `
   )
 `;
 export const ROW_EXISTS = 'SELECT 1 AS found FROM filtered_messages WHERE id = ?';
+// The newest corpus row of a logical message, visible or hidden; its reference is what an edit keeps.
+export const NEWEST_CORPUS_ROW = `
+  SELECT reference FROM filtered_messages WHERE id = ? OR source_id = ? ORDER BY rowid DESC LIMIT 1
+`;
 export const MARK_RAW_DELETED =
   'UPDATE messages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL';
 export const MARK_CORPUS_DELETED = `
@@ -55,16 +59,22 @@ export const RANDOM_MESSAGES = `
   ORDER BY RANDOM()
   LIMIT ?
 `;
-// The gap is measured on the raw table so messages the corpus filter dropped still count as activity;
-// deleted rows are excluded inside the window so they are not neighbours either.
+// The gap sequence covers visible raw and bot messages: messages the corpus filter dropped still count as
+// activity, and a human message right after a bot message is not a starter. It is computed once and joined
+// by logical id (no OR), so SQLite does not rescan it for every corpus row.
 export const RANDOM_STARTERS = `
+  WITH timeline AS (
+    SELECT id, timestamp FROM messages WHERE deleted_at IS NULL
+    UNION ALL
+    SELECT id, timestamp FROM bot_messages WHERE deleted_at IS NULL
+  ),
+  gaps AS (
+    SELECT id, timestamp - LAG(timestamp) OVER (ORDER BY timestamp, id) AS gap FROM timeline
+  )
   SELECT f.content
-  FROM (
-    SELECT id, timestamp - LAG(timestamp) OVER (ORDER BY timestamp, id) AS gap
-    FROM messages WHERE deleted_at IS NULL
-  ) g
-  JOIN filtered_messages f ON (f.id = g.id OR f.source_id = g.id) AND f.deleted_at IS NULL
-  WHERE f.author = ? AND (g.gap IS NULL OR g.gap > ?)
+  FROM filtered_messages f
+  JOIN gaps g ON g.id = COALESCE(f.source_id, f.id)
+  WHERE f.author = ? AND f.deleted_at IS NULL AND (g.gap IS NULL OR g.gap > ?)
   ORDER BY RANDOM() LIMIT ?
 `;
 // Measured on the raw table: the corpus filter drops the short messages bursts are made of.

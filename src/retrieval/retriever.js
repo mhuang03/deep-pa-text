@@ -52,9 +52,11 @@ export const createRetriever = ({ vectorStore, messageStore, config, logger }) =
   const dedupeRaw = async (raw) => {
     const ids = Array.from(new Set(BUCKET_ORDER.flatMap((key) => raw[key].map((c) => c.id))));
     const embeddings = await loadEmbeddings(ids);
-    const deduped = dedupeBuckets(BUCKET_ORDER.map((key) => withEmbeddings(raw[key], embeddings)), dedupeOptions);
     const limits = [retrieval.replyResults, retrieval.similarResults, retrieval.gifResults, retrieval.otherResults];
-    return Object.fromEntries(BUCKET_ORDER.map((key, i) => [key, deduped[i].slice(0, limits[i])]));
+    const deduped = dedupeBuckets(
+      BUCKET_ORDER.map((key) => withEmbeddings(raw[key], embeddings)), { ...dedupeOptions, limits },
+    );
+    return Object.fromEntries(BUCKET_ORDER.map((key, i) => [key, deduped[i]]));
   };
 
   const countAll = (author, kept, before) => {
@@ -87,8 +89,8 @@ export const createRetriever = ({ vectorStore, messageStore, config, logger }) =
       author, limit: fetchLimit(retrieval.reviveSamples),
     });
     const candidates = rows.map(({ id, content }) => ({ id, text: content, embedding: null }));
-    const [kept] = dedupeBuckets([candidates], dedupeOptions);
-    return kept.slice(0, retrieval.reviveSamples).map((item) => item.text);
+    const [kept] = dedupeBuckets([candidates], { ...dedupeOptions, limits: [retrieval.reviveSamples] });
+    return kept.map((item) => item.text);
   };
 
   return { retrieveForReply, retrieveForRevive };

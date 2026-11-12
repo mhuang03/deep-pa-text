@@ -80,7 +80,9 @@ test('an ambiguous or unknown webhook name is unattributed and skipped', () => {
   assert.equal(counts.unattributed, 2);
   assert.equal(counts.imported, 0);
   assert.equal(botMessageStore.getById('1'), null);
-  assert.equal(infos.length, 2);
+  // Spec 32: one summary line per run, not one per message.
+  assert.equal(infos.length, 1);
+  assert.match(infos[0][0], /^2 bot messages/);
 });
 
 test('a non-webhook message without a persona source is unattributed even if its name matches a user', () => {
@@ -116,4 +118,20 @@ test('a dry run counts without writing', () => {
 test('splitReplyLink leaves content without the prefix alone and uses the Discord reference', () => {
   assert.deepEqual(splitReplyLink({ content: 'plain', reference: { messageId: 'r' } }), { text: 'plain', reference: 'r' });
   assert.deepEqual(splitReplyLink({ content: 'plain', reference: null }), { text: 'plain', reference: null });
+});
+
+test('unattributed bot messages are reported in one line with the count and the first five ids', () => {
+  const { importer, infos } = setup();
+  const messages = Array.from({ length: 7 }, (_, i) => hookMessage(`u${i}`, 'nobody'));
+  assert.equal(importer.run(messages).unattributed, 7);
+  assert.equal(infos.length, 1);
+  assert.match(infos[0][0], /^7 bot messages/);
+  assert.match(infos[0][0], /u0, u1, u2, u3, u4\./);
+  assert.doesNotMatch(infos[0][0], /u5/);
+});
+
+test('nothing is logged when every bot message is attributed', () => {
+  const { importer, infos } = setup();
+  importer.run([embedMessage('1', 'alice')]);
+  assert.deepEqual(infos, []);
 });

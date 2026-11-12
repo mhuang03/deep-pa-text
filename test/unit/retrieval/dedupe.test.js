@@ -72,3 +72,21 @@ test('does not mutate its input', () => {
   assert.notEqual(out[0][0], input[0][0]);
   assert.equal(input[0][0].variants, undefined);
 });
+
+test('a bucket limit applies during the pass, so cut candidates do not suppress later buckets', () => {
+  const replies = [cand('1', 'one'), cand('2', 'two'), cand('3', 'shared text')];
+  const similar = [cand('4', 'Shared text!'), cand('5', 'other')];
+  const out = dedupeBuckets([replies, similar], { ...OPTIONS, limits: [2, 5] });
+  assert.deepEqual(texts(out), [['one', 'two'], ['Shared text!', 'other']]);
+});
+
+test('candidates skipped by a full bucket add no variants to kept items', () => {
+  const out = dedupeBuckets([[cand('1', 'lol'), cand('2', 'LOL')]], { ...OPTIONS, limits: [1] });
+  assert.deepEqual(out[0][0].variants, ['lol']);
+});
+
+test('without limits a bucket is unbounded, and a limit of zero keeps nothing', () => {
+  const many = Array.from({ length: 30 }, (_, i) => cand(`${i}`, `distinct ${i}`));
+  assert.equal(dedupeBuckets([many], OPTIONS)[0].length, 30);
+  assert.equal(dedupeBuckets([many], { ...OPTIONS, limits: [0] })[0].length, 0);
+});

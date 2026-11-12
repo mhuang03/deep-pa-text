@@ -26,6 +26,7 @@ export const createMessageStore = ({ db, config }) => {
   const newestRevisionSql = db.prepare(sql.NEWEST_REVISION);
   const anchoredSql = db.prepare(sql.ANCHORED_VISIBLE);
   const rowExistsSql = db.prepare(sql.ROW_EXISTS);
+  const newestRowSql = db.prepare(sql.NEWEST_CORPUS_ROW);
   const markRawSql = db.prepare(sql.MARK_RAW_DELETED);
   const markCorpusSql = db.prepare(sql.MARK_CORPUS_DELETED);
   const randomSql = db.prepare(sql.RANDOM_MESSAGES);
@@ -76,9 +77,8 @@ export const createMessageStore = ({ db, config }) => {
     }
   };
 
-  const insertCorpusRow = (record, { rowId, sourceId, shouldInfer }) => {
+  const insertCorpusRow = (record, { rowId, sourceId, reference }) => {
     const hasGif = record.content.includes(GIF_TOKEN);
-    const reference = resolveReference(record, shouldInfer);
     const { changes } = insertFilteredSql.run(
       rowId, record.author, record.content, record.timestamp, reference, hasGif ? 1 : 0, sourceId,
     );
@@ -89,7 +89,9 @@ export const createMessageStore = ({ db, config }) => {
 
   // Replies to bot messages pass inferReference: false so they are not linked to an unrelated human message.
   const insertFiltered = (record, { inferReference: shouldInfer = true } = {}) =>
-    insertCorpusRow(record, { rowId: record.id, sourceId: null, shouldInfer });
+    insertCorpusRow(record, {
+      rowId: record.id, sourceId: null, reference: resolveReference(record, shouldInfer),
+    });
 
   const markCorpus = (id, at) => Number(markCorpusSql.run(at, id, id).changes) > 0;
 
@@ -98,15 +100,29 @@ export const createMessageStore = ({ db, config }) => {
     return markCorpus(id, at) || raw;
   };
 
-  const applyInTransaction = ({ id, content, editedAt, filtered, inferReference: shouldInfer }) => {
-    if (Number(insertRevisionSql.run(id, content, editedAt).changes) === 0) return null;
-    markCorpus(id, editedAt);
-    if (!filtered) return null;
-    return insertCorpusRow(filtered, { rowId: `${id}:${editedAt}`, sourceId: id, shouldInfer });
+  // An edit never infers: it keeps the reference of the message's newest corpus row, or, when the message
+  // never had one, its explicit reference if that resolves. Read before the old rows are hidden.
+  const editReference = (id, filtered) => {
+    const previous = newestRowSql.get(id, id);
+    return previous ? previous.reference : resolveExplicit(filtered.reference);
   };
 
-  const applyEdit = ({ inferReference: shouldInfer = true, ...edit }) =>
-    transaction(() => applyInTransaction({ ...edit, inferReference: shouldInfer }));
+  // The first corpus row of a logical message takes its id (the anchor that references point at);
+  // later ones are <id>:<editedAt> with source_id set.
+  const editRowIds = (id, editedAt) => (rowExistsSql.get(id)
+    ? { rowId: `${id}:${editedAt}`, sourceId: id }
+    : { rowId: id, sourceId: null });
+
+  const applyInTransaction = ({ id, content, editedAt, filtered }) => {
+    if (Number(insertRevisionSql.run(id, content, editedAt).changes) === 0) return null;
+    const reference = filtered ? editReference(id, filtered) : null;
+    const ids = editRowIds(id, editedAt);
+    markCorpus(id, editedAt);
+    if (!filtered) return null;
+    return insertCorpusRow(filtered, { ...ids, reference });
+  };
+
+  const applyEdit = (edit) => transaction(() => applyInTransaction(edit));
 
   const pageFiltered = ({ after = null, limit }) => {
     const { timestamp, id } = after ?? NO_CURSOR;

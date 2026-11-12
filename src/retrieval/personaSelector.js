@@ -9,10 +9,10 @@ export const createPersonaSelector = ({ vectorStore, messageStore, users, random
       where: {
         $and: [{ author: { $ne: record.author } }, { timestamp: { $lt: record.timestamp } }],
       },
-      limit: config.retrieval.likelyRepliers,
+      limit: config.retrieval.likelyRepliers * config.retrieval.overFetchFactor,
     });
     const hidden = messageStore.hiddenIds(hits.map((hit) => hit.id));
-    return hits.filter((hit) => !hidden.has(hit.id));
+    return hits.filter((hit) => !hidden.has(hit.id)).slice(0, config.retrieval.likelyRepliers);
   };
 
   const likelyRepliers = async (record) =>

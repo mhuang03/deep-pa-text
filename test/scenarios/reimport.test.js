@@ -319,3 +319,48 @@ test('a Chroma batch rejection leaves the run in progress and --resume repairs t
   assert.equal(metaOf(env.databasePath, 'reimport_completed_at'), String(BASE_TIME));
   await assert.rejects(makeReimporter(env).run({ yes: true, resume: true }), /Nothing to resume/);
 });
+
+const interruptedCopy = () => ({
+  linkSync: () => { throw Object.assign(new Error('cross-device'), { code: 'EXDEV' }); },
+  copyFileSync: (from, to) => {
+    fs.writeFileSync(to, fs.readFileSync(from).subarray(0, 100));
+    throw new Error('copy interrupted');
+  },
+});
+
+test('an interrupted copy-path backup leaves .old.tmp, blocks the next run and never touches the database', async (t) => {
+  const env = await prepared(t);
+  const bytes = fileBytes(env.databasePath);
+  await assert.rejects(makeReimporter(env, { fsOverrides: interruptedCopy() }).run({ yes: true }), /copy interrupted/);
+  assert.deepEqual(fileBytes(env.databasePath), bytes);
+  assert.equal(fs.existsSync(`${env.databasePath}.old`), false);
+  assert.ok(fs.existsSync(`${env.databasePath}.old.tmp`));
+  await assert.rejects(makeReimporter(env).run({ yes: true }), /incomplete backup/);
+  await assert.rejects(makeReimporter(env).run({ yes: true, resume: true }), /incomplete backup/);
+  assert.deepEqual(fileBytes(env.databasePath), bytes);
+});
+
+test('--resume with a truncated .old next to .new is refused and the database stays', async (t) => {
+  const env = await prepared(t);
+  const bytes = fileBytes(env.databasePath);
+  await assert.rejects(makeReimporter(env, { fsOverrides: crashAt('renameSync') }).run({ yes: true }), /crash at renameSync/);
+  fs.rmSync(`${env.databasePath}.old`);
+  fs.writeFileSync(`${env.databasePath}.old`, bytes.subarray(0, bytes.length - 10));
+  await assert.rejects(
+    makeReimporter(env).run({ yes: true, resume: true }),
+    /not identical.*original database is intact.*without --resume/s,
+  );
+  assert.deepEqual(fileBytes(env.databasePath), bytes);
+  assert.ok(fs.existsSync(`${env.databasePath}.new`));
+});
+
+test('--resume with an identical (copied) .old proceeds', async (t) => {
+  const env = await prepared(t);
+  const bytes = fileBytes(env.databasePath);
+  await assert.rejects(makeReimporter(env, { fsOverrides: crashAt('renameSync') }).run({ yes: true }), /crash at renameSync/);
+  fs.rmSync(`${env.databasePath}.old`);
+  fs.copyFileSync(env.databasePath, `${env.databasePath}.old`);
+  const report = await makeReimporter(env).run({ yes: true, resume: true });
+  assert.equal(report.applied, true);
+  assert.deepEqual(fileBytes(`${env.databasePath}.old`), bytes);
+});

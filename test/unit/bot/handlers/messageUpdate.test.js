@@ -32,7 +32,7 @@ test('records the edit with the edit time and the message record', async () => {
   await handler.onUpdate({}, message);
   assert.deepEqual(edits, [[
     { id: 'm1', author: 'alice', content: 'new', timestamp: 5, reference: null, editedAt: 99 },
-    { repliesToBot: false, tolerateVectorErrors: true },
+    { tolerateVectorErrors: true },
   ]]);
 });
 
@@ -42,10 +42,10 @@ test('falls back to the clock when there is no edit timestamp', async () => {
   assert.equal(edits[0][0].editedAt, 777);
 });
 
-test('flags edits of replies to bot messages', async () => {
+test('passes the reference through without any bot-parent lookup (edits never infer)', async () => {
   const { handler, edits, make } = setup({ bots: { b1: { id: 'b1' } } });
   await handler.onUpdate({}, make({ id: 'm1', reference: 'b1' }));
-  assert.equal(edits[0][1].repliesToBot, true);
+  assert.deepEqual(edits[0][1], { tolerateVectorErrors: true });
   assert.equal(edits[0][0].reference, 'b1');
 });
 

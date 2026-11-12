@@ -21,12 +21,16 @@ const toEntry = (candidate) => ({
   item: { ...candidate, variants: [candidate.text] },
 });
 
-// Greedy and order dependent: earlier buckets and earlier candidates win, across buckets.
-export const dedupeBuckets = (buckets, options) => {
+// Greedy and order dependent: earlier buckets and earlier candidates win, across buckets. A bucket's limit
+// applies during the pass: once it is full, its remaining candidates are skipped without being merged
+// anywhere, so they cannot suppress duplicates in later buckets. Without limits a bucket is unbounded.
+export const dedupeBuckets = (buckets, { limits = [], ...options } = {}) => {
   const kept = [];
-  return buckets.map((bucket) => {
+  return buckets.map((bucket, index) => {
+    const limit = limits[index] ?? Infinity;
     const result = [];
     bucket.forEach((candidate) => {
+      if (result.length >= limit) return;
       const entry = toEntry(candidate);
       const match = findMatch(kept, entry, options);
       if (match) return mergeInto(match, candidate.text);

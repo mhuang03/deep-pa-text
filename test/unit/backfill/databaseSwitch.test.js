@@ -62,6 +62,9 @@ test('inspect: blocked by each journal file', (t) => {
     const result = dbSwitch.inspect(db);
     assert.equal(result.state, 'blocked');
     assert.ok(result.reason.includes(`${db}${suffix}`));
+    assert.match(result.reason, /not closed cleanly/);
+    assert.match(result.reason, /Do not move or delete that file/);
+    assert.doesNotMatch(result.reason, /move it away/);
   });
 });
 
@@ -166,4 +169,68 @@ test('swap replaces the database atomically and keeps the old content under .old
   const old = openDatabase(`${db}.old`, { readOnly: true });
   assert.equal(old.prepare('SELECT COUNT(*) AS n FROM messages').get().n, 1);
   old.close();
+});
+
+const exdev = () => { throw Object.assign(new Error('cross-device'), { code: 'EXDEV' }); };
+
+test('inspect: a leftover .old.tmp is an incomplete backup that may be moved away, in every state', (t) => {
+  const { db, dbSwitch } = setup(t);
+  touch(`${db}.old.tmp`);
+  const result = dbSwitch.inspect(db);
+  assert.equal(result.state, 'blocked');
+  assert.match(result.reason, /incomplete backup/);
+  assert.match(result.reason, /may be moved away/);
+  touch(`${db}.new`);
+  touch(`${db}.old`);
+  assert.equal(dbSwitch.inspect(db).state, 'blocked');
+});
+
+test('an interrupted copy leaves .old.tmp, no .old and the database untouched; the next run is blocked', (t) => {
+  const interrupted = () => { throw new Error('disk unplugged'); };
+  const { db, dbSwitch } = setup(t, { fsOverrides: { linkSync: exdev, copyFileSync: (from, to) => {
+    fs.writeFileSync(to, 'partial');
+    interrupted();
+  } } });
+  const before = fs.readFileSync(db);
+  assert.throws(() => dbSwitch.backup(db), /disk unplugged/);
+  assert.equal(fs.existsSync(`${db}.old`), false);
+  assert.equal(fs.existsSync(`${db}.old.tmp`), true);
+  assert.deepEqual(fs.readFileSync(db), before);
+  assert.equal(dbSwitch.inspect(db).state, 'blocked');
+});
+
+test('the copy path renames only after verification and never over an .old that appeared meanwhile', (t) => {
+  const racer = { copyFileSync: (from, to, mode) => {
+    fs.copyFileSync(from, to, mode);
+    fs.writeFileSync(`${from}.old`, 'someone else');
+  } };
+  const { db, dbSwitch } = setup(t, { fsOverrides: { linkSync: exdev, ...racer } });
+  assert.throws(() => dbSwitch.backup(db), { code: 'EEXIST' });
+  assert.equal(fs.readFileSync(`${db}.old`, 'utf8'), 'someone else');
+});
+
+test('verifyBackup accepts the same inode and an equal copy', (t) => {
+  const { db, dbSwitch } = setup(t);
+  fs.linkSync(db, `${db}.linked`);
+  fs.copyFileSync(db, `${db}.copy`);
+  dbSwitch.verifyBackup(db, `${db}.linked`);
+  dbSwitch.verifyBackup(db, `${db}.copy`);
+});
+
+test('verifyBackup rejects a truncated copy and a different one of the same size', (t) => {
+  const { db, dbSwitch } = setup(t);
+  const bytes = fs.readFileSync(db);
+  fs.writeFileSync(`${db}.short`, bytes.subarray(0, bytes.length - 1));
+  assert.throws(() => dbSwitch.verifyBackup(db, `${db}.short`), /not identical/);
+  const flipped = Buffer.from(bytes);
+  flipped[flipped.length - 1] ^= 0xff;
+  fs.writeFileSync(`${db}.flipped`, flipped);
+  assert.throws(() => dbSwitch.verifyBackup(db, `${db}.flipped`), /not identical/);
+});
+
+test('verifyBackup rejects an identical file that has no messages table', (t) => {
+  const { db, dbSwitch } = setup(t, { withDb: false });
+  new DatabaseSync(db).close();
+  fs.copyFileSync(db, `${db}.copy`);
+  assert.throws(() => dbSwitch.verifyBackup(db, `${db}.copy`), /no messages table/);
 });

@@ -335,3 +335,15 @@ test('asks for embeddings only for surviving candidates', async () => {
   assert.equal(asked.includes('1'), false);
   assert.equal(asked.includes('2'), true);
 });
+
+test('a text cut from the replies bucket by its limit still appears in the similar bucket', async () => {
+  const ctx = await setup({ replyResults: 1 });
+  seed(ctx, 'message_reply_embeddings', [
+    ['r1', 'cats rule', meta('alice', 10)],
+    ['r2', 'dogs bark loudly at night', meta('alice', 11)],
+  ]);
+  seed(ctx, 'message_embeddings', [['s1', 'dogs bark loudly at night', meta('alice', 12)]]);
+  const result = await ctx.retriever.retrieveForReply('alice', record);
+  assert.deepEqual(result.similar, ['dogs bark loudly at night']);
+  assert.equal(result.replies.length, 1);
+});

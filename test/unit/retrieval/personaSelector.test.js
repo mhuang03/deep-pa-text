@@ -12,7 +12,7 @@ const config = {
     messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings', ...CHROMA_LIMITS,
   },
   embedding: { dimensions: 64 },
-  retrieval: { likelyRepliers: 3 },
+  retrieval: { likelyRepliers: 3, overFetchFactor: 2 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
 };
 const users = [
@@ -60,7 +60,7 @@ test('likelyRepliers honours the limit and the legacy where shape', async () => 
   seedReplies(seed);
   await selector.likelyRepliers(record);
   const [query] = fake.state.collection('message_reply_embeddings').queries;
-  assert.equal(query.nResults, 3);
+  assert.equal(query.nResults, 6);
   assert.deepEqual(query.queryTexts, ['cats rule']);
   assert.deepEqual(query.where, {
     $and: [{ author: { $ne: 'alice' } }, { timestamp: { $lt: 100 } }],
@@ -141,6 +141,25 @@ test('likelyReplierHits drops hits whose corpus row was deleted', async () => {
     id, author: 'bob', content: 'x', timestamp: 1, reference: null,
   }));
   messageStore.softDelete('1', 9);
-  assert.deepEqual((await selector.likelyReplierHits(record)).map((hit) => hit.id).sort(), ['2', '3']);
-  assert.deepEqual(await selector.likelyRepliers(record), ['bob', 'carol']);
+  // Over-fetching refills the slot the hidden hit left, so the cut is still likelyRepliers visible hits.
+  const ids = (await selector.likelyReplierHits(record)).map((hit) => hit.id);
+  assert.equal(ids.length, 3);
+  assert.ok(!ids.includes('1'));
+  assert.ok(ids.includes('3'));
+  assert.deepEqual(await selector.likelyRepliers(record), ['bob', 'carol', 'dave']);
+});
+
+test('likelyReplierHits still returns likelyRepliers visible hits when hidden ones rank first', async () => {
+  const { selector, seed, messageStore } = await setup();
+  seed([
+    ['1', 'cats rule', 'bob', 10], ['2', 'cats rule', 'bob', 11], ['3', 'cats rule', 'bob', 12],
+    ['4', 'cats rules', 'carol', 20], ['5', 'cats rule!', 'dave', 30], ['6', 'cats rule?', 'carol', 40],
+  ]);
+  ['1', '2', '3'].forEach((id) => messageStore.insertFiltered({
+    id, author: 'bob', content: 'cats rule', timestamp: 1,
+  }, { inferReference: false }));
+  ['1', '2', '3'].forEach((id) => messageStore.softDelete(id, 5));
+  const hits = await selector.likelyReplierHits(record);
+  assert.equal(hits.length, 3);
+  assert.ok(hits.every((hit) => !['1', '2', '3'].includes(hit.id)));
 });

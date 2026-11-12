@@ -34,6 +34,11 @@ const assertRunnable = (status, resume) => {
   if (!RESUMABLE.includes(status.state)) throw new Error(refusal(status));
 };
 
+const verificationFailure = (error, db) => new Error(
+  `${error.message} The original database is intact. Move ${db}.old away and run again without --resume `
+  + `(move ${db}.new away too).`,
+);
+
 export const createReimporter = ({
   config, vendor, data, clock, logger, fs, buildContainer, createDiscordClient, databaseSwitch, openDatabase,
 }) => {
@@ -72,8 +77,19 @@ export const createReimporter = ({
     logger,
   }).plan(messages, { channel, archive });
 
+  // A backup that is not a complete copy of the database must never let the fresh database replace it.
+  const verifyBeforeSwap = (status) => {
+    if (status.state !== SWITCH_STATES.BEFORE_SWAP) return;
+    try {
+      databaseSwitch.verifyBackup(dbPath, paths.backup);
+    } catch (error) {
+      throw verificationFailure(error, dbPath);
+    }
+  };
+
   const switchDatabase = (status, resume) => {
     if (resume) {
+      verifyBeforeSwap(status);
       if (status.state === SWITCH_STATES.BEFORE_SWAP) databaseSwitch.swap(dbPath);
       return null;
     }
@@ -138,6 +154,7 @@ export const createReimporter = ({
   const run = async ({ yes = false, resume = false } = {}) => {
     const status = databaseSwitch.inspect(dbPath);
     assertRunnable(status, resume);
+    if (resume) verifyBeforeSwap(status);
     const { client, channel } = await connect();
     try {
       const messages = await readHistory(channel);

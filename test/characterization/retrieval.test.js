@@ -266,7 +266,8 @@ test('searchLikelyRepliers returns at most 20 authors', async (t) => {
   );
   const authors = await world.subject.searchLikelyRepliers(query('alice', 'reply text'));
   assert.equal(authors.length, 20);
-  assert.equal(replyEmbeddings(world).queries[0].nResults, 20);
+  // Spec 32: over-fetches by retrieval.overFetchFactor (3) before dropping hidden hits.
+  assert.equal(replyEmbeddings(world).queries[0].nResults, 60);
 });
 
 test('searchLikelyRepliers returns an empty list when the collection is empty', async (t) => {

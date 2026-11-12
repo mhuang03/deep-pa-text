@@ -85,3 +85,18 @@ test('a failing history fetch still revives with the time sentence only', async 
   assert.ok(!prompt.includes('has been quiet') && !prompt.includes('last conversation'));
   assert.equal(world.discord.channel.sent.length, 1);
 });
+
+test('the first human message after a revive is not a starter, but one after a long silence is', async (t) => {
+  const world = await newWorld(t);
+  await seedHistory(world);
+  await world.ready();
+  await world.emitMessage({ id: 'tail1', author: 'alice', content: 'who wants lunch', timestamp: BASE_TIME - MINUTE });
+  await world.advance(3 * HOUR + 10 * MINUTE);
+  assert.equal(world.llm.calls.length, 1, 'a revive was sent');
+  const replyAt = Date.now() + 5 * MINUTE;
+  await world.emitMessage({ id: 'after1', author: 'carol', content: 'oh hi there bot', timestamp: replyAt });
+  await world.emitMessage({ id: 'later1', author: 'carol', content: 'after a very long gap', timestamp: replyAt + 5 * HOUR });
+  const { messageStore } = world.container;
+  const starters = messageStore.randomStarters({ author: 'carol', minGapMs: HOUR, limit: 10 });
+  assert.deepEqual(starters, ['after a very long gap']);
+});
