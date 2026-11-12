@@ -20,7 +20,7 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/main.js` | Entry point (`npm start`): loads `.env`, config and data files, builds the container, connects Chroma, starts the bot. |
 | `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
 | `src/config.js` | Every tunable, ID, model name and limit, with environment overrides. |
-| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate), responder (compose then deliver), `bot.js`. |
+| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (typing, compose, deliver the parts), `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
 | `src/storage/` | SQLite schema, migrations and queries; the Chroma vector store. |
 | `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
@@ -96,6 +96,7 @@ Everything else is defined in `src/config.js`. These optional environment variab
 | `REPLY_OVERRIDE` | off | `true` replies to every message, ignoring randomness and the rate limit (testing) |
 | `REVIVE_OVERRIDE` | off | `true` checks every minute and revives regardless of idle time (testing) |
 | `CHAIN_REPLIES` | on | `false` turns off chain replies (replies to a bot message). Such replies then get no answer at all, not even a random one |
+| `BURSTS` | on | `false` turns off multi-message bursts: the model is not told it may split, and any `<split>` marker in its output becomes a newline in a single message |
 | `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
 
 The corpus is only filled by live messages (`ingest.recordMessage`). There is no history backfill script in this repo; the vector store accepts batches, but nothing calls it in bulk.
@@ -113,12 +114,18 @@ All four only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-autho
 
 `REPLY_OVERRIDE` and `REVIVE_OVERRIDE` remove the randomness and timers for testing.
 
+### Typing and bursts
+
+While the bot works on an auto reply, chain reply or revive it shows the typing indicator (sent immediately, refreshed every `typing.refreshMs`, 8 s, and stopped when the reply is out or fails; `typing.enabled: false` turns it off). The `reply` command does not type: its interaction shows its own placeholder.
+
+A persona who often sends several short messages in a row may answer with a burst. `burst.minSamples` (20) of the persona's raw messages must exist and at least `burst.minRate` (0.2) of them must have been followed by another message from the same author within `burst.windowMs` (30 s); the rate is measured on the raw `messages` table and cached per author for `burst.cacheMs` (1 h). Such personas get a prompt section (just before avoid-repeats) saying the response may be split into up to `burst.maxMessages` (3) messages with `<split>` on its own line. A `<split>` from any persona is honoured; parts beyond the maximum are joined onto the last one, each part is cleaned on its own, and empty parts are dropped. The first part is sent as usual (a Discord reply, or the interaction reply for the command); later parts are plain channel messages (follow-ups for the command), each with its own author embed and GIFs, after a pause of `burst.msPerChar` (40 ms) per character clamped to `burst.minDelayMs` (800) and `burst.maxDelayMs` (4000), with a typing pulse before each. Only the first part can ping the replied user. Every part is recorded in `bot_messages`. The reply rate limit is armed as soon as the first part is delivered, so a message arriving mid-burst cannot trigger another reply; if a later part fails to send it is logged and the rest of the burst is skipped. When someone replies to any part of a burst, the parts count as one assistant turn (and one bot turn) in the chain.
+
 ## Storage
 
 SQLite (`messages.db`):
 
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
-- `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
+- `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
 - `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
 
 Chroma:

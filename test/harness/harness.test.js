@@ -369,3 +369,49 @@ test('the fake LLM awaits a responder that returns a promise', async (t) => {
   release('held answer');
   assert.equal((await pending).choices[0].message.content, 'held answer');
 });
+
+test('the fake channel counts typing calls and can fail them', async (t) => {
+  const world = await newWorld(t);
+  const { channel } = world.discord;
+  await channel.sendTyping();
+  assert.equal(channel.typingCalls, 1);
+  channel.failTyping(new Error('no access'));
+  await assert.rejects(channel.sendTyping(), /no access/);
+  await channel.sendTyping();
+  assert.equal(channel.typingCalls, 3);
+});
+
+test('the fake modal submit records follow-ups and can fail them', async (t) => {
+  const world = await newWorld(t);
+  const command = await world.openReplyCommand({ target: { content: 'a replyable message' }, user: 'alice' });
+  const submitted = await command.submit({ author: 'bob' });
+  const message = await submitted.followUp({ content: 'more' });
+  assert.deepEqual(submitted.followUps, [{ content: 'more' }]);
+  assert.equal(message.content, 'more');
+  submitted.failFollowUps(new Error('gone'));
+  await assert.rejects(submitted.followUp({ content: 'x' }), /gone/);
+});
+
+test('world.sleeps records the burst delays and resolves immediately, running the sleep hook parked', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  world.llm.respondWith('one<split>two');
+  const hooked = [];
+  world.sleepHook = async (ms) => {
+    hooked.push(ms);
+    await world.settle();
+  };
+  await world.emitMessage({ content: 'hello there friends' });
+  assert.equal(world.sleeps.length, 1);
+  assert.deepEqual(hooked, world.sleeps);
+});
+
+test('llm.hold parks the next completion, settle still returns, and release lets it finish', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const release = world.llm.hold();
+  const message = await world.emitMessage({ content: 'hello there friends' });
+  assert.equal(world.llm.calls.length, 1);
+  assert.equal(message.replies.length, 0);
+  release();
+  await world.settle();
+  assert.equal(message.replies.length, 1);
+});
