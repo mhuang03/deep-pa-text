@@ -91,19 +91,13 @@ test('the UPDATE rule rejects overwrites of user data', () => {
 const FILE_REMOVAL = /\b(unlink|unlinkSync|rm|rmSync|rmdir|rmdirSync|truncate|truncateSync|ftruncate|ftruncateSync)\(/;
 const FILE_MOVE = /\b(renameSync|linkSync|copyFileSync)\(/;
 const DATABASE_SWITCH = 'src/backfill/databaseSwitch.js';
-// The snapshot reader removes only the temporary copy it created itself, never user data.
-const TEMP_COPY_CLEANUP = ['src/storage/snapshot.js'];
 
 test('no source file removes or truncates a file', () => {
-  const checked = sources.filter(({ file }) => !TEMP_COPY_CLEANUP.includes(file));
-  assert.deepEqual(offenders((text) => FILE_REMOVAL.test(text), checked), []);
+  assert.deepEqual(offenders((text) => FILE_REMOVAL.test(text)), []);
 });
 
-test('only the temporary-copy cleanup removes anything, and only from the OS temp directory', () => {
-  const removing = sources.filter(({ text }) => FILE_REMOVAL.test(text)).map(({ file }) => file);
-  assert.deepEqual(removing, TEMP_COPY_CLEANUP);
-  const snapshot = sources.find(({ file }) => file === TEMP_COPY_CLEANUP[0]).text;
-  assert.ok(snapshot.includes('os.tmpdir()'));
+test('nothing in src or scripts calls rmSync', () => {
+  assert.deepEqual(offenders((text) => text.includes('rmSync')), []);
 });
 
 test('rename, link and copy of files appear only in the database switch', () => {

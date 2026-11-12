@@ -7,7 +7,7 @@ import { Events } from 'discord.js';
 import { openDatabase } from '../../src/storage/database.js';
 import { createMetaStore } from '../../src/storage/metaStore.js';
 import { buildContainer, buildGifResolver, defaultClock } from '../../src/container.js';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, isConfigError } from '../../src/config.js';
 import { createFakeDiscord } from '../support/fakes/discord.js';
 import { createFakeChroma } from '../support/fakes/chroma.js';
 import { createFakeOpenAI } from '../support/fakes/llm.js';
@@ -22,7 +22,7 @@ const SERVICES = [
   'historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync',
 ];
 
-const setup = (overrides = {}, databasePath = ':memory:') => {
+const setup = (overrides = {}, databasePath = ':memory:', env = ENV) => {
   const fakes = {
     discord: createFakeDiscord(), chroma: createFakeChroma(), llm: createFakeOpenAI(), gifs: createFakeGifs(),
   };
@@ -34,7 +34,7 @@ const setup = (overrides = {}, databasePath = ':memory:') => {
     GiphyFetch: fakes.gifs.GiphyFetch,
     fetch: fakes.gifs.fetch,
   };
-  const config = loadConfig({ ...ENV, ...overrides });
+  const config = loadConfig({ ...env, ...overrides });
   const storage = { ...config.storage, databasePath };
   const container = buildContainer({
     config: { ...config, storage }, vendor, data: { users: USERS, pingCache: PING_CACHE },
@@ -177,5 +177,53 @@ test('uses a given Discord client instead of creating one', () => {
   });
   assert.equal(container.client, client);
   assert.deepEqual(fakes.discord.state.clientOptions, { given: true }, 'no second client was constructed');
+  container.db.close();
+});
+
+const gifVendor = (fakes) => ({ GiphyFetch: fakes.GiphyFetch, fetch: fakes.fetch });
+
+const KEY_SUBSETS = [
+  { keys: {}, called: [] },
+  { keys: { KLIPY_API_KEY: 'k' }, called: ['klipy'] },
+  { keys: { GIPHY_API_KEY: 'g' }, called: ['giphy'] },
+  { keys: { HUMOR_API_KEY: 'h' }, called: ['humor'] },
+  { keys: { GIPHY_API_KEY: 'g', HUMOR_API_KEY: 'h' }, called: ['giphy', 'humor'] },
+  { keys: { KLIPY_API_KEY: 'k', GIPHY_API_KEY: 'g', HUMOR_API_KEY: 'h' }, called: ['klipy', 'giphy', 'humor'] },
+];
+
+test('buildGifResolver builds and calls only the engines whose key is set', async () => {
+  for (const { keys, called } of KEY_SUBSETS) {
+    const fakes = createFakeGifs();
+    const resolver = buildGifResolver({ config: loadConfig(keys), vendor: gifVendor(fakes) });
+    await resolver.resolve('<gif! cat>');
+    const seen = ['klipy', 'giphy', 'humor'].filter((name) => fakes.state[name].calls.length > 0);
+    assert.deepEqual(seen, called, JSON.stringify(keys));
+    assert.equal(fakes.state.constructed.length, keys.GIPHY_API_KEY ? 1 : 0, 'GiphyFetch only with its key');
+  }
+});
+
+test('with no GIF key a token stays unresolved as placeholder text', async () => {
+  const resolver = buildGifResolver({ config: loadConfig({}), vendor: gifVendor(createFakeGifs()) });
+  const { content, gifLinks } = await resolver.resolve('hi <gif! cat>');
+  assert.equal(content, 'hi <INSERT GIF:  cat>');
+  assert.deepEqual(gifLinks, [{ match: '<gif! cat>', url: '' }]);
+});
+
+test('without DEEPSEEK_API_KEY the SDK client is never built and generating rejects naming the variable', async () => {
+  const { OPENAI_API_KEY, ...rest } = ENV;
+  const { DEEPSEEK_API_KEY, ...withoutDeepseek } = { ...rest, OPENAI_API_KEY };
+  assert.ok(DEEPSEEK_API_KEY);
+  const { fakes, container } = setup({}, ':memory:', withoutDeepseek);
+  assert.deepEqual(fakes.llm.state.constructed, []);
+  await assert.rejects(
+    container.generator.generateRevive('alice'),
+    (error) => isConfigError(error) && error.message.includes('DEEPSEEK_API_KEY'),
+  );
+  container.db.close();
+});
+
+test('the database is opened with the configured busy timeout', () => {
+  const { container } = setup({}, ':memory:');
+  assert.equal(container.db.prepare('PRAGMA busy_timeout').get().timeout, 5000);
   container.db.close();
 });

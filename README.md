@@ -17,12 +17,12 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 
 | Path | Role |
 | --- | --- |
-| `src/main.js` | Entry point (`npm start`): loads `.env`, config and data files, builds the container, connects Chroma, starts the bot. |
+| `src/main.js` | Entry point (`npm start`): loads `.env` if present, config, required variables and data files, builds the container, connects Chroma, starts the bot. |
 | `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
-| `src/config.js` | Every tunable, ID, model name and limit, with environment overrides. |
+| `src/config.js`, `src/config/` | Every tunable, ID, model name and limit, with strict environment parsing and range validation (`config.js` is the public entry; `config/` holds the parsers, section builders, validators, required-variable checks and the optional `.env` loader). |
 | `src/bot/` | Triggers and orchestration: `handlers/` (message, message edit, message delete, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (typing, compose, deliver the parts), `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
-| `src/storage/` | SQLite schema, migrations and queries (including soft deletes and edit revisions); the Chroma vector store; a migrated read-only snapshot for `inspectDb.js`. |
+| `src/storage/` | SQLite schema, migrations and queries (including soft deletes and edit revisions); the Chroma vector store; the read-only, schema-tolerant inspector behind `inspectDb.js`. |
 | `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
 | `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
@@ -41,15 +41,17 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm install
    ```
 
-2. Create `.env`. The file must exist; the entry points call `loadEnvFile('.env')`.
+2. Provide the variables below in `.env` or in the environment. `.env` is optional (variables already in the environment are not overridden); a `.env` that exists but cannot be loaded stops startup. A missing required variable stops startup with one message listing all of them.
 
    | Variable | Used for |
    | --- | --- |
-   | `DISCORD_BOT_TOKEN` | Bot login and command registration |
-   | `DISCORD_CLIENT_ID` | Command registration (`npm run register`) |
-   | `OPENAI_API_KEY` | Embeddings (`text-embedding-3-small`, 512 dims, via Chroma's embedding function) |
-   | `DEEPSEEK_API_KEY` | Chat completions (`deepseek-v4-flash`, thinking enabled) |
-   | `KLIPY_API_KEY`, `GIPHY_API_KEY`, `HUMOR_API_KEY` | GIF search, tried in that order |
+   | `DISCORD_BOT_TOKEN` | Bot login and command registration. Required by `npm start`, `backfill`, `reimport` and `register` |
+   | `DISCORD_CLIENT_ID` | Command registration. Required by `npm run register` only |
+   | `OPENAI_API_KEY` | Embeddings (`text-embedding-3-small`, 512 dims, via Chroma's embedding function). Required by `npm start`, `backfill` and `reimport` |
+   | `DEEPSEEK_API_KEY` | Chat completions (`deepseek-v4-flash`, thinking enabled). Required by `npm start` only; the chat client is never built without it, so `OPENAI_API_KEY` is never sent to DeepSeek |
+   | `KLIPY_API_KEY`, `GIPHY_API_KEY`, `HUMOR_API_KEY` | GIF search, tried in that order. All optional: only engines with a key are used, and with none every GIF token stays as placeholder text (one startup warning). `npm run gif-smoke` needs at least one |
+
+   A variable that is empty or only whitespace counts as not set.
 
 3. Create the data files (git-ignored; `*.old` backups and `*.db.new` files from a re-import are git-ignored too).
 
@@ -59,13 +61,15 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    [{ "username": "discord_username", "name": "Real Name", "id": "optional Discord user id" }]
    ```
 
-   The optional `id` makes member lookups exact from the first use (see [Member profiles](#member-profiles)); without it the id is learned from the first successful search.
+   Each entry needs a non-empty string `username` and `name`; usernames must be unique ignoring case; the file must be a non-empty array. `id`, when given, is 5 to 25 digits (a string or a number); other keys are ignored. The optional `id` makes member lookups exact from the first use (see [Member profiles](#member-profiles)); without it the id is learned from the first successful search.
 
    `data/ping_caches.json` maps Discord IDs to display text, used to rewrite mentions.
 
    ```json
    { "users": { "<id>": "name" }, "roles": { "<id>": "name" }, "channels": { "<id>": "name" } }
    ```
+
+   The file must be an object; `users`, `roles` and `channels` default to `{}` when absent. A missing, unreadable or malformed file stops startup with a one-line error naming the file.
 
 4. Start Chroma on port 7429 (override with `CHROMA_PORT`).
 
@@ -85,17 +89,17 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm start
    ```
 
-Other npm scripts: `npm run backfill` (see [Backfill](#backfill)), `npm run reimport` (see [Re-importing from Discord](#re-importing-from-discord)), `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; a database from before the soft-delete columns is read through a migrated temporary copy and never written) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
+Other npm scripts: `npm run backfill` (see [Backfill](#backfill)), `npm run reimport` (see [Re-importing from Discord](#re-importing-from-discord)), `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; each section's query is built from the columns that exist, so a database from any earlier schema is read in place: nothing is copied, migrated or written, a missing table prints `(no <table> table yet)`, and a missing or unreadable database prints one line and exits 1) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs; exits 1 when no GIF key is set or a token stays unresolved).
 
 ### Configuration overrides
 
-Everything else is defined in `src/config.js`. These optional environment variables (in `.env` or the shell) override the defaults:
+Everything else is defined in `src/config.js`. These optional environment variables (in `.env` or the shell) override the defaults. Boolean variables accept `true` or `false` in any case (anything else, such as `0`, `yes` or `off`, stops startup with an error naming the variable); an unset, empty or whitespace-only value takes the default. `PATEXT_CHANNEL_ID` and `GUILD_ID` must be 5 to 25 digits.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PATEXT_CHANNEL_ID` | `704837777564500149` | The one channel the bot reads and posts in |
 | `GUILD_ID` | `478743674826784769` | Guild for command registration and member lookups |
-| `CHROMA_PORT` | `7429` | Chroma server port (must be a number) |
+| `CHROMA_PORT` | `7429` | Chroma server port (digits only, 1 to 65535) |
 | `REPLY_OVERRIDE` | off | `true` replies to every message, ignoring randomness and the rate limit (testing) |
 | `REVIVE_OVERRIDE` | off | `true` checks every minute and revives regardless of idle time (testing) |
 | `CHAIN_REPLIES` | on | `false` turns off chain replies (replies to a bot message). Such replies then get no answer at all, not even a random one |
@@ -106,6 +110,8 @@ Everything else is defined in `src/config.js`. These optional environment variab
 Backfill tunables in `src/config.js`: `backfill.pageSize` (100, 1 to 100), `backfill.batchSize` (100, 1 or more), `backfill.pageRetries` (3, 0 or more), `backfill.retryDelayMs` (2000) and `backfill.pageTimeoutMs` (30000, above 0). Values outside these ranges stop startup.
 
 Other tunables in `src/config.js` for this feature: `discord.webhookName` (`deep-pa-text`), `discord.webhookUsernameMax` (80), `discord.webhookReplyLink` (true), `profiles.refreshIntervalMs` (3600000, integer of 0 or more; `0` disables the refresh), `profiles.minCheckIntervalMs` (10000, 0 or more), `profiles.lookupTimeoutMs` (5000, above 0) and `profiles.searchLimit` (100, 1 to 1000). Values outside these ranges stop startup.
+
+Numeric tunables are validated when the config loads (for example `gifs.candidates` an integer of 1 or more, `gifs.timeoutMs` and `llm.timeoutMs` above 0, `llm.maxRetries` and `llm.emptyRetries` integers of 0 or more, `reply.probability` 0 to 1, `reply.minIntervalMs` 0 or more, `filter.minLength` at most `filter.maxLength`, every `retrieval.*Results`, `reviveSamples` and `likelyRepliers` an integer of 1 or more). `storage.busyTimeoutMs` (5000, integer of 0 or more) is applied as the SQLite busy timeout on every connection, read-only ones included, so a brief overlap between the bot and a script waits instead of failing.
 
 The corpus is filled by live messages and by the [backfill](#backfill) script.
 

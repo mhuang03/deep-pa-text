@@ -1,6 +1,8 @@
 import fs from 'node:fs';
-import { loadEnvFile } from 'node:process';
 import { loadConfig } from '../src/config.js';
+import { loadEnvIfPresent } from '../src/config/env.js';
+import { assertRequired } from '../src/config/requirements.js';
+import { isConfigError } from '../src/config/errors.js';
 import { loadData } from '../src/userData/loadData.js';
 import { buildContainer, defaultClock } from '../src/container.js';
 import { createVendor } from '../src/vendor.js';
@@ -29,8 +31,9 @@ const parseOrExit = () => {
 
 const main = async (options) => {
   console.log(`${WARNING}\n`);
-  loadEnvFile('.env');
+  loadEnvIfPresent();
   const config = loadConfig(process.env);
+  assertRequired(config, process.env, 'reimport');
   const logger = createLogger();
   const reimporter = createReimporter({
     config,
@@ -41,7 +44,9 @@ const main = async (options) => {
     fs,
     buildContainer,
     createDiscordClient,
-    databaseSwitch: createDatabaseSwitch({ fs, openDatabase, createMetaStore, logger }),
+    databaseSwitch: createDatabaseSwitch({
+      fs, openDatabase, createMetaStore, logger, busyTimeoutMs: config.storage.busyTimeoutMs,
+    }),
     openDatabase,
   });
   formatReport(await reimporter.run(options)).forEach((line) => console.log(line));
@@ -51,6 +56,6 @@ const options = parseOrExit();
 try {
   await main(options);
 } catch (error) {
-  console.error(`Re-import failed: ${error.message}`);
+  console.error(isConfigError(error) ? error.message : `Re-import failed: ${error.message}`);
   process.exitCode = 1;
 }

@@ -1,5 +1,7 @@
-import { loadEnvFile } from 'node:process';
 import { loadConfig } from '../src/config.js';
+import { loadEnvIfPresent } from '../src/config/env.js';
+import { assertRequired } from '../src/config/requirements.js';
+import { isConfigError } from '../src/config/errors.js';
 import { loadData } from '../src/userData/loadData.js';
 import { buildContainer } from '../src/container.js';
 import { createVendor } from '../src/vendor.js';
@@ -34,8 +36,9 @@ const syncVectors = async ({ vectorSync }, { dryRun }) => {
 };
 
 const main = async (options) => {
-  loadEnvFile('.env');
+  loadEnvIfPresent();
   const config = loadConfig(process.env);
+  assertRequired(config, process.env, 'backfill');
   const container = buildContainer({
     config, vendor: createVendor(), data: loadData(config.storage), cacheMessages: false,
   });
@@ -54,7 +57,7 @@ const options = parseOrExit();
 try {
   await main(options);
 } catch (error) {
-  console.error(`Backfill failed: ${error.message}`);
+  console.error(isConfigError(error) ? error.message : `Backfill failed: ${error.message}`);
   if (error.isVectorError) console.error(VECTOR_HINT);
   process.exitCode = 1;
 }

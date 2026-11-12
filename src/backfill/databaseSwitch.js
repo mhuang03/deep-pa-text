@@ -23,7 +23,8 @@ export const switchPaths = (db) => ({
 
 const hasTable = (handle, name) => handle.prepare(TABLE_QUERY).get(name) !== undefined;
 
-export const createDatabaseSwitch = ({ fs, openDatabase, createMetaStore, logger }) => {
+export const createDatabaseSwitch = ({ fs, openDatabase: open, createMetaStore, logger, busyTimeoutMs }) => {
+  const openDatabase = (path, options = {}) => open(path, { ...options, busyTimeoutMs });
   const blocked = (reason) => ({ state: SWITCH_STATES.BLOCKED, reason });
 
   // A database from before the meta table simply has no keys.

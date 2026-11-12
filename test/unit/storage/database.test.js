@@ -110,3 +110,21 @@ test('spec 24 migrations add the soft-delete columns, index and revisions table 
   assert.equal(db.prepare('SELECT content FROM messages').get().content, 'raw');
   assert.equal(db.prepare('SELECT deleted_at FROM bot_messages').get().deleted_at, null);
 });
+
+const busyTimeout = (db) => db.prepare('PRAGMA busy_timeout').get().timeout;
+
+test('sets the busy timeout on every handle, read-only ones included', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dpt-db-'));
+  const file = path.join(dir, 'm.db');
+  const writable = openDatabase(file, { busyTimeoutMs: 1234 });
+  const readOnly = openDatabase(file, { readOnly: true, busyTimeoutMs: 4321 });
+  assert.equal(busyTimeout(writable), 1234);
+  assert.equal(busyTimeout(readOnly), 4321);
+  writable.close();
+  readOnly.close();
+  fs.rmSync(dir, { recursive: true });
+});
+
+test('the busy timeout defaults to the configured default', () => {
+  assert.equal(busyTimeout(openDatabase(':memory:')), 5000);
+});

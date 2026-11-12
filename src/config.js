@@ -1,266 +1,16 @@
-export const PERSONA_DISPLAYS = Object.freeze(['embed', 'webhook']);
+import * as base from './config/sections.js';
+import * as feature from './config/featureSections.js';
+import * as check from './config/validate.js';
+import * as checkFeature from './config/validateFeatures.js';
 
-const parsePersonaDisplay = (raw) => {
-  if (raw === undefined) return 'embed';
-  if (!PERSONA_DISPLAYS.includes(raw)) {
-    throw new Error(`PERSONA_DISPLAY must be one of ${PERSONA_DISPLAYS.join(', ')}, got "${raw}"`);
-  }
-  return raw;
-};
-
-const buildDiscord = (env) => ({
-  token: env.DISCORD_BOT_TOKEN,
-  clientId: env.DISCORD_CLIENT_ID,
-  channelId: env.PATEXT_CHANNEL_ID ?? '704837777564500149',
-  guildId: env.GUILD_ID ?? '478743674826784769',
-  botName: 'deep-pa-text',
-  embedColor: 0x5865F2,
-  modalTimeoutMs: 120000,
-  maxMessageLength: 2000,
-  truncateLookbackChars: 200,
-  pingRepliedUser: env.PING_REPLIED_USER !== 'false',
-  personaDisplay: parsePersonaDisplay(env.PERSONA_DISPLAY),
-  webhookName: 'deep-pa-text',
-  webhookUsernameMax: 80,
-  webhookReplyLink: true,
-});
-
-const buildReply = (env) => ({
-  probability: 0.1,
-  minIntervalMs: 300000,
-  escalateAfterMisses: 10,
-  escalationStep: 0.05,
-  override: env.REPLY_OVERRIDE === 'true',
-});
-
-const buildRevive = (env) => ({
-  checkIntervalMs: 600000,
-  overrideCheckIntervalMs: 60000,
-  dayIdleMs: 10800000,
-  nightIdleMs: 43200000,
-  dayStartHour: 10,
-  dayEndHour: 22,
-  timeZone: 'America/Chicago',
-  transcriptLimit: 10,
-  starterGapMs: 3600000,
-  starterSamples: 20,
-  override: env.REVIVE_OVERRIDE === 'true',
-});
-
-const buildFilter = () => ({
-  minLength: 5,
-  maxLength: 200,
-  commandPrefixes: ['!', '$', '#', '%', '&', '-', '+', 'p!'],
-});
-
-const buildStorage = () => ({
-  databasePath: 'messages.db',
-  usersPath: 'data/users.json',
-  pingCachePath: 'data/ping_caches.json',
-  inferredReferenceWindowMs: 3600000,
-});
-
-const parsePort = (raw) => {
-  if (raw === undefined) return 7429;
-  const port = raw.trim() === '' ? NaN : Number(raw);
-  if (Number.isNaN(port)) throw new Error('CHROMA_PORT must be a number');
-  return port;
-};
-
-const buildChroma = (env) => ({
-  port: parsePort(env.CHROMA_PORT),
-  messagesCollection: 'message_embeddings',
-  repliesCollection: 'message_reply_embeddings',
-});
-
-const buildEmbedding = () => ({
-  apiKeyEnvVar: 'OPENAI_API_KEY',
-  modelName: 'text-embedding-3-small',
-  dimensions: 512,
-});
-
-const buildRetrieval = () => ({
-  replyResults: 10,
-  similarResults: 20,
-  gifResults: 10,
-  otherResults: 10,
-  reviveSamples: 30,
-  likelyRepliers: 20,
-  shortMessageChars: 25,
-  queryContextMessages: 2,
-  overFetchFactor: 3,
-  nearDuplicateThreshold: 0.95,
-  nearDuplicateMinChars: 12,
-  frequentMinCount: 3,
-  frequentLimit: 10,
-  recentBotMessages: 10,
-});
-
-export const assertRetrieval = (retrieval) => {
-  if (!(Number.isInteger(retrieval.overFetchFactor) && retrieval.overFetchFactor >= 1)) {
-    throw new Error('retrieval.overFetchFactor must be an integer of at least 1');
-  }
-  const threshold = retrieval.nearDuplicateThreshold;
-  if (!(Number.isFinite(threshold) && threshold > 0 && threshold <= 1)) {
-    throw new Error('retrieval.nearDuplicateThreshold must be a number in (0, 1]');
-  }
-  return retrieval;
-};
-
-export const assertPersona = (persona) => {
-  const { recencyHalfLifeMs, minRecencyWeight } = persona;
-  if (!(Number.isFinite(recencyHalfLifeMs) && recencyHalfLifeMs > 0)) {
-    throw new Error('persona.recencyHalfLifeMs must be a number greater than 0');
-  }
-  if (!(Number.isFinite(minRecencyWeight) && minRecencyWeight > 0 && minRecencyWeight <= 1)) {
-    throw new Error('persona.minRecencyWeight must be a number in (0, 1]');
-  }
-  return persona;
-};
-
-const buildPersona = () => assertPersona({
-  recencyHalfLifeMs: 15552000000,
-  minRecencyWeight: 0.25,
-});
-
-const buildLlm = (env) => ({
-  apiKey: env.DEEPSEEK_API_KEY,
-  baseURL: 'https://api.deepseek.com',
-  model: 'deepseek-v4-flash',
-  thinking: true,
-  stream: false,
-  timeoutMs: 120000,
-  maxRetries: 1,
-  emptyRetries: 1,
-});
-
-const buildGifs = (env) => ({
-  klipyApiKey: env.KLIPY_API_KEY,
-  giphyApiKey: env.GIPHY_API_KEY,
-  humorApiKey: env.HUMOR_API_KEY,
-  maxQueryLength: 50,
-  klipyBaseUrl: 'https://api.klipy.com/api/v1',
-  klipyPerPage: 8,
-  klipyCustomerId: 'deep-pa-text',
-  klipyLocale: 'us',
-  klipyContentFilter: 'off',
-  klipyFormatFilter: 'gif',
-  humorUrl: 'https://api.humorapi.com/gif/search',
-  candidates: 5,
-  timeoutMs: 5000,
-});
-
-const buildContext = () => ({
-  transcriptLimit: 20,
-  maxEntryChars: 300,
-  maxAgeMs: 21600000,
-  timeZone: 'America/Chicago',
-});
-
-export const assertChain = (chain) => {
-  if (!(Number.isFinite(chain.decay) && chain.decay > 0 && chain.decay < 1)) {
-    throw new Error('chain.decay must be a number in (0, 1)');
-  }
-  if (!(Number.isInteger(chain.maxContextTurns) && chain.maxContextTurns >= 2)) {
-    throw new Error('chain.maxContextTurns must be an integer of at least 2');
-  }
-  return chain;
-};
-
-const buildChain = (env) => assertChain({
-  enabled: env.CHAIN_REPLIES !== 'false',
-  fullDepth: 3,
-  decay: 0.5,
-  maxBotTurns: 8,
-  maxContextTurns: 12,
-  maxWalkSteps: 50,
-});
-
-const buildTyping = () => ({
-  enabled: true,
-  refreshMs: 8000,
-});
-
-export const assertBurst = (burst) => {
-  if (!(Number.isInteger(burst.maxMessages) && burst.maxMessages >= 1)) {
-    throw new Error('burst.maxMessages must be an integer of at least 1');
-  }
-  return burst;
-};
-
-const buildBurst = (env) => assertBurst({
-  enabled: env.BURSTS !== 'false',
-  maxMessages: 3,
-  windowMs: 30000,
-  minRate: 0.2,
-  minSamples: 20,
-  cacheMs: 3600000,
-  msPerChar: 40,
-  minDelayMs: 800,
-  maxDelayMs: 4000,
-  siblingWindowMs: 60000,
-});
-
-const MAX_SEARCH_LIMIT = 1000;
-
-export const assertProfiles = (profiles) => {
-  const { refreshIntervalMs, minCheckIntervalMs, lookupTimeoutMs, searchLimit } = profiles;
-  if (!(Number.isInteger(refreshIntervalMs) && refreshIntervalMs >= 0)) {
-    throw new Error('profiles.refreshIntervalMs must be an integer of at least 0');
-  }
-  if (!(Number.isFinite(minCheckIntervalMs) && minCheckIntervalMs >= 0)) {
-    throw new Error('profiles.minCheckIntervalMs must be a number of at least 0');
-  }
-  if (!(Number.isFinite(lookupTimeoutMs) && lookupTimeoutMs > 0)) {
-    throw new Error('profiles.lookupTimeoutMs must be a number greater than 0');
-  }
-  if (!(Number.isInteger(searchLimit) && searchLimit >= 1 && searchLimit <= MAX_SEARCH_LIMIT)) {
-    throw new Error(`profiles.searchLimit must be an integer from 1 to ${MAX_SEARCH_LIMIT}`);
-  }
-  return profiles;
-};
-
-const buildProfiles = () => assertProfiles({
-  refreshIntervalMs: 3600000,
-  minCheckIntervalMs: 10000,
-  lookupTimeoutMs: 5000,
-  searchLimit: 100,
-});
-
-const MAX_PAGE_SIZE = 100;
-
-export const assertBackfill = (backfill) => {
-  const { pageSize, batchSize, pageRetries, retryDelayMs, pageTimeoutMs } = backfill;
-  if (!(Number.isInteger(pageSize) && pageSize >= 1 && pageSize <= MAX_PAGE_SIZE)) {
-    throw new Error(`backfill.pageSize must be an integer from 1 to ${MAX_PAGE_SIZE}`);
-  }
-  if (!(Number.isInteger(batchSize) && batchSize >= 1)) {
-    throw new Error('backfill.batchSize must be an integer of at least 1');
-  }
-  if (!(Number.isInteger(pageRetries) && pageRetries >= 0)) {
-    throw new Error('backfill.pageRetries must be an integer of at least 0');
-  }
-  if (!(Number.isFinite(retryDelayMs) && retryDelayMs >= 0)) {
-    throw new Error('backfill.retryDelayMs must be a number of at least 0');
-  }
-  if (!(Number.isFinite(pageTimeoutMs) && pageTimeoutMs > 0)) {
-    throw new Error('backfill.pageTimeoutMs must be a number greater than 0');
-  }
-  return backfill;
-};
-
-const buildBackfill = () => assertBackfill({
-  pageSize: 100,
-  batchSize: 100,
-  pageRetries: 3,
-  retryDelayMs: 2000,
-  pageTimeoutMs: 30000,
-});
-
-const buildLogging = () => ({
-  locale: 'en-US',
-  timeZone: 'America/Chicago',
-});
+export { DEFAULT_BUSY_TIMEOUT_MS } from './config/sections.js';
+export { PERSONA_DISPLAYS } from './config/parse.js';
+export { assertRequired, buildGifKeyWarning } from './config/requirements.js';
+export { createConfigError, isConfigError } from './config/errors.js';
+export {
+  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertRetrieval, assertPersona,
+} from './config/validate.js';
+export { assertChain, assertBurst, assertProfiles, assertBackfill } from './config/validateFeatures.js';
 
 const deepFreeze = (value) => {
   if (value === null || typeof value !== 'object') return value;
@@ -269,24 +19,24 @@ const deepFreeze = (value) => {
 };
 
 const buildConfig = (env) => ({
-  discord: buildDiscord(env),
-  reply: buildReply(env),
-  revive: buildRevive(env),
-  filter: buildFilter(),
-  storage: buildStorage(),
-  chroma: buildChroma(env),
-  embedding: buildEmbedding(),
-  retrieval: assertRetrieval(buildRetrieval()),
-  persona: buildPersona(),
-  llm: buildLlm(env),
-  gifs: buildGifs(env),
-  context: buildContext(),
-  chain: buildChain(env),
-  typing: buildTyping(),
-  burst: buildBurst(env),
-  profiles: buildProfiles(),
-  backfill: buildBackfill(),
-  logging: buildLogging(),
+  discord: base.buildDiscord(env),
+  reply: check.assertReply(base.buildReply(env)),
+  revive: base.buildRevive(env),
+  filter: check.assertFilter(base.buildFilter()),
+  storage: check.assertStorage(base.buildStorage()),
+  chroma: base.buildChroma(env),
+  embedding: base.buildEmbedding(),
+  retrieval: check.assertRetrieval(base.buildRetrieval()),
+  persona: check.assertPersona(base.buildPersona()),
+  llm: check.assertLlm(feature.buildLlm(env)),
+  gifs: check.assertGifs(feature.buildGifs(env)),
+  context: feature.buildContext(),
+  chain: checkFeature.assertChain(feature.buildChain(env)),
+  typing: feature.buildTyping(),
+  burst: checkFeature.assertBurst(feature.buildBurst(env)),
+  profiles: checkFeature.assertProfiles(feature.buildProfiles()),
+  backfill: checkFeature.assertBackfill(feature.buildBackfill()),
+  logging: feature.buildLogging(),
 });
 
 export const DEFAULTS = deepFreeze(buildConfig({}));

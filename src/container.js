@@ -1,5 +1,6 @@
 // The only place services are wired together.
 import { createLogger } from './logger.js';
+import { createConfigError } from './config/errors.js';
 import { buildUserDirectory } from './userData/loadData.js';
 import { createMessageFilter } from './corpus/messageFilter.js';
 import { openDatabase } from './storage/database.js';
@@ -60,13 +61,18 @@ export const defaultClock = () => {
   return clock;
 };
 
+// Only engines whose key is set are built, so a missing key never produces a request.
+const buildGifEngines = ({ config, vendor }) => {
+  const { klipyApiKey, giphyApiKey, humorApiKey } = config.gifs;
+  return [
+    klipyApiKey && createKlipyEngine({ fetch: vendor.fetch, config }),
+    giphyApiKey && createGiphyEngine({ giphy: new vendor.GiphyFetch(giphyApiKey), config }),
+    humorApiKey && createHumorEngine({ fetch: vendor.fetch, config }),
+  ].filter(Boolean);
+};
+
 export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logger = createLogger() }) => {
-  const giphy = new vendor.GiphyFetch(config.gifs.giphyApiKey);
-  const engines = [
-    createKlipyEngine({ fetch: vendor.fetch, config }),
-    createGiphyEngine({ giphy, config }),
-    createHumorEngine({ fetch: vendor.fetch, config }),
-  ];
+  const engines = buildGifEngines({ config, vendor });
   return createGifResolver({ engines, config, random: clock.random, logger, clock });
 };
 
@@ -81,19 +87,31 @@ const buildVectorStore = ({ config, vendor, generation }) => {
   return createVectorStore({ client, embeddingFunction, config, generation });
 };
 
+// Without a key the SDK would fall back to OPENAI_API_KEY and send it to DeepSeek, so it is never constructed.
+const buildChatClient = ({ config, vendor }) => {
+  const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
+  if (!apiKey) {
+    return {
+      complete: async () => {
+        throw createConfigError('DEEPSEEK_API_KEY is not set, so no reply can be generated.');
+      },
+    };
+  }
+  const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
+  return createChatClient({ client, config });
+};
+
 const buildGenerator = ({
   config, vendor, retriever, userDirectory, botMessageStore, messageStore, burstProfile, logger,
 }) => {
-  const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
-  const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
-  const chatClient = createChatClient({ client, config });
+  const chatClient = buildChatClient({ config, vendor });
   return createGenerator({
     chatClient, retriever, userDirectory, botMessageStore, messageStore, burstProfile, config, logger,
   });
 };
 
 const buildCore = ({ config, vendor, data, clock, logger }) => {
-  const db = openDatabase(config.storage.databasePath);
+  const db = openDatabase(config.storage.databasePath, { busyTimeoutMs: config.storage.busyTimeoutMs });
   const messageStore = createMessageStore({ db, config });
   const botMessageStore = createBotMessageStore({ db, config });
   const profileStore = createProfileStore({ db });

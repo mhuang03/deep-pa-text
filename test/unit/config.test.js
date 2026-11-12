@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
+import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig,
+  assertGifs, assertLlm, assertReply, assertFilter, assertStorage } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -30,7 +31,7 @@ const EXPECTED_DEFAULTS = {
   filter: { minLength: 5, maxLength: 200, commandPrefixes: ['!', '$', '#', '%', '&', '-', '+', 'p!'] },
   storage: {
     databasePath: 'messages.db', usersPath: 'data/users.json', pingCachePath: 'data/ping_caches.json',
-    inferredReferenceWindowMs: 3600000,
+    inferredReferenceWindowMs: 3600000, busyTimeoutMs: 5000,
   },
   chroma: { port: 7429, messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
   embedding: { apiKeyEnvVar: 'OPENAI_API_KEY', modelName: 'text-embedding-3-small', dimensions: 512 },
@@ -85,33 +86,69 @@ test('secrets are read from the environment', () => {
 
 test('applies each optional environment override', () => {
   const config = loadConfig({
-    PATEXT_CHANNEL_ID: '1', GUILD_ID: '2', CHROMA_PORT: '9000', REPLY_OVERRIDE: 'true', REVIVE_OVERRIDE: 'true',
+    PATEXT_CHANNEL_ID: '12345', GUILD_ID: '23456', CHROMA_PORT: '9000', REPLY_OVERRIDE: 'true', REVIVE_OVERRIDE: 'true',
   });
-  assert.equal(config.discord.channelId, '1');
-  assert.equal(config.discord.guildId, '2');
+  assert.equal(config.discord.channelId, '12345');
+  assert.equal(config.discord.guildId, '23456');
   assert.equal(config.chroma.port, 9000);
   assert.equal(config.reply.override, true);
   assert.equal(config.revive.override, true);
 });
 
-test('boolean overrides are true only for the string true', () => {
-  ['TRUE', '1', 'yes', 'false', ''].forEach((value) => {
-    const config = loadConfig({ REPLY_OVERRIDE: value, REVIVE_OVERRIDE: value });
-    assert.equal(config.reply.override, false, value);
-    assert.equal(config.revive.override, false, value);
+test('boolean overrides accept true and false in any case and reject anything else', () => {
+  ['true', 'TRUE', ' True '].forEach((value) => {
+    assert.equal(loadConfig({ REPLY_OVERRIDE: value }).reply.override, true, value);
+  });
+  ['false', 'FALSE'].forEach((value) => {
+    assert.equal(loadConfig({ REVIVE_OVERRIDE: value }).revive.override, false, value);
+  });
+  ['1', 'yes', '0', 'on', 'off'].forEach((value) => {
+    assert.throws(() => loadConfig({ REPLY_OVERRIDE: value }), (e) => isConfigError(e)
+      && e.message === `REPLY_OVERRIDE must be "true" or "false", got "${value}"`);
   });
 });
 
-test('PING_REPLIED_USER disables the reply ping only when it is the string false', () => {
+test('an empty or whitespace-only variable takes the default', () => {
+  const config = loadConfig({
+    REPLY_OVERRIDE: '', BURSTS: '  ', CHAIN_REPLIES: '', PING_REPLIED_USER: '', CHROMA_PORT: ' ',
+    PATEXT_CHANNEL_ID: '', GUILD_ID: ' ', PERSONA_DISPLAY: '',
+  });
+  assert.deepEqual(config, DEFAULTS);
+});
+
+test('PING_REPLIED_USER, CHAIN_REPLIES and BURSTS are strict booleans', () => {
   assert.equal(loadConfig({ PING_REPLIED_USER: 'false' }).discord.pingRepliedUser, false);
-  ['true', 'TRUE', '', '0', 'no'].forEach((value) => {
-    assert.equal(loadConfig({ PING_REPLIED_USER: value }).discord.pingRepliedUser, true, value);
+  assert.equal(loadConfig({ CHAIN_REPLIES: 'FALSE' }).chain.enabled, false);
+  assert.equal(loadConfig({ BURSTS: 'false' }).burst.enabled, false);
+  assert.equal(loadConfig({ BURSTS: 'TRUE' }).burst.enabled, true);
+  ['0', 'off', 'no'].forEach((value) => {
+    ['PING_REPLIED_USER', 'CHAIN_REPLIES', 'BURSTS'].forEach((name) => {
+      assert.throws(() => loadConfig({ [name]: value }), new RegExp(`${name} must be "true" or "false"`));
+    });
   });
 });
 
-test('throws when CHROMA_PORT is not a number', () => {
-  assert.throws(() => loadConfig({ CHROMA_PORT: 'abc' }), { message: 'CHROMA_PORT must be a number' });
-  assert.throws(() => loadConfig({ CHROMA_PORT: '' }), { message: 'CHROMA_PORT must be a number' });
+test('CHROMA_PORT is an integer from 1 to 65535', () => {
+  assert.equal(loadConfig({ CHROMA_PORT: ' 8000 ' }).chroma.port, 8000);
+  assert.equal(loadConfig({ CHROMA_PORT: '65535' }).chroma.port, 65535);
+  ['abc', '0', '70000', '80.5', '0x10', '1e3', '-1', '65536'].forEach((value) => {
+    assert.throws(() => loadConfig({ CHROMA_PORT: value }), (e) => isConfigError(e) && /CHROMA_PORT/.test(e.message), value);
+  });
+});
+
+test('channel and guild ids must be 5 to 25 digits when set', () => {
+  assert.equal(loadConfig({ GUILD_ID: '1'.repeat(25) }).discord.guildId, '1'.repeat(25));
+  ['abc', '1234', '1'.repeat(26), '12a45'].forEach((value) => {
+    assert.throws(() => loadConfig({ PATEXT_CHANNEL_ID: value }), /PATEXT_CHANNEL_ID/, value);
+    assert.throws(() => loadConfig({ GUILD_ID: value }), /GUILD_ID/, value);
+  });
+});
+
+test('secrets that are blank count as not set', () => {
+  const config = loadConfig({ DEEPSEEK_API_KEY: '  ', GIPHY_API_KEY: '', DISCORD_BOT_TOKEN: ' tok ' });
+  assert.equal(config.llm.apiKey, undefined);
+  assert.equal(config.gifs.giphyApiKey, undefined);
+  assert.equal(config.discord.token, 'tok');
 });
 
 test('is deeply frozen, including arrays', () => {
@@ -127,7 +164,7 @@ test('is deeply frozen, including arrays', () => {
 
 test('does not share state between calls', () => {
   assert.notEqual(loadConfig({}), loadConfig({}));
-  assert.equal(loadConfig({ GUILD_ID: 'x' }).discord.guildId, 'x');
+  assert.equal(loadConfig({ GUILD_ID: '99999' }).discord.guildId, '99999');
   assert.equal(loadConfig({}).discord.guildId, '478743674826784769');
 });
 
@@ -143,7 +180,7 @@ test('assertPersona rejects an invalid half-life or recency floor', () => {
 });
 
 test('assertRetrieval rejects an invalid over-fetch factor or near-duplicate threshold', () => {
-  const valid = { overFetchFactor: 1, nearDuplicateThreshold: 1 };
+  const valid = { ...DEFAULTS.retrieval, overFetchFactor: 1, nearDuplicateThreshold: 1 };
   assert.equal(assertRetrieval(valid), valid);
   [0, -1, 1.5, NaN, undefined].forEach((overFetchFactor) => {
     assert.throws(() => assertRetrieval({ ...valid, overFetchFactor }), /overFetchFactor/);
@@ -153,12 +190,6 @@ test('assertRetrieval rejects an invalid over-fetch factor or near-duplicate thr
   });
 });
 
-test('CHAIN_REPLIES=false disables chain replies and anything else keeps them on', () => {
-  assert.equal(loadConfig({ CHAIN_REPLIES: 'false' }).chain.enabled, false);
-  assert.equal(loadConfig({ CHAIN_REPLIES: 'true' }).chain.enabled, true);
-  assert.equal(loadConfig({}).chain.enabled, true);
-});
-
 test('assertChain validates decay and the context size', () => {
   const ok = { ...DEFAULTS.chain };
   assert.equal(assertChain(ok), ok);
@@ -166,11 +197,6 @@ test('assertChain validates decay and the context size', () => {
   [1, 1.5, 0, NaN].forEach((maxContextTurns) =>
     assert.throws(() => assertChain({ ...ok, maxContextTurns }), /chain\.maxContextTurns/));
   assert.doesNotThrow(() => assertChain({ ...ok, maxContextTurns: 2 }));
-});
-
-test('BURSTS disables bursts only when it is the string false', () => {
-  assert.equal(loadConfig({ BURSTS: 'false' }).burst.enabled, false);
-  ['true', 'FALSE', '', '0'].forEach((value) => assert.equal(loadConfig({ BURSTS: value }).burst.enabled, true, value));
 });
 
 test('assertBurst requires maxMessages to be an integer of at least 1', () => {
@@ -185,7 +211,7 @@ test('PERSONA_DISPLAY accepts embed and webhook and rejects anything else naming
   assert.equal(loadConfig({ PERSONA_DISPLAY: 'webhook' }).discord.personaDisplay, 'webhook');
   assert.equal(loadConfig({ PERSONA_DISPLAY: 'embed' }).discord.personaDisplay, 'embed');
   assert.throws(() => loadConfig({ PERSONA_DISPLAY: 'Webhook' }), /PERSONA_DISPLAY.*"Webhook"/);
-  assert.throws(() => loadConfig({ PERSONA_DISPLAY: '' }), /PERSONA_DISPLAY/);
+  assert.throws(() => loadConfig({ PERSONA_DISPLAY: ' ' + 'x' }), /PERSONA_DISPLAY/);
 });
 
 test('assertProfiles accepts the boundaries and rejects values outside the ranges', () => {
@@ -214,4 +240,70 @@ test('assertBackfill accepts the boundaries and rejects values outside the range
   bad.forEach((override) => {
     assert.throws(() => assertBackfill({ ...ok, ...override }), /backfill\./, JSON.stringify(override));
   });
+});
+
+const failsFor = (assertFn, valid, key, values) => values.forEach((value) => {
+  assert.throws(() => assertFn({ ...valid, [key]: value }), (e) => isConfigError(e) && e.message.includes(key),
+    `${key}=${String(value)}`);
+});
+const passesFor = (assertFn, valid, key, values) => values.forEach((value) => {
+  assert.doesNotThrow(() => assertFn({ ...valid, [key]: value }), `${key}=${String(value)}`);
+});
+
+test('assertGifs requires candidates >= 1 (integer) and a positive timeout', () => {
+  const ok = DEFAULTS.gifs;
+  assert.equal(assertGifs(ok), ok);
+  failsFor(assertGifs, ok, 'candidates', [0, 1.5, NaN, Infinity, -1, undefined]);
+  failsFor(assertGifs, ok, 'timeoutMs', [0, NaN, Infinity, -1, undefined]);
+  passesFor(assertGifs, ok, 'candidates', [1, 7]);
+  passesFor(assertGifs, ok, 'timeoutMs', [0.5, 1]);
+});
+
+test('assertLlm requires a positive timeout and non-negative integer retries', () => {
+  const ok = DEFAULTS.llm;
+  assert.equal(assertLlm(ok), ok);
+  failsFor(assertLlm, ok, 'timeoutMs', [0, NaN, Infinity, -1]);
+  failsFor(assertLlm, ok, 'maxRetries', [1.5, NaN, Infinity, -1]);
+  failsFor(assertLlm, ok, 'emptyRetries', [1.5, NaN, Infinity, -1]);
+  passesFor(assertLlm, ok, 'maxRetries', [0, 2]);
+  passesFor(assertLlm, ok, 'emptyRetries', [0, 2]);
+});
+
+test('assertReply requires a probability in [0, 1] and a non-negative interval', () => {
+  const ok = DEFAULTS.reply;
+  assert.equal(assertReply(ok), ok);
+  failsFor(assertReply, ok, 'probability', [-0.1, 1.1, NaN, Infinity, undefined]);
+  failsFor(assertReply, ok, 'minIntervalMs', [-1, NaN, Infinity]);
+  passesFor(assertReply, ok, 'probability', [0, 1, 0.5]);
+  passesFor(assertReply, ok, 'minIntervalMs', [0, 1.5]);
+});
+
+test('assertFilter requires minLength <= maxLength', () => {
+  const ok = DEFAULTS.filter;
+  assert.equal(assertFilter(ok), ok);
+  assert.throws(() => assertFilter({ ...ok, minLength: 10, maxLength: 9 }), /minLength/);
+  assert.doesNotThrow(() => assertFilter({ ...ok, minLength: 9, maxLength: 9 }));
+  failsFor(assertFilter, ok, 'minLength', [NaN, -1]);
+  failsFor(assertFilter, ok, 'maxLength', [NaN, Infinity]);
+});
+
+test('assertRetrieval requires every result count to be an integer of at least 1', () => {
+  const ok = DEFAULTS.retrieval;
+  ['replyResults', 'similarResults', 'gifResults', 'otherResults', 'reviveSamples', 'likelyRepliers'].forEach((key) => {
+    failsFor(assertRetrieval, ok, key, [0, 1.5, NaN, Infinity, undefined]);
+    passesFor(assertRetrieval, ok, key, [1, 50]);
+  });
+});
+
+test('assertStorage requires a non-negative integer busy timeout', () => {
+  const ok = DEFAULTS.storage;
+  assert.equal(assertStorage(ok), ok);
+  failsFor(assertStorage, ok, 'busyTimeoutMs', [-1, 1.5, NaN, Infinity, undefined]);
+  passesFor(assertStorage, ok, 'busyTimeoutMs', [0, 5000]);
+});
+
+test('every validator error is a config error', () => {
+  assert.throws(() => assertGifs({ ...DEFAULTS.gifs, candidates: 0 }), (e) => isConfigError(e) && e instanceof Error);
+  assert.equal(isConfigError(new Error('x')), false);
+  assert.equal(isConfigError(undefined), false);
 });

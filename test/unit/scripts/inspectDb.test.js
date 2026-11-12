@@ -38,7 +38,9 @@ const seed = (dir) => {
   db.close();
 };
 
-const run = (cwd) => spawnSync(process.execPath, [SCRIPT], { cwd, encoding: 'utf8' });
+const run = (cwd, tmp = os.tmpdir()) => spawnSync(process.execPath, ['--no-warnings', SCRIPT], {
+  cwd, encoding: 'utf8', env: { PATH: process.env.PATH, TMPDIR: tmp },
+});
 
 test('prints the five sections from a seeded database', (t) => {
   const dir = makeDir(t);
@@ -64,7 +66,9 @@ test('prints the five sections from a seeded database', (t) => {
 test('opens the database read-only: a missing database is an error and is not created', (t) => {
   const dir = makeDir(t);
   const result = run(dir);
-  assert.notEqual(result.status, 0);
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim().split('\n').length, 1, 'one line, no stack');
+  assert.doesNotMatch(result.stderr, /\bat .*\.js/);
   assert.equal(fs.existsSync(path.join(dir, 'messages.db')), false);
 });
 
@@ -98,4 +102,33 @@ test('hides soft-deleted rows', (t) => {
   const result = run(dir);
   assert.equal(result.status, 0, result.stderr);
   assert.ok(!result.stdout.includes('first message here (reference'));
+});
+
+test('a legacy database (no deleted_at, no bot_messages) is read in place: bytes unchanged, nothing copied', (t) => {
+  const dir = makeDir(t);
+  const tmp = path.join(dir, 'tmp');
+  fs.mkdirSync(tmp);
+  const file = path.join(dir, 'messages.db');
+  const db = new DatabaseSync(file);
+  MIGRATIONS.slice(0, 3).forEach((m) => db.exec(m.sql));
+  db.exec(`INSERT INTO messages (id, author, content, timestamp) VALUES ('a', 'alice', 'legacy row here', ${T0});
+    INSERT INTO filtered_messages (id, author, content, timestamp, has_gif) VALUES ('a', 'alice', 'legacy row here', ${T0}, 0)`);
+  db.close();
+  const before = fs.readFileSync(file);
+  const result = run(dir, tmp);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes('[11/12/2026, 12:00:00 PM] alice: legacy row here (reference: null)'));
+  const lines = result.stdout.split('\n');
+  assert.equal(lines[lines.indexOf('Latest bot messages:') + 1], '(no bot_messages table yet)');
+  assert.deepEqual(fs.readFileSync(file), before);
+  assert.deepEqual(fs.readdirSync(tmp), []);
+  assert.deepEqual(fs.readdirSync(dir).sort(), ['messages.db', 'tmp']);
+});
+
+test('a corrupt database prints one line and exits 1 without a stack', (t) => {
+  const dir = makeDir(t);
+  fs.writeFileSync(path.join(dir, 'messages.db'), 'this is not a sqlite database at all, just text'.repeat(50));
+  const result = run(dir);
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim().split('\n').length, 1);
 });

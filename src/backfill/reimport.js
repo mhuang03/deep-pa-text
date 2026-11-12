@@ -57,7 +57,7 @@ export const createReimporter = ({
 
   const withArchive = async (path, fn) => {
     if (!fs.existsSync(path)) throw new Error(`Expected the previous database at ${path}, but it does not exist.`);
-    const handle = openDatabase(path, { readOnly: true });
+    const handle = openDatabase(path, { readOnly: true, busyTimeoutMs: config.storage.busyTimeoutMs });
     try {
       return await fn(createArchiveReader({ db: handle }));
     } finally {
