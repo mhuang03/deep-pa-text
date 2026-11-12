@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { describeLocalTime, describeQuiet } from '../../../src/context/situation.js';
+import { describeLocalTime, describeQuiet } from '../../../src/text/situation.js';
 
 const MINUTE = 60000;
 const HOUR = 60 * MINUTE;

@@ -2,23 +2,23 @@ import {
   ModalBuilder, StringSelectMenuBuilder, StringSelectMenuOptionBuilder,
   LabelBuilder, TextDisplayBuilder,
 } from 'discord.js';
-import { truncateCodePoints } from '../util/text.js';
+import { truncateCodePoints } from '../text/truncate.js';
 
 export const REPLY_MODAL_PREFIX = 'replyModal';
 export const AUTHOR_SELECT_ID = 'authorSelect';
 export const RANDOM_AUTHOR = 'random';
 // Discord allows 25 select options; one is kept for 'random'.
 export const MODAL_MAX_USERS = 24;
-export const PREVIEW_ELLIPSIS = '…';
+const PREVIEW_ELLIPSIS = '…';
 
-export const MODAL_TITLE = 'Reply using deep pa-text';
-export const AUTHOR_LABEL = 'Who should I reply as?';
-export const AUTHOR_PLACEHOLDER = 'Select an author';
-export const RANDOM_DESCRIPTION = 'Reply as a random user';
+const MODAL_TITLE = 'Reply using deep pa-text';
+const AUTHOR_LABEL = 'Who should I reply as?';
+const AUTHOR_PLACEHOLDER = 'Select an author';
+const RANDOM_DESCRIPTION = 'Reply as a random user';
 export const NOT_REPLYABLE_MESSAGE = 'The selected message is not replyable.';
 export const MODAL_TIMEOUT_LOG = 'reply modal dismissed or timed out';
 export const GENERATION_FAILED_MESSAGE = 'Could not generate a reply.';
-export const WRONG_CHANNEL_MESSAGE = 'This command can only be used in the #pa-text channel.';
+export const WRONG_CHANNEL_MESSAGE = "This command can only be used in the bot's channel.";
 
 const buildUserOption = (user, defaultAuthor) => {
   const option = new StringSelectMenuOptionBuilder()

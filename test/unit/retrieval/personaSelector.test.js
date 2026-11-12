@@ -36,7 +36,7 @@ const setup = async (rolls = []) => {
     return queue.shift();
   };
   const db = openDatabase(':memory:');
-  const messageStore = createMessageStore({ db, config: { storage: { inferredReferenceWindowMs: 1 } } });
+  const messageStore = createMessageStore({ db, config: { storage: { inferredReferenceWindowMs: 1, chunkSize: 500 } } });
   const selector = createPersonaSelector({ vectorStore, messageStore, users, random, config });
   const seed = (rows) => fake.state.collection('message_reply_embeddings').seed(
     rows.map(([id, document, author, timestamp]) => ({ id, document, metadata: { author, timestamp } })),

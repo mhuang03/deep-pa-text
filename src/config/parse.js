@@ -1,6 +1,6 @@
 import { createConfigError } from './errors.js';
 
-export const PERSONA_DISPLAYS = Object.freeze(['embed', 'webhook']);
+const PERSONA_DISPLAYS = Object.freeze(['embed', 'webhook']);
 
 const MIN_PORT = 1;
 const MAX_PORT = 65535;

@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadConfig, assertRequired, buildGifKeyWarning, isConfigError, createConfigError } from '../../../src/config.js';
+import { loadConfig, isConfigError, createConfigError } from '../../../src/config.js';
+import { assertRequired, buildGifKeyWarning } from '../../../src/config/requirements.js';
 
 const config = loadConfig({});
 const MISSING = 'Missing required environment variables: ';

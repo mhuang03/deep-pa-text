@@ -1,6 +1,6 @@
 import { EmbedBuilder } from 'discord.js';
 
-export const THINKING_TEXT = 'thinking...';
+const THINKING_TEXT = 'thinking...';
 
 export const createAuthorEmbeds = ({ config, memberProfiles }) => {
   const make = async (author, guild, { thinking = false } = {}) => {

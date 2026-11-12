@@ -4,7 +4,7 @@ import { hitWeight, pickWeighted, weighAuthors } from '../../../src/retrieval/pe
 
 const DAY = 86_400_000;
 const HALF_LIFE = 100 * DAY;
-const options = { referenceTimeMs: 1000 * DAY, halfLifeMs: HALF_LIFE, minRecency: 0.25 };
+const options = { referenceTimeMs: 1000 * DAY, halfLifeMs: HALF_LIFE, minRecency: 0.25, missingSimilarity: 0.5 };
 const hit = (author, distance, timestamp) => ({ distance, metadata: { author, timestamp } });
 const NOW = options.referenceTimeMs;
 

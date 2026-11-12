@@ -1,5 +1,5 @@
-import { formatTranscript, truncateEntry } from '../context/transcript.js';
-import { describeLocalTime, describeQuiet } from '../context/situation.js';
+import { formatTranscript, truncateEntry } from '../text/transcript.js';
+import { describeLocalTime, describeQuiet } from '../text/situation.js';
 
 const EXAMPLES_INTRO = {
   replies: 'Here are examples of how the user replied to messages similar to the one they just received. "them" is the message the user was responding to and "you" is the user\'s reply:',

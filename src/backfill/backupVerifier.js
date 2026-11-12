@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-export const HASH_CHUNK_BYTES = 1024 * 1024;
+const HASH_CHUNK_BYTES = 1024 * 1024;
 const TABLE_QUERY = "SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?";
 
 // Streamed in fixed chunks so a large database is never read into memory at once.

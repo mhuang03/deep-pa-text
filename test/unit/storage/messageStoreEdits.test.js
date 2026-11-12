@@ -4,7 +4,7 @@ import { openDatabase } from '../../../src/storage/database.js';
 import { createMessageStore } from '../../../src/storage/messageStore.js';
 
 const HOUR = 3600000;
-const config = { storage: { inferredReferenceWindowMs: HOUR } };
+const config = { storage: { inferredReferenceWindowMs: HOUR, chunkSize: 500 } };
 const msg = (id, author, timestamp, extra = {}) => ({
   id, author, content: `content ${id}`, timestamp, reference: null, ...extra,
 });

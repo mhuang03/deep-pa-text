@@ -57,6 +57,7 @@ export const buildStorage = () => ({
   pingCachePath: 'data/ping_caches.json',
   inferredReferenceWindowMs: 3600000,
   busyTimeoutMs: DEFAULT_BUSY_TIMEOUT_MS,
+  chunkSize: 500,
 });
 
 export const buildChroma = (env) => ({
@@ -98,4 +99,5 @@ export const buildRetrieval = () => ({
 export const buildPersona = () => ({
   recencyHalfLifeMs: 15552000000,
   minRecencyWeight: 0.25,
+  missingSimilarity: 0.5,
 });

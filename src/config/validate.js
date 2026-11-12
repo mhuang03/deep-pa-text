@@ -47,6 +47,7 @@ export const assertChroma = (chroma) => checkRules('chroma', chroma, {
 
 export const assertStorage = (storage) => checkRules('storage', storage, {
   busyTimeoutMs: integer(0),
+  chunkSize: integer(1),
 });
 
 export const assertRetrieval = (retrieval) => checkRules('retrieval', retrieval, {
@@ -63,4 +64,5 @@ export const assertRetrieval = (retrieval) => checkRules('retrieval', retrieval,
 export const assertPersona = (persona) => checkRules('persona', persona, {
   recencyHalfLifeMs: above(0),
   minRecencyWeight: between(0, 1, 'low'),
+  missingSimilarity: between(0, 1, 'low'),
 });

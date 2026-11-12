@@ -8,7 +8,7 @@ import { RANDOM_STARTERS } from '../../../src/storage/messageSql.js';
 const HOUR = 3600000;
 const SCALE_MESSAGES = 20000;
 const SCALE_BOUND_MS = 1000;
-const config = { storage: { inferredReferenceWindowMs: HOUR }, burst: { siblingWindowMs: 1000 } };
+const config = { storage: { inferredReferenceWindowMs: HOUR, chunkSize: 500 }, burst: { siblingWindowMs: 1000 } };
 
 const setup = () => {
   const db = openDatabase(':memory:');

@@ -1,4 +1,4 @@
-import { normalizeForDedup } from './normalize.js';
+import { normalizeForDedup } from '../text/normalize.js';
 import { cosineSimilarity } from './similarity.js';
 
 const isNearDuplicate = (a, b, { nearDuplicateThreshold, nearDuplicateMinChars }) => {

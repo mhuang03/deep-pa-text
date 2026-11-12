@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildQueryText } from '../../../src/retrieval/queryText.js';
+import { buildQueryText } from '../../../src/text/queryText.js';
 
 const options = { shortMessageChars: 25, queryContextMessages: 2 };
 const transcript = ['one', 'two', 'three'].map((content) => ({ content }));

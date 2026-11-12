@@ -8,7 +8,7 @@ import { createFakeChroma, fakeEmbed } from '../../support/fakes/chroma.js';
 import { inertClock, CHROMA_LIMITS } from '../../support/clocks.js';
 
 const baseConfig = {
-  storage: { inferredReferenceWindowMs: 3600000 },
+  storage: { inferredReferenceWindowMs: 3600000, chunkSize: 500 },
   chroma: {
     messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings', ...CHROMA_LIMITS,
   },
@@ -171,23 +171,37 @@ test('reply examples pair each hit with the content of its parent message', asyn
   assert.equal(byYou['only in chroma'], null);
 });
 
-test('hits sharing a document keep the nearest id and its parent; one getParents call', async () => {
+// Two reply rows hold the same document with different parents; the query embeds `queryContent`, so the
+// row whose stored embedding is that text's embedding is the nearest hit.
+const duplicateHits = async (queryContent) => {
   const ctx = await setup();
   store(ctx, 'p1', 'bob', 'first parent', 1);
   store(ctx, 'p2', 'bob', 'second parent', 2);
   ctx.messageStore.insertFiltered({ id: 'r1', author: 'alice', content: 'cats rule', timestamp: 20, reference: 'p1' });
   ctx.messageStore.insertFiltered({ id: 'r2', author: 'alice', content: 'cats rule', timestamp: 30, reference: 'p2' });
-  seed(ctx, 'message_reply_embeddings', [
-    ['r2', 'cats rule', meta('alice', 30)],
-    ['r1', 'cats rule', meta('alice', 20)],
+  ctx.fake.state.collection('message_reply_embeddings').seed([
+    { id: 'r2', document: 'cats rule', metadata: meta('alice', 30), embedding: fakeEmbed('zebra crossing ahead') },
+    { id: 'r1', document: 'cats rule', metadata: meta('alice', 20), embedding: fakeEmbed('cats rule') },
   ]);
   const calls = [];
   const original = ctx.messageStore.getParents;
   ctx.messageStore.getParents = (ids) => { calls.push(ids); return original(ids); };
-  const { replies } = await ctx.retriever.retrieveForReply('alice', { ...record, timestamp: 100 });
+  const { replies } = await ctx.retriever.retrieveForReply('alice', { ...record, content: queryContent, timestamp: 100 });
+  return { replies, calls };
+};
+
+test('hits sharing a document keep the nearest id and attach its parent; one getParents call', async () => {
+  const { replies, calls } = await duplicateHits('cats rule');
   assert.equal(replies.length, 1);
-  assert.equal(calls.length, 1);
-  assert.equal(replies[0].them, calls[0][0] === 'r1' ? 'first parent' : 'second parent');
+  assert.deepEqual(calls, [['r1']]);
+  assert.equal(replies[0].them, 'first parent');
+});
+
+test('the winner follows the query: when the other duplicate is nearest its parent is attached', async () => {
+  const { replies, calls } = await duplicateHits('zebra crossing ahead');
+  assert.equal(replies.length, 1);
+  assert.deepEqual(calls, [['r2']]);
+  assert.equal(replies[0].them, 'second parent');
 });
 
 test('a bucket still reaches its limit when near-identical nearest hits are merged away', async () => {

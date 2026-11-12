@@ -1,9 +1,8 @@
-const MISSING_SIMILARITY = 0.5;
 const HALF_LIFE_BASE = 0.5;
 const MAX_ROLL = 1 - Number.EPSILON;
 
-const similarityOf = (distance) =>
-  Number.isFinite(distance) ? 1 / (1 + Math.max(0, distance)) : MISSING_SIMILARITY;
+const similarityOf = (distance, missingSimilarity) =>
+  Number.isFinite(distance) ? 1 / (1 + Math.max(0, distance)) : missingSimilarity;
 
 const recencyOf = (timestamp, { referenceTimeMs, halfLifeMs, minRecency }) => {
   if (!Number.isFinite(timestamp)) return minRecency;
@@ -12,7 +11,7 @@ const recencyOf = (timestamp, { referenceTimeMs, halfLifeMs, minRecency }) => {
 };
 
 export const hitWeight = (hit, options) =>
-  similarityOf(hit.distance) * recencyOf(hit.metadata?.timestamp, options);
+  similarityOf(hit.distance, options.missingSimilarity) * recencyOf(hit.metadata?.timestamp, options);
 
 const isCountable = (hit, allowedAuthors) => {
   const author = hit.metadata?.author;

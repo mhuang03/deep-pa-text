@@ -1,4 +1,4 @@
-import { truncateCodePoints } from '../util/text.js';
+import { truncateCodePoints } from '../text/truncate.js';
 
 // Discord rejects webhook usernames containing these words, in any case.
 const FORBIDDEN_WORDS = /clyde|discord/i;

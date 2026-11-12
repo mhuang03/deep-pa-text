@@ -4,9 +4,6 @@ import * as check from './config/validate.js';
 import * as checkFeature from './config/validateFeatures.js';
 
 export { DEFAULT_BUSY_TIMEOUT_MS } from './config/sections.js';
-export { PERSONA_DISPLAYS } from './config/parse.js';
-export { assertRequired, buildGifKeyWarning } from './config/requirements.js';
-export { secretsOf } from './config/secrets.js';
 export { createConfigError, isConfigError } from './config/errors.js';
 export {
   assertGifs, assertLlm, assertReply, assertRevive, assertDiscord, assertFilter, assertStorage, assertRetrieval, assertPersona, assertChroma,

@@ -235,3 +235,79 @@ test('an edit keeps the reference of the message, including none for a reply to 
   const edited = world.sqlite.get('SELECT reference FROM filtered_messages WHERE content = ?', 'sure where do we go');
   assert.equal(edited.reference, first.id);
 });
+
+const MINUTE = 60_000;
+const STARTERS_INTRO = 'Here are messages this user has sent to start a conversation';
+const FREQUENT_INTRO = 'The user sends some of these messages often.';
+
+// The JSON list on the line after an intro sentence; list order is random.
+const listAfter = (text, intro) => {
+  const lines = text.split('\n');
+  const at = lines.findIndex((line) => line.startsWith(intro));
+  return at === -1 ? null : JSON.parse(lines[at + 1]);
+};
+
+// dave opens at T0 - 10h (always a starter). bob and carol talk, then dave answers 40 minutes after carol,
+// so that message is mid-conversation unless the one before it is gone.
+const revivePromptAfter = async (deletedIds) => {
+  const world = await createWorld();
+  try {
+    return await runRevive(world, deletedIds);
+  } finally {
+    await world.close();
+  }
+};
+
+const runRevive = async (world, deletedIds) => {
+  const start = BASE_TIME - 48 * HOUR;
+  await world.seed([
+    m('o0', 'dave', 'a very first opener from dave', start - 10 * HOUR),
+    m('a1', 'bob', 'anybody here this morning', start),
+    m('a2', 'carol', 'yes i am around here', start + 40 * MINUTE),
+    m('d1', 'dave', 'answering after forty minutes', start + 80 * MINUTE),
+  ]);
+  await world.ready();
+  for (const id of deletedIds) await world.emitDelete(id);
+  await world.emitMessage({ id: 'tail', author: 'alice', content: 'who wants lunch', timestamp: BASE_TIME });
+  await world.advance(3 * HOUR + 10 * MINUTE);
+  assert.equal(world.llm.calls.length, 1, 'a revive was sent');
+  return world.llm.calls[0].messages[1].content;
+};
+
+test('deleting the message before a would-be starter makes the next author\'s message a starter', async () => {
+  const kept = listAfter(await revivePromptAfter([]), STARTERS_INTRO);
+  assert.deepEqual(kept, ['a very first opener from dave']);
+  const afterDelete = listAfter(await revivePromptAfter(['a2']), STARTERS_INTRO);
+  assert.deepEqual([...afterDelete].sort(), ['a very first opener from dave', 'answering after forty minutes']);
+});
+
+const SPELLINGS = [...Array(3).fill('see you tomorrow'), ...Array(2).fill('See you tomorrow!'), 'see you tomorrowww'];
+
+const habitPrompt = async (deletedIds) => {
+  const world = await createWorld({ random: 0 });
+  try {
+    return await runHabit(world, deletedIds);
+  } finally {
+    await world.close();
+  }
+};
+
+const runHabit = async (world, deletedIds) => {
+  const start = BASE_TIME - 2 * 24 * HOUR;
+  await world.seed([
+    m('p1', 'dave', 'hello there friends', start),
+    ...SPELLINGS.map((content, i) => m(`h${i}`, 'carol', content, start + (i + 1) * MINUTE, i === 0 ? 'p1' : null)),
+  ]);
+  for (const id of deletedIds) await world.emitDelete(id);
+  await world.emitMessage({ content: 'hello there friends' });
+  return world.llm.calls[0].messages[1].content;
+};
+
+test('deleted messages drop out of the frequent-phrase counts', async () => {
+  const full = await habitPrompt([]);
+  assert.match(full.split(FREQUENT_INTRO)[1], /\[\{"text":"see you tomorrow","times":6\}\]/);
+  const fewer = await habitPrompt(['h4', 'h5']);
+  assert.match(fewer.split(FREQUENT_INTRO)[1], /\[\{"text":"see you tomorrow","times":4\}\]/);
+  const below = await habitPrompt(['h1', 'h2', 'h3', 'h4']);
+  assert.equal(below.includes(FREQUENT_INTRO), false);
+});

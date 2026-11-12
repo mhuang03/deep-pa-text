@@ -12,7 +12,7 @@ import { createDatabaseSwitch } from '../../src/backfill/databaseSwitch.js';
 import { createReimporter, buildGeneration } from '../../src/backfill/reimport.js';
 import { REPLY_LINK_PREFIX } from '../../src/discord/webhookDelivery.js';
 import { createFakeDiscord } from '../support/fakes/discord.js';
-import { createFakeChroma, FAKE_DIMENSIONS } from '../support/fakes/chroma.js';
+import { createFakeChroma, fakeEmbed, FAKE_DIMENSIONS } from '../support/fakes/chroma.js';
 import { createFakeOpenAI } from '../support/fakes/llm.js';
 import { createFakeGifs } from '../support/fakes/gifs.js';
 import { BASE_TIME, ENV, PING_CACHE, USERS } from '../support/fixtures.js';
@@ -183,6 +183,25 @@ test('an applied run backs up, replaces and re-imports under a new generation', 
   assert.equal(newMessages.rows.get('h2').metadata.has_gif, true);
   assert.ok(chroma.collection(`message_reply_embeddings_${GENERATION}`));
   assert.deepEqual(chroma.collection('message_embeddings').rows, oldRows);
+});
+
+test('the new reply collection holds the human reply with the parent embedding and has_gif, and none for a reply to a bot message', async (t) => {
+  const env = await prepared(t);
+  env.fakes.discord.state.addHistory({
+    id: 'h5', author: 'bob', content: 'a direct reply <gif! nod> about the fence', timestamp: at(12), reference: 'h1',
+  });
+  await makeReimporter(env).run({ yes: true });
+  const chroma = env.fakes.chroma.state;
+  const replies = chroma.collection(`message_reply_embeddings_${GENERATION}`);
+  assert.ok(replies.rows.has('h5'));
+  const row = replies.rows.get('h5');
+  assert.equal(row.document, 'a direct reply <gif! nod> about the fence');
+  assert.deepEqual(row.embedding, fakeEmbed(FENCE_TEXT));
+  assert.deepEqual(row.embedding, chroma.collection(`message_embeddings_${GENERATION}`).rows.get('h1').embedding);
+  assert.equal(row.metadata.has_gif, true);
+  assert.equal(row.metadata.author, 'bob');
+  assert.equal(replies.rows.has('h4'), false);
+  assert.equal(rows(env.databasePath, "SELECT reference FROM filtered_messages WHERE id = 'h5'")[0].reference, 'h1');
 });
 
 test('bot messages keep the backup\'s attribution, else fall back, else are counted as unattributed', async (t) => {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeForDedup } from '../../../src/retrieval/normalize.js';
+import { normalizeForDedup } from '../../../src/text/normalize.js';
 
 const TABLE = [
   ['lol', 'lol'], ['LOL', 'lol'], ['lol ', 'lol'], ['lolll', 'lol'], ['lol!!', 'lol'],

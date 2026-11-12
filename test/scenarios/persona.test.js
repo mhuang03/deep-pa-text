@@ -28,13 +28,14 @@ test('a recent, near-identical reply beats an old, loosely similar one', async (
   assert.equal(personaOf(message), 'carol');
 });
 
-test('recency alone decides between replies to identical parents', async (t) => {
+test('recency alone decides between replies to identical parents, even when the recent one is seeded first', async (t) => {
   const world = await newWorld(t);
+  // Carol is inserted first, so ties in distance list her first and a uniform pick at roll 0.5 would choose bob.
   await world.seed([
-    { id: 'p1', author: 'dave', content: HELLO, timestamp: BASE_TIME - 730 * DAY },
-    { id: 'r1', author: 'bob', content: 'bob old reply', timestamp: BASE_TIME - 730 * DAY + 1000, reference: 'p1' },
     { id: 'p2', author: 'dave', content: HELLO, timestamp: BASE_TIME - DAY },
     { id: 'r2', author: 'carol', content: 'carol recent reply', timestamp: BASE_TIME - DAY + 1000, reference: 'p2' },
+    { id: 'p1', author: 'dave', content: HELLO, timestamp: BASE_TIME - 730 * DAY },
+    { id: 'r1', author: 'bob', content: 'bob old reply', timestamp: BASE_TIME - 730 * DAY + 1000, reference: 'p1' },
   ]);
   const message = await world.emitMessage({ content: HELLO });
   assert.equal(personaOf(message), 'carol');

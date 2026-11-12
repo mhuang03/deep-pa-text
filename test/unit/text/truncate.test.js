@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { truncateForDiscord, truncateCodePoints } from '../../../src/util/text.js';
+import { truncateForDiscord, truncateCodePoints } from '../../../src/text/truncate.js';
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 

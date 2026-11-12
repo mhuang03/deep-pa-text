@@ -1,4 +1,4 @@
-import { buildTranscript } from './transcript.js';
+import { buildTranscript } from '../text/transcript.js';
 
 export const createContextBuilder = ({ channelHistory, botMessageResolver, messageFilter, config }) => {
   const { transcriptLimit, maxEntryChars, maxAgeMs } = config.context;

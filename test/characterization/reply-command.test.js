@@ -66,7 +66,7 @@ test('tells the user the command only works in the pa-text channel for a target 
     target: { content: CONTENT, channel: world.discord.otherChannel },
   });
   assert.equal(interaction.replies.length, 1);
-  assert.equal(interaction.replies[0].content, 'This command can only be used in the #pa-text channel.');
+  assert.equal(interaction.replies[0].content, "This command can only be used in the bot's channel.");
   assert.equal(interaction.replies[0].flags, MessageFlags.Ephemeral);
   assert.equal(interaction.modal, null);
 });
@@ -115,6 +115,7 @@ test('waits up to 120000 ms for the modal submission', async (t) => {
   const world = await newWorld(t);
   const interaction = await world.openReplyCommand({ target: { content: CONTENT } });
   assert.equal(interaction.modalOptions.time, 120_000);
+  assert.equal(typeof interaction.modalOptions.filter, 'function');
 });
 
 test('submitting a named author acknowledges at once, then shows a thinking embed', async (t) => {
@@ -230,7 +231,7 @@ test('makes no network call before the modal: the channel check needs no guild l
   });
   assert.equal(world.discord.otherChannel.id, OTHER_CHANNEL_ID);
   assert.deepEqual(world.discord.guildFetches, []);
-  assert.equal(interaction.replies[0].content, 'This command can only be used in the #pa-text channel.');
+  assert.equal(interaction.replies[0].content, "This command can only be used in the bot's channel.");
 });
 
 test('LLM failure after submit replaces the thinking reply with a failure notice and logs no handler error', async (t) => {

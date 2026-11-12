@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildTranscript, formatTranscript } from '../../../src/context/transcript.js';
+import { buildTranscript, formatTranscript } from '../../../src/text/transcript.js';
 
 const T = Date.UTC(2026, 10, 12, 18, 0);
 const msg = (id, username, content, extra = {}) => ({
@@ -107,4 +107,17 @@ test('an entry is cut by code points so an emoji at the boundary is kept whole o
   const [cut] = build([msg('2', 'alice', content)], { maxEntryChars: 299 });
   assert.equal(cut.content, `${'a'.repeat(299)}…`);
   assert.doesNotMatch(cut.content, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+});
+
+test('a message replying to a message that is not in the transcript (the target itself) has no suffix', () => {
+  const result = build([msg('1', 'alice', 'hello'), msg('2', 'bob', 'answering you', { reference: 'target-id' })]);
+  assert.equal(result[1].replyTo, null);
+  assert.equal(formatTranscript(result, { timeZone: 'UTC' }).includes('replying to'), false);
+});
+
+test('content is cleaned by the injected transform, including the stored content of a bot message', () => {
+  const resolveBot = (m) => (m.id === 'b' ? { persona: 'carol', content: 'rendered https://gif.test/wave.gif' } : null);
+  const transform = (text) => text.replace(/https?:\/\/\S+/g, '').trim();
+  const result = build([msg('b', 'deep-pa-text', 'ignored', { bot: true })], { resolveBot, transform });
+  assert.equal(result[0].content, 'rendered');
 });

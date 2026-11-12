@@ -1,10 +1,10 @@
 import { splitBurst, capParts } from './burst.js';
 import { sanitizeResponse, unwrapQuotes } from './sanitize.js';
 import { stripLinks } from '../util/links.js';
-import { limitGifTokens } from '../gifs/gifTokens.js';
+import { limitGifTokens } from '../text/gifTokens.js';
 
-export const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
-export const PART_SEPARATOR = '\n<split>\n';
+const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
+const PART_SEPARATOR = '\n<split>\n';
 
 const DOUBLE_QUOTE = '"';
 

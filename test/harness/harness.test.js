@@ -81,6 +81,9 @@ test('reply command parks on the modal without blocking the world', async (t) =>
   const submitted = await interaction.submit({ author: 'bob' });
   assert.equal(submitted.deferrals.length, 1);
   assert.equal(submitted.edits.length, 2);
+  assert.equal(submitted.editedMessages.length, 2);
+  assert.deepEqual(submitted.editedMessages.map((m) => m.id), [...new Set(submitted.editedMessages.map((m) => m.id))]);
+  assert.equal(submitted.editedMessages.at(-1).embeds.length, submitted.edits.at(-1).embeds?.length ?? 0);
 
   const other = await world.openReplyCommand({ target: { content: 'hello there friends' } });
   await other.timeout();
@@ -702,4 +705,13 @@ test('failCollection can be limited to some operations and peek lists rows witho
   await assert.rejects(collection.upsert({ ids: ['3'], documents: ['c'] }), /no writes/);
   assert.deepEqual((await collection.peek({ limit: 1 })).ids, ['1']);
   assert.deepEqual((await collection.get({ limit: 5, include: ['embeddings'] })).ids, ['1', '2']);
+});
+
+test('a message records the messages its replies resolved to', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const message = await world.emitMessage({ content: 'hello there friends' });
+  assert.equal(message.replies.length, 1);
+  assert.equal(message.sentMessages.length, 1);
+  assert.match(message.sentMessages[0].id, /^auto-/);
+  assert.notEqual(message.sentMessages[0].id, message.id);
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyGifResults, findGifTokens, limitGifTokens } from '../../../src/gifs/gifTokens.js';
+import { applyGifResults, findGifTokens, limitGifTokens } from '../../../src/text/gifTokens.js';
 
 test('findGifTokens returns nothing when there is no token', () => {
   assert.deepEqual(findGifTokens('no gifs here', 50), []);

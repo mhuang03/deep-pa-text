@@ -1,4 +1,4 @@
-import { truncateCodePoints } from '../util/text.js';
+import { truncateCodePoints } from './truncate.js';
 
 const TOKEN_PATTERN = /<gif!(.*?)>/g;
 

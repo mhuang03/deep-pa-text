@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadConfig, secretsOf } from '../../../src/config.js';
+import { loadConfig } from '../../../src/config.js';
+import { secretsOf } from '../../../src/config/secrets.js';
 
 test('the embedding key is read from the variable named by apiKeyEnvVar', () => {
   const config = loadConfig({ OPENAI_API_KEY: 'embedding-key-1234' });

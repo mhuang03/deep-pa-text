@@ -18,17 +18,22 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | Path | Role |
 | --- | --- |
 | `src/main.js` | Entry point (`npm start`): loads `.env` if present, config, required variables and data files, builds the container, connects Chroma, starts the bot. |
-| `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
-| `src/config.js`, `src/config/` | Every tunable, ID, model name and limit, with strict environment parsing and range validation (`config.js` is the public entry; `config/` holds the parsers, section builders, validators, required-variable checks and the optional `.env` loader). |
-| `src/bot/` | Triggers and orchestration: `handlers/` (message, message edit, message delete, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (typing, compose, deliver the parts), `bot.js`. |
+| `src/container.js`, `src/container/` | `container.js` is the public entry that composes the service map; `container/` has one builder per layer (`storage`, `services`, `discord`, `bot`, `backfill`) and the default `clock`. `src/vendor.js` collects the real third-party constructors. |
+| `src/config.js`, `src/config/` | Every tunable, ID, model name and limit, with strict environment parsing and range validation (`config.js` is the public entry; `config/` holds the parsers, section builders, validators, required-variable checks, secret list and the optional `.env` loader). |
+| `src/bot/` | Triggers and orchestration: `handlers/` (message create with its auto-reply and chain parts, message edit, message delete and bulk delete, the `reply` command split into preparation and answering, revive tick, profile refresh), reply, chain, revive and command-limit policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (context, delivery of the parts, recording), lifecycle, startup and ready steps, process hooks, state restore and `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
-| `src/storage/` | SQLite schema, migrations and queries (including soft deletes and edit revisions); the Chroma vector store; the read-only, schema-tolerant inspector behind `inspectDb.js`. |
-| `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
-| `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
-| `src/userData/`, `src/logger.js` | Reading `data/*.json`; the logger (errors as text, secrets redacted) and timestamp formatting. |
-| `src/backfill/` | History import: argument parsing, the paged history reader, message classification, the importers for human and own-bot messages, and the full re-import (database switch, archive reader, plan, comparison, report). Imported only by `scripts/backfill.js`, `scripts/reimport.js` and the container. |
+| `src/storage/` | SQLite schema, migrations and queries (the message store is split into statements, writes and reads; soft deletes and edit revisions); the Chroma vector store (collections, guard, reads, writes, connection check, record mapping); the read-only, schema-tolerant inspector behind `inspectDb.js`. |
 | `src/ingest/` | Recording messages into SQLite and Chroma, the vector sync (reconciles Chroma with SQLite) and the vector health (automatic repair). |
-| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js` and `reimport.js` (see the npm scripts below). |
+| `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/`, `src/profiles/` | Retrieval and persona choice; prompts (assembled from sections), the generators for replies, chains and revives, and the chat client; GIF resolution; the transcript builders and the reply-thread chain builder; member profile checks. |
+| `src/text/` | Pure text helpers shared by the services above: truncation, dedup keys, query text, transcript entries, situation wording and GIF tokens. Takes what it needs as parameters and imports nothing from the configuration. |
+| `src/util/` | Pure helpers with no project imports: link stripping, vector error marking and `withTimeout`. |
+| `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), webhooks, the reply modal, the command definition, login and the Discord error codes. |
+| `src/userData/`, `src/logger.js` | Reading and validating `data/*.json`; the logger (errors as text, secrets redacted) and timestamp formatting. |
+| `src/backfill/` | History import: argument parsing, the paged history reader, message classification, the importers for human and own-bot messages, catch-up, and the full re-import (steps, guards, database switch and its inspection, archive reader, plan, comparison, report). Imported only by `scripts/backfill.js`, `scripts/reimport.js` and the container. |
+| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js` and `reimport.js` (see the npm scripts below). Run them from the repo root with `.env` present; `inspect` needs an existing `messages.db`. |
+| `test/unit/` | One test file per source module, mirroring `src/`; plus the enforcement tests `layering`, `sizeLimits`, `unusedExports` and `coverageMap`, the non-destructive guard and the send-site guard. |
+| `test/characterization/`, `test/scenarios/` | Whole-bot tests through the `createWorld()` harness: behaviour pinned from the original bot, then one file per feature. |
+| `test/harness/`, `test/support/` | Smoke tests of the harness, and the harness itself: the world, the boot helper, the fakes for Discord, Chroma, the LLM, GIFs, webhooks and members, the clocks and the source scanners the enforcement tests use. |
 
 ## Setup
 
@@ -115,11 +120,11 @@ Lifecycle tunables in `src/config.js`: `lifecycle.graceMs` (10000, 0 or more: ho
 
 Vector-store tunables in `src/config.js`: `chroma.timeoutMs` (30000, above 0: every interactive Chroma or embedding call), `chroma.connectTimeoutMs` (10000, above 0: startup connection), `chroma.batchTimeoutMs` (120000, above 0: each call of a batch operation: backfill, re-import and sync writes and reads), `vector.repairIntervalMs` (600000, above 0: how often the automatic repair runs and how often the missing-vectors warning may repeat) and `vector.repairWindowMs` (604800000, 7 days, above 0: how far back the automatic repair looks). Values outside these ranges stop startup. A timeout abandons the request without cancelling it; Chroma may still finish it in the background.
 
-Backfill tunables in `src/config.js`: `backfill.pageSize` (100, 1 to 100), `backfill.batchSize` (100, 1 or more), `backfill.pageRetries` (3, 0 or more), `backfill.retryDelayMs` (2000) and `backfill.pageTimeoutMs` (30000, above 0). Values outside these ranges stop startup.
+Backfill tunables in `src/config.js`: `backfill.pageSize` (100, 1 to 100), `backfill.batchSize` (100, 1 or more), `backfill.pageRetries` (3, 0 or more), `backfill.retryDelayMs` (2000), `backfill.pageTimeoutMs` (30000, above 0) and `backfill.comparisonPageSize` (500, 1 or more: rows per page when a re-import compares the old and new databases). Values outside these ranges stop startup.
 
 Other tunables in `src/config.js` for this feature: `discord.webhookName` (`deep-pa-text`), `discord.webhookUsernameMax` (80), `discord.webhookReplyLink` (true), `profiles.refreshIntervalMs` (3600000, integer of 0 or more; `0` disables the refresh), `profiles.minCheckIntervalMs` (10000, 0 or more), `profiles.lookupTimeoutMs` (5000, above 0) and `profiles.searchLimit` (100, 1 to 1000). Values outside these ranges stop startup.
 
-Numeric tunables are validated when the config loads (for example `gifs.candidates` an integer of 1 or more, `gifs.timeoutMs` and `llm.timeoutMs` above 0, `llm.maxRetries` and `llm.emptyRetries` integers of 0 or more, `reply.probability` 0 to 1, `reply.minIntervalMs` 0 or more, `filter.minLength` at most `filter.maxLength`, every `retrieval.*Results`, `reviveSamples` and `likelyRepliers` an integer of 1 or more). `storage.busyTimeoutMs` (5000, integer of 0 or more) is applied as the SQLite busy timeout on every connection, read-only ones included, so a brief overlap between the bot and a script waits instead of failing.
+Numeric tunables are validated when the config loads (for example `gifs.candidates` an integer of 1 or more, `gifs.timeoutMs` and `llm.timeoutMs` above 0, `llm.maxRetries` and `llm.emptyRetries` integers of 0 or more, `reply.probability` 0 to 1, `reply.minIntervalMs` 0 or more, `filter.minLength` at most `filter.maxLength`, every `retrieval.*Results`, `reviveSamples` and `likelyRepliers` an integer of 1 or more). `storage.chunkSize` (500, integer of 1 or more) bounds how many ids one SQL lookup carries, and `persona.missingSimilarity` (0.5, above 0 and at most 1) is the similarity weight of a hit without a distance when a persona is chosen. `storage.busyTimeoutMs` (5000, integer of 0 or more) is applied as the SQLite busy timeout on every connection, read-only ones included, so a brief overlap between the bot and a script waits instead of failing.
 
 The corpus is filled by live messages and by the [backfill](#backfill) script.
 
@@ -308,4 +313,11 @@ If an auto reply cannot be sent, the failure is logged and the rate limit is arm
 These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
 
 
-None are open at the moment.
+None are open at the moment. These limits are accepted and recorded in `docs/specs/33-standards-and-test-gaps.md`:
+
+- `PATEXT_CHANNEL_ID` and `GUILD_ID` default to the values the original bot hard-coded, so the existing deployment keeps working; set both variables to point the bot elsewhere.
+- The Klipy content filter stays `off` as in the original (`gifs.klipyContentFilter`), and no output token cap is set: Discord's length limit and the reply limits bound what is sent.
+- A human replying to part one of a burst while later parts are pending, and GIF lookups that run one after another across the parts of a burst, are accepted.
+- Discord REST calls rely on discord.js's own request timeout and retries. The `reply` command has no role allow-list: the per-user cooldown and the concurrency cap bound its cost. GIF engine errors are logged by message only, and secrets are redacted by the logger.
+- A dry run of `backfill` or `reimport` may apply additive schema migrations and create empty collections.
+- The startup checks stop the bot on an invalid configuration or an unreachable Chroma; shutdown is graceful for signals only, and `backfill` leaves its SQLite handle to process exit.

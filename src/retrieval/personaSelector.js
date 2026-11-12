@@ -28,6 +28,7 @@ export const createPersonaSelector = ({ vectorStore, messageStore, users, random
     referenceTimeMs: record.timestamp,
     halfLifeMs: config.persona.recencyHalfLifeMs,
     minRecency: config.persona.minRecencyWeight,
+    missingSimilarity: config.persona.missingSimilarity,
     allowedAuthors: users.map((user) => user.username),
   });
 

@@ -24,6 +24,7 @@ test('an auto reply is stored with its persona, reference, trigger and GIF token
   assert.equal(message.replies.length, 1);
   const [row] = botRows(world);
   assert.equal(botRows(world).length, 1);
+  assert.equal(row.id, message.sentMessages[0].id);
   assert.equal(row.trigger, 'auto');
   assert.equal(row.reference, message.id);
   assert.equal(row.content, WITH_GIF);
@@ -52,9 +53,12 @@ test('a command reply is stored with the target as its reference', async (t) => 
   world.llm.respondWith(WITH_GIF);
   const target = world.discord.makeMessage({ content: HELLO });
   const interaction = await world.openReplyCommand({ target });
-  await interaction.submit({ author: 'carol' });
+  const submitted = await interaction.submit({ author: 'carol' });
   const rows = botRows(world);
   assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, submitted.editedMessages.at(-1).id);
+  assert.notEqual(rows[0].id, interaction.id);
+  assert.notEqual(rows[0].id, submitted.editedMessages[0].id);
   assert.equal(rows[0].persona, 'carol');
   assert.equal(rows[0].trigger, 'command');
   assert.equal(rows[0].reference, target.id);

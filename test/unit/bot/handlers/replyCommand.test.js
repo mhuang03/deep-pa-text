@@ -103,7 +103,7 @@ test('refuses a target in another channel without any network call', async () =>
   const { handler, command, events } = setup({ target });
   await (await run(handler, command)).done;
   assert.deepEqual(events, []);
-  assert.deepEqual(command.replies, [{ content: 'This command can only be used in the #pa-text channel.', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }]);
+  assert.deepEqual(command.replies, [{ content: "This command can only be used in the bot's channel.", flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } }]);
   assert.equal(command.modal, null);
 });
 

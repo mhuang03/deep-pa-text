@@ -36,7 +36,7 @@ const EXPECTED_DEFAULTS = {
   filter: { minLength: 5, maxLength: 200, commandPrefixes: ['!', '$', '#', '%', '&', '-', '+', 'p!'] },
   storage: {
     databasePath: 'messages.db', usersPath: 'data/users.json', pingCachePath: 'data/ping_caches.json',
-    inferredReferenceWindowMs: 3600000, busyTimeoutMs: 5000,
+    inferredReferenceWindowMs: 3600000, busyTimeoutMs: 5000, chunkSize: 500,
   },
   chroma: {
     port: 7429, messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings',
@@ -60,11 +60,11 @@ const EXPECTED_DEFAULTS = {
     msPerChar: 40, minDelayMs: 800, maxDelayMs: 4000, siblingWindowMs: 60000,
   },
   profiles: { refreshIntervalMs: 3600000, minCheckIntervalMs: 10000, lookupTimeoutMs: 5000, searchLimit: 100 },
-  backfill: { pageSize: 100, batchSize: 100, pageRetries: 3, retryDelayMs: 2000, pageTimeoutMs: 30000 },
+  backfill: { pageSize: 100, batchSize: 100, pageRetries: 3, retryDelayMs: 2000, pageTimeoutMs: 30000, comparisonPageSize: 500 },
   lifecycle: { graceMs: 10000, pollMs: 100 },
   catchUp: { enabled: true, maxMessages: 2000 },
   vector: { repairIntervalMs: 600000, repairWindowMs: 604800000 },
-  persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
+  persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25, missingSimilarity: 0.5 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
     timeoutMs: 120000, maxRetries: 1, emptyRetries: 1, postProcessRetries: 1,
@@ -183,7 +183,7 @@ test('does not share state between calls', () => {
 });
 
 test('assertPersona rejects an invalid half-life or recency floor', () => {
-  const valid = { recencyHalfLifeMs: 1000, minRecencyWeight: 1 };
+  const valid = { recencyHalfLifeMs: 1000, minRecencyWeight: 1, missingSimilarity: 0.5 };
   assert.equal(assertPersona(valid), valid);
   [0, -1, NaN, Infinity, undefined].forEach((recencyHalfLifeMs) => {
     assert.throws(() => assertPersona({ ...valid, recencyHalfLifeMs }), /recencyHalfLifeMs/);
@@ -243,13 +243,13 @@ test('assertProfiles accepts the boundaries and rejects values outside the range
 });
 
 test('assertBackfill accepts the boundaries and rejects values outside the ranges', () => {
-  const ok = { pageSize: 1, batchSize: 1, pageRetries: 0, retryDelayMs: 0, pageTimeoutMs: 1 };
+  const ok = { pageSize: 1, batchSize: 1, pageRetries: 0, retryDelayMs: 0, pageTimeoutMs: 1, comparisonPageSize: 1 };
   assert.deepEqual(assertBackfill(ok), ok);
   assert.equal(assertBackfill({ ...ok, pageSize: 100 }).pageSize, 100);
   const bad = [
     { pageSize: 0 }, { pageSize: 101 }, { pageSize: 1.5 }, { batchSize: 0 }, { batchSize: 2.5 },
     { pageRetries: -1 }, { pageRetries: 1.5 }, { retryDelayMs: -1 }, { retryDelayMs: Number.NaN },
-    { pageTimeoutMs: 0 },
+    { pageTimeoutMs: 0 }, { comparisonPageSize: 0 }, { comparisonPageSize: 1.5 },
   ];
   bad.forEach((override) => {
     assert.throws(() => assertBackfill({ ...ok, ...override }), /backfill\./, JSON.stringify(override));
@@ -316,6 +316,8 @@ test('assertStorage requires a non-negative integer busy timeout', () => {
   assert.equal(assertStorage(ok), ok);
   failsFor(assertStorage, ok, 'busyTimeoutMs', [-1, 1.5, NaN, Infinity, undefined]);
   passesFor(assertStorage, ok, 'busyTimeoutMs', [0, 5000]);
+  failsFor(assertStorage, ok, 'chunkSize', [0, 1.5, NaN, undefined]);
+  passesFor(assertStorage, ok, 'chunkSize', [1, 500]);
 });
 
 test('every validator error is a config error', () => {

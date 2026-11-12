@@ -1,5 +1,5 @@
 import { withTimeout } from '../util/withTimeout.js';
-import { applyGifResults, findGifTokens } from './gifTokens.js';
+import { applyGifResults, findGifTokens } from '../text/gifTokens.js';
 
 export const createGifResolver = ({ engines, config, random, logger, clock }) => {
   const searchEngine = async (engine, query) => {

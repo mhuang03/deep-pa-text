@@ -5,7 +5,7 @@ import { createMessageStore } from '../../../src/storage/messageStore.js';
 import { PAGE_FILTERED } from '../../../src/storage/messageSql.js';
 
 const HOUR = 3600000;
-const config = { storage: { inferredReferenceWindowMs: HOUR } };
+const config = { storage: { inferredReferenceWindowMs: HOUR, chunkSize: 500 } };
 const msg = (id, author, timestamp, extra = {}) => ({
   id, author, content: `content ${id}`, timestamp, reference: null, ...extra,
 });

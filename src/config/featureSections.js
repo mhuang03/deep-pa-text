@@ -84,6 +84,7 @@ export const buildBackfill = () => ({
   pageRetries: 3,
   retryDelayMs: 2000,
   pageTimeoutMs: 30000,
+  comparisonPageSize: 500,
 });
 
 export const buildLogging = () => ({

@@ -1,59 +1,57 @@
+// Each claim frees only itself, once, so an override claim and a normal claim never clear each other.
+const claim = (state) => {
+  let held = true;
+  state.inFlight += 1;
+  return () => {
+    if (!held) return;
+    held = false;
+    state.inFlight -= 1;
+  };
+};
+
+const isRateLimited = ({ rules, state, now }) =>
+  state.replyTime !== null && now() - state.replyTime < rules.minIntervalMs;
+
+const roll = ({ rules, state, random }) => {
+  const value = random();
+  const chance = rules.probability + Math.max(0, state.misses - rules.escalateAfterMisses) * rules.escalationStep;
+  if (value > chance) {
+    state.misses += 1;
+    return { reply: false, reason: 'random', roll: value, chance };
+  }
+  return { reply: true, reason: 'accepted', roll: value, chance, release: claim(state) };
+};
+
+const decide = (ctx) => {
+  const { rules, state, now } = ctx;
+  if (rules.override) return { reply: true, reason: 'override', release: claim(state) };
+  if (isRateLimited(ctx)) return { reply: false, reason: 'rate-limited' };
+  if (state.inFlight > 0) return { reply: false, reason: 'in-flight' };
+  if (now() < state.cooldownUntil) return { reply: false, reason: 'cooldown' };
+  return roll(ctx);
+};
+
+// Monotonic and never in the future, so a restore cannot lengthen or invent a rate-limit window.
+const restore = ({ state, now }, restored) => {
+  if (restored === null || restored === undefined) return;
+  const clamped = Math.min(restored, now());
+  if (state.replyTime === null || clamped > state.replyTime) state.replyTime = clamped;
+};
+
 export const createReplyPolicy = ({ config, now, random }) => {
-  const {
-    probability, minIntervalMs, escalateAfterMisses, escalationStep, override, failureCooldownMs,
-  } = config.reply;
-  let replyTime = null;
-  let misses = 0;
-  let inFlight = 0;
-  let cooldownUntil = 0;
-
-  // Each claim frees only itself, once, so an override claim and a normal claim never clear each other.
-  const claim = () => {
-    let held = true;
-    inFlight += 1;
-    return () => {
-      if (!held) return;
-      held = false;
-      inFlight -= 1;
-    };
+  const ctx = {
+    rules: config.reply, now, random, state: { replyTime: null, misses: 0, inFlight: 0, cooldownUntil: 0 },
   };
-
-  const isRateLimited = () => replyTime !== null && now() - replyTime < minIntervalMs;
-
-  const roll = () => {
-    const value = random();
-    const chance = probability + Math.max(0, misses - escalateAfterMisses) * escalationStep;
-    if (value > chance) {
-      misses++;
-      return { reply: false, reason: 'random', roll: value, chance };
-    }
-    return { reply: true, reason: 'accepted', roll: value, chance, release: claim() };
+  return {
+    decide: () => decide(ctx),
+    noteReply: ({ resetMisses }) => {
+      ctx.state.replyTime = now();
+      if (resetMisses) ctx.state.misses = 0;
+    },
+    // A failure before anything was delivered must not let every message start its own attempt.
+    noteFailure: () => {
+      ctx.state.cooldownUntil = now() + ctx.rules.failureCooldownMs;
+    },
+    restore: ({ replyTime }) => restore(ctx, replyTime),
   };
-
-  const decide = () => {
-    if (override) return { reply: true, reason: 'override', release: claim() };
-    if (isRateLimited()) return { reply: false, reason: 'rate-limited' };
-    if (inFlight > 0) return { reply: false, reason: 'in-flight' };
-    if (now() < cooldownUntil) return { reply: false, reason: 'cooldown' };
-    return roll();
-  };
-
-  const noteReply = ({ resetMisses }) => {
-    replyTime = now();
-    if (resetMisses) misses = 0;
-  };
-
-  // A failure before anything was delivered must not let every message start its own attempt.
-  const noteFailure = () => {
-    cooldownUntil = now() + failureCooldownMs;
-  };
-
-  // Monotonic and never in the future, so a restore cannot lengthen or invent a rate-limit window.
-  const restore = ({ replyTime: restored }) => {
-    if (restored === null || restored === undefined) return;
-    const clamped = Math.min(restored, now());
-    if (replyTime === null || clamped > replyTime) replyTime = clamped;
-  };
-
-  return { decide, noteReply, noteFailure, restore };
 };

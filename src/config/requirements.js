@@ -12,7 +12,7 @@ const REQUIRED = Object.freeze({
   inspect: () => [],
 });
 
-export const PURPOSES = Object.freeze(Object.keys(REQUIRED));
+const PURPOSES = Object.freeze(Object.keys(REQUIRED));
 
 const fix = 'Set them in .env or the environment.';
 

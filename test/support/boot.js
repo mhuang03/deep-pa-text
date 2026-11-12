@@ -1,6 +1,7 @@
 // The only construction-aware file: it builds the app through buildContainer with the
 // world's fakes as the vendor, then maps the spec 00 subject surface onto the services.
-import { loadConfig, secretsOf } from '../../src/config.js';
+import { loadConfig } from '../../src/config.js';
+import { secretsOf } from '../../src/config/secrets.js';
 import { createLogger } from '../../src/logger.js';
 import { createStartup } from '../../src/bot/startup.js';
 import { buildContainer, defaultClock } from '../../src/container.js';

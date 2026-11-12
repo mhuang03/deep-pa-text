@@ -45,7 +45,18 @@ Runtime code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, 
 - **No import-time side effects.** Importing a module must not read files, open connections, read `process.env`, start timers, or log. Only entry points (`src/main.js`, `scripts/*.js`) do that. `src/container.js` is the only place services are wired together, and `src/vendor.js` is the only place real third-party constructors are collected.
 - **No module-level mutable state.** State lives in the closure of a factory instance so each test gets a fresh one.
 - **One source of configuration.** Every tunable, ID, model name, limit and probability is defined in `src/config.js`. No magic numbers or hardcoded IDs elsewhere. Only `config.js` and entry points read `process.env`.
-- **Layering.** Imports point downward only: entry points → `backfill/` (history import and vector sync; imported only by scripts and the container) → `bot/` (triggers, handlers, orchestration) → use-case services (`ingest/`, `retrieval/`, `llm/`, `gifs/`, `context/`, `profiles/`) → adapters (`storage/`, `discord/`) and pure modules (`corpus/`, `config.js`), above `util/` (pure helpers with no project imports). Lower layers never import higher ones. Only `src/discord/`, `src/bot/`, `src/vendor.js` and entry points may import `discord.js`.
+- **Layering.** Imports point downward only. The layer of a file is its first directory under `src/`; a top-level file and the directory with the same stem (`config.js` and `config/`, `container.js` and `container/`) are one unit.
+
+  | Level | Members |
+  | --- | --- |
+  | 5 | `main.js`, `container.js`, `container/`, `vendor.js`, `scripts/*` |
+  | 4 | `backfill/` (history import and vector sync; imported only by scripts and the container) |
+  | 3 | `bot/` (triggers, handlers, orchestration) |
+  | 2 | `ingest/`, `retrieval/`, `context/`, `profiles/`, `llm/`, `gifs/` |
+  | 1 | `storage/`, `discord/` |
+  | 0 | `corpus/`, `text/`, `util/`, `config/`, `config.js`, `logger.js`, `userData/` |
+
+  An import may go to a lower level or stay inside its own directory. Imports between different directories of the same level are forbidden on levels 1 to 4 (so `storage/` and `discord/` never import each other, and `llm/` never imports `retrieval/`); levels 0 and 5 may import within their level, without cycles. Pure helpers that several services share live in `text/` (or `util/`) and take what they need as parameters; they never import the configuration. Only `src/discord/`, `src/bot/`, `src/backfill/`, `src/vendor.js` and `scripts/` may import `discord.js`. `test/unit/layering.test.js` enforces all of this, including import cycles and relative paths that do not resolve.
 - **One responsibility per module.** If a file needs "and" to describe it, split it. Prefer adding a small module over growing an existing one.
 - **Handlers are boundaries.** Event handlers and timers catch errors, log them with context, and never throw. Everything below them lets errors propagate.
 
@@ -55,7 +66,7 @@ Runtime code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, 
 - Two-space indent, semicolons, single quotes, trailing commas in multiline literals, `const` by default, `let` only when reassigned, never `var`.
 - Module-level functions are `const name = (args) => { ... };` arrow functions. Named exports only; no default exports.
 - Naming: `camelCase` for values and files, `UPPER_SNAKE_CASE` for constants, `createX` for factories, `buildX` for pure constructors of data, `isX`/`hasX`/`shouldX` for predicates.
-- **Small functions.** A function does one thing, fits in about 25 lines, nests at most three levels, and takes at most three positional parameters (use an options object beyond that). Use early returns instead of nested conditionals. Files stay under about 200 lines.
+- **Small functions.** A function does one thing, fits in about 25 lines, nests at most three levels, and takes at most three positional parameters (use an options object beyond that; a destructured options object counts as one). Use early returns instead of nested conditionals. Files stay under about 200 lines. The guideline is enforced at a ceiling by `test/unit/sizeLimits.test.js`: at most 200 lines per file under `src/` and `scripts/`, at most 40 lines per function (an inner closure counts, and a factory's body includes its closures), and at most 3 positional parameters. A factory that grows past the ceiling is split into modules of small functions that take their dependencies as an explicit context object.
 - Do not mutate arguments. Return new values.
 - `async`/`await` only; no `.then` chains. No floating promises: every promise is awaited or deliberately handled.
 - Throw `Error` objects with enough context to debug. Never swallow an error silently; if a failure is tolerated (a GIF lookup, an avatar fetch), log it and state the fallback.
@@ -75,6 +86,7 @@ Runtime code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, 
 - Assert on observable behaviour (returned values, rows written, payloads sent, prompts built), not on implementation details or call order that does not matter.
 - Test names state the behaviour: `'does not reply within the rate-limit window'`.
 - Tests are independent and deterministic: fresh world or fresh factory instance per test, no shared mutable fixtures, no reliance on test order.
+- Three tests enforce the structure mechanically; fix the code, never the test: `test/unit/layering.test.js` (the layer table, cycles, `discord.js` imports), `test/unit/sizeLimits.test.js` (file, function and parameter ceilings) and `test/unit/coverageMap.test.js` (every file under `src/` except `main.js` is imported directly by some test). `test/unit/unusedExports.test.js` fails on a named export that nothing imports; constants imported only by tests may stay exported. Their source scanners live in `test/support/` and have their own self-tests.
 
 ## Workflow
 

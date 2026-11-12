@@ -183,6 +183,8 @@ export const createFakeDiscord = () => {
       guild: guildField,
       guildId: target.guildId,
       replies: [],
+      // The messages each reply call resolved to, in order.
+      sentMessages: [],
       referenceFetches: 0,
       url: `https://discord.test/channels/${target.guildId}/${target.id}/${id}`,
     };
@@ -199,7 +201,9 @@ export const createFakeDiscord = () => {
     message.reply = async (payload) => {
       failer.check();
       message.replies.push(payload);
-      return makeBotMessage(nextId(), payload, target, { messageId: id });
+      const sent = makeBotMessage(nextId(), payload, target, { messageId: id });
+      message.sentMessages.push(sent);
+      return sent;
     };
     return message;
   };
@@ -231,6 +235,8 @@ export const createFakeDiscord = () => {
       fields: { getStringSelectValues: () => [author] },
       replies: [],
       edits: [],
+      // The messages each editReply call resolved to, in order.
+      editedMessages: [],
       followUps: [],
       // The options of each deferReply call, in order.
       deferrals: [],
@@ -251,7 +257,9 @@ export const createFakeDiscord = () => {
     submit.editReply = async (payload) => {
       editFailer.check();
       submit.edits.push(payload);
-      return makeBotMessage(nextId(), payload, channel);
+      const edited = makeBotMessage(nextId(), payload, channel);
+      submit.editedMessages.push(edited);
+      return edited;
     };
     submit.followUp = async (payload) => {
       followUpFailer.check();

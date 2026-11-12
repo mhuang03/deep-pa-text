@@ -7,61 +7,57 @@ const toBotTurn = (group, persona) => ({
   isPersona: group[0].persona === persona,
 });
 
-export const createChainBuilder = ({
-  botMessageStore, messageStore, messageFilter, userDirectory, config,
-}) => {
-  const { maxWalkSteps, maxContextTurns } = config.chain;
+const botAt = ({ botMessageStore }, id, parent) => (parent.id === id ? parent : botMessageStore.getById(id));
 
-  const botAt = (id, parent) => (parent.id === id ? parent : botMessageStore.getById(id));
-
-  // A fallback parent has no stored row, so it cannot have stored siblings.
-  const burstOf = (bot) => {
-    if (bot.fallback) return [bot];
-    const group = botMessageStore.siblings(bot);
-    return group.length > 0 ? group : [bot];
-  };
-
-  // One step of the walk: the turn (or null), the next id (or null) and whether it was a bot message.
-  const step = (id, parent, persona) => {
-    const bot = botAt(id, parent);
-    if (bot) {
-      // A deleted bot message ends the walk (a deleted direct parent is rejected by build).
-      if (bot.deleted) return null;
-      // A fallback parent has reference null, so its unknown ancestry ends the walk.
-      return { turn: toBotTurn(burstOf(bot), persona), next: bot.reference ?? null, isBot: true };
-    }
-    const raw = messageStore.getRaw(id);
-    if (!raw) return null;
-    // A deleted human turn is skipped; the walk continues through its reference.
-    const content = raw.deleted ? '' : messageFilter.transform(raw.content);
-    const turn = content === '' ? null : { speaker: raw.author, content, isPersona: false };
-    return { turn, next: raw.reference ?? null, isBot: false };
-  };
-
-  const walk = (parent, persona) => {
-    const seen = new Set();
-    const turns = [];
-    let botTurns = 0;
-    let id = parent.id;
-    for (let steps = 0; id && steps < maxWalkSteps && !seen.has(id); steps += 1) {
-      seen.add(id);
-      const visited = step(id, parent, persona);
-      if (!visited) break;
-      if (visited.turn) turns.push(visited.turn);
-      if (visited.isBot) botTurns += 1;
-      id = visited.next;
-    }
-    return { turns, botTurns };
-  };
-
-  const build = (target, parent) => {
-    const { persona } = parent;
-    if (parent.deleted || !userDirectory.nameOf(persona)) return null;
-    const { turns, botTurns } = walk(parent, persona);
-    const kept = turns.reverse().slice(-(maxContextTurns - 1));
-    const incoming = { speaker: target.author, content: target.content, isPersona: false };
-    return { persona, turns: [...kept, incoming], botTurns };
-  };
-
-  return { build };
+// A fallback parent has no stored row, so it cannot have stored siblings.
+const burstOf = ({ botMessageStore }, bot) => {
+  if (bot.fallback) return [bot];
+  const group = botMessageStore.siblings(bot);
+  return group.length > 0 ? group : [bot];
 };
+
+const humanStep = ({ messageStore, messageFilter }, id) => {
+  const raw = messageStore.getRaw(id);
+  if (!raw) return null;
+  // A deleted human turn is skipped; the walk continues through its reference.
+  const content = raw.deleted ? '' : messageFilter.transform(raw.content);
+  const turn = content === '' ? null : { speaker: raw.author, content, isPersona: false };
+  return { turn, next: raw.reference ?? null, isBot: false };
+};
+
+// One step of the walk: the turn (or null), the next id (or null) and whether it was a bot message.
+const step = (ctx, { id, parent, persona }) => {
+  const bot = botAt(ctx, id, parent);
+  if (!bot) return humanStep(ctx, id);
+  // A deleted bot message ends the walk (a deleted direct parent is rejected by build).
+  if (bot.deleted) return null;
+  // A fallback parent has reference null, so its unknown ancestry ends the walk.
+  return { turn: toBotTurn(burstOf(ctx, bot), persona), next: bot.reference ?? null, isBot: true };
+};
+
+const walk = (ctx, parent, persona) => {
+  const seen = new Set();
+  const turns = [];
+  let botTurns = 0;
+  let id = parent.id;
+  for (let steps = 0; id && steps < ctx.config.chain.maxWalkSteps && !seen.has(id); steps += 1) {
+    seen.add(id);
+    const visited = step(ctx, { id, parent, persona });
+    if (!visited) break;
+    if (visited.turn) turns.push(visited.turn);
+    if (visited.isBot) botTurns += 1;
+    id = visited.next;
+  }
+  return { turns, botTurns };
+};
+
+const build = (ctx, target, parent) => {
+  const { persona } = parent;
+  if (parent.deleted || !ctx.userDirectory.nameOf(persona)) return null;
+  const { turns, botTurns } = walk(ctx, parent, persona);
+  const kept = turns.reverse().slice(-(ctx.config.chain.maxContextTurns - 1));
+  const incoming = { speaker: target.author, content: target.content, isPersona: false };
+  return { persona, turns: [...kept, incoming], botTurns };
+};
+
+export const createChainBuilder = (deps) => ({ build: (target, parent) => build(deps, target, parent) });

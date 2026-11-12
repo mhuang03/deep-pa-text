@@ -34,6 +34,7 @@ export const assertBackfill = (backfill) => checkRules('backfill', backfill, {
   pageRetries: integer(0),
   retryDelayMs: atLeast(0),
   pageTimeoutMs: above(0),
+  comparisonPageSize: integer(1),
 });
 
 export const assertLifecycle = (lifecycle) => checkRules('lifecycle', lifecycle, {

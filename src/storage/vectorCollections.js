@@ -29,3 +29,9 @@ export const createCollectionLoader = ({ client, embeddingFunction, config, gene
 
   return { collections };
 };
+
+export const namedCollection = async (collections, name, ms) => {
+  const target = (await collections(ms))[name];
+  if (!target) throw new Error(`Unknown collection: ${name}`);
+  return target;
+};

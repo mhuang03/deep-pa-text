@@ -95,6 +95,27 @@ test('mentions are transformed, long lines cut, mention-only lines skipped, and 
   assert.ok(!prompt.includes('replying to'));
 });
 
+test('a history message replying to the target itself shows no reply suffix', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  world.addHistory({ id: 'x1', author: 'bob', content: 'answering the question', timestamp: at(2), reference: 'target-1' });
+  await world.emitMessage({ id: 'target-1', author: 'alice', content: 'want to get food' });
+  const prompt = userPrompt(world);
+  assert.ok(prompt.includes('bob: answering the question\n'), prompt);
+  assert.ok(!prompt.includes('replying to'));
+});
+
+test('URLs in the content of an embed-fallback bot message are removed from the transcript line', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  world.addHistory({
+    author: 'deep-pa-text', authorId: 'bot-user', bot: true, embeds: [{ author: { name: 'carol' } }],
+    content: 'look at https://gif.test/wave.gif now', timestamp: at(2),
+  });
+  await world.emitMessage({ author: 'alice', content: 'want to get food' });
+  const prompt = userPrompt(world);
+  assert.ok(prompt.includes('carol: look at now\n'), prompt);
+  assert.ok(!prompt.includes('gif.test'));
+});
+
 test('a short target is embedded together with the last two transcript lines; a long one alone', async (t) => {
   const world = await newWorld(t, { random: 0 });
   world.addHistory({ author: 'alice', content: 'are we still going friday', timestamp: at(3) });

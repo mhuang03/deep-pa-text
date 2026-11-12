@@ -1,14 +1,14 @@
 import { GatewayIntentBits, Options, Partials } from 'discord.js';
 import { SAFE_MENTIONS } from './payload.js';
 
-export const CLIENT_INTENTS = [
+const CLIENT_INTENTS = [
   GatewayIntentBits.Guilds,
   GatewayIntentBits.GuildMessages,
   GatewayIntentBits.MessageContent,
 ];
 
 // Partial messages let delete and edit events arrive for messages the client has not cached.
-export const CLIENT_PARTIALS = [Partials.Message];
+const CLIENT_PARTIALS = [Partials.Message];
 
 // A bulk import would otherwise keep every fetched message in memory.
 const NO_MESSAGE_CACHE = Options.cacheWithLimits({ MessageManager: 0 });

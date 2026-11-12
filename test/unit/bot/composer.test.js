@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createComposer } from '../../../src/bot/composer.js';
 import { loadConfig } from '../../../src/config.js';
+import { truncateForDiscord } from '../../../src/text/truncate.js';
 
 const setup = ({ links = [], text = 'hello', generate = null } = {}) => {
   const calls = [];
@@ -80,19 +81,24 @@ test('truncates only the delivered content, not the returned response', async ()
   assert.equal(parts[0].content.length, loadConfig({}).discord.maxMessageLength);
 });
 
-test('truncates after GIF processing', async () => {
+test('truncates after GIF processing: a short text that resolves to over-long content is cut, not passed through', async () => {
+  const resolved = `${'word '.repeat(500)}end`;
+  const text = '<gif! cat> hi';
+  const config = loadConfig({});
   const composer = createComposer({
-    generator: {
-      generateReply: async () => {
-        const text = `<gif! cat>${'a'.repeat(1995)}`;
-        return { response: text, parts: [text] };
-      },
-    },
-    gifResolver: { resolve: async () => ({ content: 'a'.repeat(1995), gifLinks: [] }) },
-    config: loadConfig({}),
+    generator: { generateReply: async () => ({ response: text, parts: [text] }) },
+    gifResolver: { resolve: async () => ({ content: resolved, gifLinks: [] }) },
+    config,
   });
   const { parts } = await composer.compose({ persona: 'bob', target: {} });
-  assert.equal(parts[0].content.length, 1995);
+  assert.ok(resolved.length > config.discord.maxMessageLength);
+  assert.ok(text.length < config.discord.maxMessageLength, 'truncating the text first would change nothing');
+  assert.equal(parts[0].content, truncateForDiscord(resolved, {
+    maxLength: config.discord.maxMessageLength, lookback: config.discord.truncateLookbackChars,
+  }));
+  assert.ok(parts[0].content.length <= config.discord.maxMessageLength);
+  assert.ok(!parts[0].content.endsWith('end'));
+  assert.equal(parts[0].text, text);
 });
 
 test('composes each part with its own GIF resolution and truncation, keeping the GIF token in text', async () => {

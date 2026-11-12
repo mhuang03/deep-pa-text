@@ -233,3 +233,35 @@ test('the database is opened with the configured busy timeout', () => {
   assert.equal(container.db.prepare('PRAGMA busy_timeout').get().timeout, 5000);
   container.db.close();
 });
+
+const PUBLIC_KEYS = {
+  messageStore: [
+    'applyEdit', 'burstStats', 'countContents', 'getParents', 'getRaw', 'hasRaw', 'hiddenIds', 'insertFiltered', 'insertRaw',
+    'latestFiltered', 'latestRaw', 'latestWithGif', 'latestWithReference', 'newestRaw', 'pageFiltered', 'randomMessages',
+    'randomStarters', 'softDelete', 'transaction',
+  ],
+  vectorStore: ['addReplyRows', 'connect', 'embed', 'fillMetadata', 'getEmbeddings', 'getRecords', 'query', 'upsertMessages'],
+  generator: ['generateReply', 'generateRevive'],
+  responder: ['respond'],
+  ingest: ['recordDelete', 'recordEdit', 'recordMessage', 'recordMessages'],
+  retriever: ['retrieveForReply', 'retrieveForRevive'],
+  historyReader: ['readAll'],
+  historyImporter: ['importMessages', 'run'],
+  botMessageImporter: ['run'],
+  vectorSync: ['run'],
+  vectorHealth: ['noteFailure', 'repair', 'startupRepair'],
+  memberProfiles: ['current', 'refreshAll'],
+  webhooks: ['forChannel', 'forget', 'ownedIds'],
+  lifecycle: ['every', 'isShuttingDown', 'shutdown', 'track'],
+  chainBuilder: ['build'],
+  composer: ['compose'],
+  delivery: ['deferOptions', 'deliver', 'placeholder'],
+};
+
+test('every public factory returns exactly the keys it had before the split', () => {
+  const { container } = setup();
+  Object.entries(PUBLIC_KEYS).forEach(([name, keys]) => {
+    assert.deepEqual(Object.keys(container[name]).sort(), keys, name);
+  });
+  container.db.close();
+});

@@ -1,6 +1,6 @@
 export const QUERY_INCLUDE = ['documents', 'metadatas', 'distances'];
 
-export const buildMetadata = (m) => ({ author: m.author, timestamp: m.timestamp, has_gif: Boolean(m.hasGif) });
+const buildMetadata = (m) => ({ author: m.author, timestamp: m.timestamp, has_gif: Boolean(m.hasGif) });
 
 export const hasEmbedding = (embedding) => Array.isArray(embedding) && embedding.length > 0;
 
