@@ -21,7 +21,7 @@ Each spec defines one change completely: behaviour, interfaces, schema and confi
 | [02](02-refactor.md) | Refactor to a modular architecture | 00, 01 |
 | [10](10-ingest-fixes.md) | Ingest fixes (GIF metadata, inferred references) | 02 |
 | [11](11-reply-modal-safety.md) | Reply-modal safety | 02 |
-| [12](12-delivery-hardening.md) | Awaited sends, safe mentions, single response pipeline | 11 |
+| [12](12-delivery-hardening.md) | Awaited sends, safe mentions, single response pipeline | 11, 14 |
 | [13](13-gif-resilience.md) | GIF resilience and variety | 02 |
 | [14](14-llm-robustness.md) | LLM timeouts, retries, output sanitising | 02 |
 | [15](15-bot-message-store.md) | Bot message store | 12 |
@@ -32,23 +32,35 @@ Each spec defines one change completely: behaviour, interfaces, schema and confi
 | [20](20-revive-context.md) | Context for revives | 17, 19 |
 | [21](21-reply-chains.md) | Reply chains on bot messages | 15, 17, 19 |
 | [22](22-typing-and-bursts.md) | Typing indicator and multi-message bursts | 21 |
-| [23](23-webhook-delivery.md) | Webhook persona display (opt-in) | 22 |
-| [24](24-edits-and-deletes.md) | Message edits and deletes (soft) | 15, 19, 21 |
-| [25](25-backfill.md) | History backfill and vector sync | 10, 24 |
+| [23](23-webhook-delivery.md) | Webhook persona display (opt-in) and member profiles | 22 |
+| [24](24-edits-and-deletes.md) | Message edits and deletes (soft) | 15, 18, 19, 20, 21, 22 |
+| [25](25-backfill.md) | History import machinery, backfill and vector sync | 10, 15, 17, 21, 23, 24 |
+| [26](26-full-reimport.md) | Full re-import from Discord (final step) | 23, 24, 25 |
 
-## Dependency order
+## Implementation order
+
+Each line is a wave; specs on one line touch disjoint areas and may be implemented in parallel, and a wave starts only when the previous one is merged.
 
 ```
-00 → 01 → 02 ─┬─ 10 ───────────────┐
-              ├─ 11 → 12 → 15 ─┐   │
-              ├─ 13            │   │
-              ├─ 14 ───────────┼─ 17 → 18 → 19 ─┬─ 20
-              └─ 16 ───────────┼────────────────┴─ 21 ─┬─ 22 → 23
-                               │                       └─ 24 → 25
-                               └ (15 also feeds 19, 21, 24)
+00
+01
+02
+10, 11, 13, 14, 16
+12
+15
+17
+18
+19
+20
+21
+22
+23
+24
+25
+26
 ```
 
-Waves that can run in parallel once their dependencies are merged: {10, 11, 13, 14, 16}, then 12, then 15, then 17, 18, 19, then {20, 21}, then {22, 24}, then {23, 25}. Specs in the same wave may touch `src/config.js`, `src/container.js` and `README.md`; make minimal edits there.
+Most later specs extend the same pipeline (responder, generator, prompts, message store), so they are implemented one at a time.
 
 ## Suggestions deliberately not specified
 
