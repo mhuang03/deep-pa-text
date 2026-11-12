@@ -3,3 +3,5 @@ data
 .vscode
 .env
 *.db
+*.old
+*.db.new

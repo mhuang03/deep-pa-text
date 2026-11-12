@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { Events } from 'discord.js';
 import { runInEntry } from './parking.js';
 import { createMembers } from './members.js';
 import { attachWebhooks } from './webhooks.js';
@@ -148,6 +149,9 @@ export const createFakeDiscord = () => {
     channel,
     otherChannel,
     loginTokens: [],
+    // When true, login emits ClientReady once, like the real gateway (the bot tests emit it by hand).
+    autoReady: false,
+    destroyed: 0,
     guildFetches: [],
     errors: tracker.errors,
     settle: tracker.settle,
@@ -352,7 +356,12 @@ export const createFakeDiscord = () => {
 
     async login(token) {
       state.loginTokens.push(token);
+      if (state.autoReady) setImmediate(() => this.emit(Events.ClientReady, this));
       return token;
+    }
+
+    async destroy() {
+      state.destroyed += 1;
     }
 
     on(event, listener) {

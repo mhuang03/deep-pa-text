@@ -1,9 +1,9 @@
 import { loadEnvFile } from 'node:process';
-import { Events } from 'discord.js';
 import { loadConfig } from '../src/config.js';
 import { loadData } from '../src/userData/loadData.js';
 import { buildContainer } from '../src/container.js';
 import { createVendor } from '../src/vendor.js';
+import { loginAndWait } from '../src/discord/login.js';
 import { parseBackfillArgs, BACKFILL_USAGE } from '../src/backfill/args.js';
 
 const USAGE_EXIT_CODE = 2;
@@ -20,15 +20,9 @@ const parseOrExit = () => {
 };
 
 // No handlers are registered (bot.start() is never called), so the script cannot reply to anything.
-const login = async (client, token) => {
-  const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
-  await client.login(token);
-  await ready;
-};
-
 const importHistory = async (container, options, config) => {
   const { client, historyImporter } = container;
-  await login(client, config.discord.token);
+  await loginAndWait(client, config.discord.token);
   const channel = await client.channels.fetch(config.discord.channelId);
   return historyImporter.run({ channel, ...options });
 };

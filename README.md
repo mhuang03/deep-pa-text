@@ -26,8 +26,8 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
 | `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
-| `src/backfill/` | History import and vector sync: argument parsing, the paged history reader, message classification, the importers for human and own-bot messages and the Chroma reconciliation. Imported only by `scripts/backfill.js` and the container. |
-| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js` (see the npm scripts below). |
+| `src/backfill/` | History import and vector sync: argument parsing, the paged history reader, message classification, the importers for human and own-bot messages, the Chroma reconciliation, and the full re-import (database switch, archive reader, plan, comparison, report). Imported only by `scripts/backfill.js`, `scripts/reimport.js` and the container. |
+| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js` and `reimport.js` (see the npm scripts below). |
 
 ## Setup
 
@@ -51,7 +51,7 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    | `DEEPSEEK_API_KEY` | Chat completions (`deepseek-v4-flash`, thinking enabled) |
    | `KLIPY_API_KEY`, `GIPHY_API_KEY`, `HUMOR_API_KEY` | GIF search, tried in that order |
 
-3. Create the data files (git-ignored).
+3. Create the data files (git-ignored; `*.old` backups and `*.db.new` files from a re-import are git-ignored too).
 
    `data/users.json` lists the members the bot may imitate. Only their messages enter the corpus.
 
@@ -85,7 +85,7 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm start
    ```
 
-Other npm scripts: `npm run backfill` (see [Backfill](#backfill)), `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; a database from before the soft-delete columns is read through a migrated temporary copy and never written) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
+Other npm scripts: `npm run backfill` (see [Backfill](#backfill)), `npm run reimport` (see [Re-importing from Discord](#re-importing-from-discord)), `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; a database from before the soft-delete columns is read through a migrated temporary copy and never written) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
 
 ### Configuration overrides
 
@@ -125,7 +125,34 @@ An unknown option or invalid value prints the usage and exits 2. Without options
 
 `--sync-vectors` walks the visible corpus in pages and adds rows missing from Chroma, adds `has_gif` to Chroma rows that lack it (document and embedding are passed back unchanged, nothing is re-embedded) and adds missing reply rows for rows with a reference. Rows whose stored document or embedding is missing, and replies whose parent has no embedding, are skipped and counted. Nothing is removed. If a vector call fails during an import, the SQLite rows are already written; run `npm run backfill -- --skip-history --sync-vectors` to repair. In a dry run the sync cannot see rows the import would have added.
 
-Limits: a backfill only adds messages that are not stored yet. It does not re-filter existing raw rows, apply edits or deletions made while the bot was offline, or change stored references (a full re-import does). Stop the bot first: the script and the bot would write the same SQLite file concurrently. A channel with a few hundred thousand messages takes tens of minutes to fetch (Discord serves 100 per request) and a few hundred megabytes of memory, plus one embedding call per batch of kept messages.
+Limits: a backfill only adds messages that are not stored yet. It does not re-filter existing raw rows, apply edits or deletions made while the bot was offline, or change stored references (a full [re-import](#re-importing-from-discord) does). Stop the bot first: the script and the bot would write the same SQLite file concurrently. A channel with a few hundred thousand messages takes tens of minutes to fetch (Discord serves 100 per request) and a few hundred megabytes of memory, plus one embedding call per batch of kept messages.
+
+### Re-importing from Discord
+
+`npm run reimport -- [--yes] [--resume]` rebuilds the database from Discord so that every current rule applies uniformly to old rows: `has_gif` metadata, reply links (replies to bot messages are no longer linked to unrelated messages), today's corpus filter, edits and deletions made while the bot was offline, and the bot's own past messages. Do it once after upgrading across the changes above; it is not routine.
+
+**Stop the bot first.** A running bot keeps the old file open and would write into the backup; the script cannot detect a running bot and says so before doing anything.
+
+1. Run `npm run reimport` without flags (a dry run). It reads the whole channel and prints a plan (messages fetched, human, the bot's own, other bots', how many the filter would keep) and changes nothing on disk or in Chroma.
+2. Run `npm run reimport -- --yes`. It checks the state, reads the history (a failure here changes nothing), then backs up `messages.db` as `messages.db.old` (a hard link, else a copy; it refuses to overwrite an existing backup), puts a fresh database in its place and imports through the normal path: the bot's own messages first, then human messages oldest first, then a vector sync. Nothing is ever deleted.
+3. Run `npm run backfill` once to pick up anything posted during the re-import, then start the bot.
+
+The new database belongs to a new generation of Chroma collections (`message_embeddings_g<UTC timestamp>` and the matching reply collection), recorded in `meta`. The old collections are not touched. If the run stops midway (a crash, or Chroma rejecting a batch), run `npm run reimport -- --yes --resume`; the steps are idempotent and the vector sync repairs batches whose vectors were not written. A fresh run refuses to start while a `.new` or `.old` file from an earlier run exists, and says which file to move away.
+
+| Data | In the new database |
+| --- | --- |
+| Human messages currently in the channel | Re-imported with their current content, filtered, referenced and embedded by the current rules |
+| Messages deleted from Discord, edit history, soft-delete markers | Not carried over (they stay in the backup) |
+| The bot's own messages still in the channel | Stored in `bot_messages`: persona, trigger, reference and GIF-token content from the backup's table; else the embed author (trigger `imported`); else the profile history of webhook names. Messages with no recognisable persona are not stored and the script warns |
+| `user_profiles` history | Copied |
+| Old Chroma collections and the backup | Left in place |
+| Messages posted after the history was read | Not included; `npm run backfill` adds them |
+
+After an applied run the script prints the backup path, the generation, a comparison of the old and new databases (counts, ids missing in the new one, ids whose content changed) and these steps again.
+
+Rollback: stop the bot, move `messages.db` aside, rename `messages.db.old` to `messages.db`. The restored database automatically uses the old collections again. Anything recorded after the re-import stays in the file moved aside. The backup and the old Chroma collections stay until someone removes them by hand; a second re-import requires moving `messages.db.old` away first.
+
+Cost: every kept message is embedded again (one embeddings request per batch of 100), and Discord serves 100 messages per request. A channel with a few hundred thousand messages takes tens of minutes, a small embeddings bill and a few hundred megabytes of memory.
 
 ## Triggers
 
@@ -156,6 +183,7 @@ SQLite (`messages.db`):
 - `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
 
 - `message_revisions`: append-only edit history (`message_id` logical id, `content`, `edited_at` ms; primary key `(message_id, edited_at)`).
+- `meta`: installation facts, written once and never overwritten (`key`, `value`). `chroma_generation` names the generation of Chroma collections this database belongs to (absent in an installation that was never re-imported, which uses `message_embeddings` and `message_reply_embeddings`; otherwise `<name>_<generation>`). `reimport_started_at` and `reimport_completed_at` (ms) mark a [re-import](#re-importing-from-discord).
 
 ### Edits and deletes (soft)
 

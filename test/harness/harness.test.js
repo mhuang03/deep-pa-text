@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld } from '../support/world.js';
 import { createFakeChroma, fakeEmbed } from '../support/fakes/chroma.js';
+import { createFakeDiscord } from '../support/fakes/discord.js';
 import { BASE_TIME, CHANNEL_ID, ENV } from '../support/fixtures.js';
 
 const HOUR = 3_600_000;
@@ -560,4 +561,35 @@ test('the world exposes the container with the backfill services', async (t) => 
   ['historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync'].forEach((name) => {
     assert.equal(typeof world.container[name], 'object', name);
   });
+});
+
+test('a standalone fake discord shares its history across clients, can auto-emit ready and records destroy', async () => {
+  const discord = createFakeDiscord();
+  discord.state.autoReady = true;
+  discord.state.addHistory({ id: 'x1', author: 'alice', content: 'shared history' });
+  const first = new discord.Client({});
+  const second = new discord.Client({});
+  let ready = 0;
+  first.once('clientReady', () => { ready += 1; });
+  await first.login('token');
+  await discord.state.settle();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ready, 1);
+  assert.equal((await second.channels.fetch(CHANNEL_ID)).history[0].id, 'x1');
+  await first.destroy();
+  assert.equal(discord.state.destroyed, 1);
+});
+
+test('the fake chroma can fail a collection by name before it exists and share collections across clients', async () => {
+  const chroma = createFakeChroma();
+  const boom = new Error('rejected');
+  chroma.state.failCollection('later', boom);
+  const a = new chroma.ChromaClient({});
+  const b = new chroma.ChromaClient({});
+  const collection = await a.getOrCreateCollection({ name: 'later' });
+  assert.equal(await b.getOrCreateCollection({ name: 'later' }), collection);
+  await assert.rejects(collection.upsert({ ids: ['1'], documents: ['text'] }), boom);
+  chroma.state.failCollection('later', null);
+  await collection.upsert({ ids: ['1'], documents: ['text'] });
+  assert.equal(collection.rows.size, 1);
 });

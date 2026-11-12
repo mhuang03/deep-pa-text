@@ -64,14 +64,13 @@ const project = (entries, include) =>
       .map(([name, key]) => [name, entries.map((entry) => entry[key])]),
   );
 
-const createCollection = (name, embeddingFunction, onEmbed) => {
+const createCollection = (name, embeddingFunction, onEmbed, failure = null) => {
   const embedder = embeddingFunction ?? {
     generate: async (texts) => {
       onEmbed();
       return texts.map(fakeEmbed);
     },
   };
-  let failure = null;
   const guard = () => {
     if (failure) throw failure;
   };
@@ -139,6 +138,8 @@ const mergeProjections = (projections) => {
 
 export const createFakeChroma = () => {
   const collections = new Map();
+  // Failures armed by name, applied when the collection is created (a generation's name is not known earlier).
+  const armed = new Map();
   let heartbeatError = null;
   const embeddingFunctions = [];
   const state = {
@@ -148,6 +149,10 @@ export const createFakeChroma = () => {
     embeddingFunctions,
     get embeddingFunctionOptions() {
       return embeddingFunctions.at(-1) ?? null;
+    },
+    failCollection: (name, error) => {
+      armed.set(name, error ?? null);
+      collections.get(name)?.setFailing(error);
     },
     failHeartbeat: (error) => {
       heartbeatError = error ?? null;
@@ -182,7 +187,7 @@ export const createFakeChroma = () => {
     async getOrCreateCollection({ name, embeddingFunction }) {
       if (!collections.has(name)) collections.set(name, createCollection(name, embeddingFunction, () => {
         state.embeddingCalls += 1;
-      }));
+      }, armed.get(name) ?? null));
       return collections.get(name);
     }
   }

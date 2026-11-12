@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createFakeChroma, fakeEmbed } from '../../support/fakes/chroma.js';
-import { createVectorStore } from '../../../src/storage/vectorStore.js';
+import { createVectorStore, collectionNames } from '../../../src/storage/vectorStore.js';
 
 const config = { chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' } };
 
@@ -291,4 +291,29 @@ test('addReplyRows does nothing for no rows', async () => {
   await store.connect();
   await store.addReplyRows([]);
   assert.equal(fake.state.collection('message_reply_embeddings').upserts.length, 0);
+});
+
+test('collectionNames returns the configured names without a generation', () => {
+  const expected = { messages: 'message_embeddings', replies: 'message_reply_embeddings' };
+  assert.deepEqual(collectionNames(config, null), expected);
+  assert.deepEqual(collectionNames(config, undefined), expected);
+  assert.deepEqual(collectionNames(config, ''), expected);
+});
+
+test('collectionNames suffixes both names with the generation and stays within the Chroma limit', () => {
+  const names = collectionNames(config, 'g20261112180000');
+  assert.deepEqual(names, {
+    messages: 'message_embeddings_g20261112180000', replies: 'message_reply_embeddings_g20261112180000',
+  });
+  Object.values(names).forEach((name) => assert.ok(name.length <= 63));
+});
+
+test('a vector store with a generation creates and uses only that generation\'s collections', async () => {
+  const fake = createFakeChroma();
+  const store = createVectorStore({
+    client: new fake.ChromaClient({}), embeddingFunction: new fake.OpenAIEmbeddingFunction({}), config, generation: 'g1',
+  });
+  await store.upsertMessages([m('1', 'some text')]);
+  assert.equal(fake.state.collection('message_embeddings_g1').rows.size, 1);
+  assert.throws(() => fake.state.collection('message_embeddings'));
 });

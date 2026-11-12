@@ -15,6 +15,7 @@
     "register": "node scripts/registerCommands.js",
     "inspect": "node scripts/inspectDb.js",
     "backfill": "node scripts/backfill.js",
+    "reimport": "node scripts/reimport.js",
     "gif-smoke": "node scripts/gifSmoke.js"
   },
   "dependencies": {

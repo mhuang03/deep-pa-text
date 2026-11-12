@@ -26,6 +26,7 @@ The SQLite database and the Chroma collections hold an irreplaceable message his
 - `UPDATE` only to set a soft-delete or marker column (for example `deleted_at`), or to fill a column that is currently `NULL`.
 - Chroma `upsert`/`add` of new ids. Re-upserting an id with identical content is tolerated for idempotency.
 - A metadata-only fill of a missing key on an existing Chroma row, with its document and embedding passed back unchanged.
+- Replacing the database file only through `src/backfill/databaseSwitch.js`: the old file is backed up to `*.old` (never overwritten) and a re-import always uses a new Chroma generation, so the old collections stay untouched. No file is deleted, truncated or overwritten anywhere else; `rename`, `link` and `copy` of files appear only in that module.
 
 **Patterns to use instead of destruction:**
 

@@ -17,17 +17,20 @@ const buildQueryInput = ({ embedding, text }) => {
   return embedding === undefined ? { queryTexts: [text] } : { queryEmbeddings: [embedding] };
 };
 
-export const createVectorStore = ({ client, embeddingFunction, config }) => {
+// A database that names a generation (a full re-import) owns its own pair of collections.
+export const collectionNames = (config, generation) => {
+  const { messagesCollection, repliesCollection } = config.chroma;
+  if (!generation) return { messages: messagesCollection, replies: repliesCollection };
+  return { messages: `${messagesCollection}_${generation}`, replies: `${repliesCollection}_${generation}` };
+};
+
+export const createVectorStore = ({ client, embeddingFunction, config, generation = null }) => {
   let pending = null;
 
   const loadCollections = async () => {
-    const { chroma } = config;
-    const messages = await client.getOrCreateCollection({
-      name: chroma.messagesCollection, embeddingFunction,
-    });
-    const replies = await client.getOrCreateCollection({
-      name: chroma.repliesCollection, embeddingFunction,
-    });
+    const names = collectionNames(config, generation);
+    const messages = await client.getOrCreateCollection({ name: names.messages, embeddingFunction });
+    const replies = await client.getOrCreateCollection({ name: names.replies, embeddingFunction });
     return { messages, replies };
   };
 

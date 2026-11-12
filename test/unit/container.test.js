@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { Events } from 'discord.js';
+import { openDatabase } from '../../src/storage/database.js';
+import { createMetaStore } from '../../src/storage/metaStore.js';
 import { buildContainer, buildGifResolver, defaultClock } from '../../src/container.js';
 import { loadConfig } from '../../src/config.js';
 import { createFakeDiscord } from '../support/fakes/discord.js';
@@ -13,11 +18,11 @@ const SERVICES = [
   'bot', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
   'botMessageStore', 'botMessageResolver', 'contextBuilder', 'chainBuilder', 'burstProfile',
-  'profileStore', 'memberProfiles', 'webhooks',
+  'profileStore', 'metaStore', 'memberProfiles', 'webhooks',
   'historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync',
 ];
 
-const setup = (overrides = {}) => {
+const setup = (overrides = {}, databasePath = ':memory:') => {
   const fakes = {
     discord: createFakeDiscord(), chroma: createFakeChroma(), llm: createFakeOpenAI(), gifs: createFakeGifs(),
   };
@@ -30,7 +35,7 @@ const setup = (overrides = {}) => {
     fetch: fakes.gifs.fetch,
   };
   const config = loadConfig({ ...ENV, ...overrides });
-  const storage = { ...config.storage, databasePath: ':memory:' };
+  const storage = { ...config.storage, databasePath };
   const container = buildContainer({
     config: { ...config, storage }, vendor, data: { users: USERS, pingCache: PING_CACHE },
   });
@@ -70,7 +75,7 @@ test('constructs nothing that connects until the bot starts', async () => {
 test('opens the configured database and creates the schema', () => {
   const { container } = setup();
   const tables = container.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'message_revisions', 'messages', 'user_profiles']);
+  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'message_revisions', 'messages', 'meta', 'user_profiles']);
   container.db.close();
 });
 
@@ -129,4 +134,48 @@ test('PERSONA_DISPLAY=webhook wires the webhook delivery', async () => {
   assert.equal(embedPlaceholder.embeds.length, 1);
   embed.container.db.close();
   hook.container.db.close();
+});
+
+const GENERATION = 'g20261112180000';
+
+test('an existing database without a generation uses the configured collection names', async () => {
+  const { fakes, container } = setup();
+  await container.vectorStore.connect();
+  assert.equal(fakes.chroma.state.collection('message_embeddings').name, 'message_embeddings');
+  container.db.close();
+});
+
+test('a database that names a generation uses that generation\'s collections', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dpt-container-'));
+  const databasePath = path.join(dir, 'messages.db');
+  const seeded = openDatabase(databasePath);
+  createMetaStore({ db: seeded }).setIfAbsent('chroma_generation', GENERATION);
+  seeded.close();
+  const { fakes, container } = setup({}, databasePath);
+  await container.vectorStore.connect();
+  assert.equal(fakes.chroma.state.collection(`message_embeddings_${GENERATION}`).name, `message_embeddings_${GENERATION}`);
+  assert.equal(fakes.chroma.state.collection(`message_reply_embeddings_${GENERATION}`).name, `message_reply_embeddings_${GENERATION}`);
+  assert.throws(() => fakes.chroma.state.collection('message_embeddings'));
+  container.db.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('uses a given Discord client instead of creating one', () => {
+  const fakes = {
+    discord: createFakeDiscord(), chroma: createFakeChroma(), llm: createFakeOpenAI(), gifs: createFakeGifs(),
+  };
+  const vendor = {
+    Client: fakes.discord.Client, ChromaClient: fakes.chroma.ChromaClient,
+    OpenAIEmbeddingFunction: fakes.chroma.OpenAIEmbeddingFunction, OpenAI: fakes.llm.OpenAI,
+    GiphyFetch: fakes.gifs.GiphyFetch, fetch: fakes.gifs.fetch,
+  };
+  const client = new fakes.discord.Client({ given: true });
+  const config = loadConfig(ENV);
+  const container = buildContainer({
+    config: { ...config, storage: { ...config.storage, databasePath: ':memory:' } },
+    vendor, data: { users: USERS, pingCache: PING_CACHE }, client,
+  });
+  assert.equal(container.client, client);
+  assert.deepEqual(fakes.discord.state.clientOptions, { given: true }, 'no second client was constructed');
+  container.db.close();
 });

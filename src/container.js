@@ -6,6 +6,7 @@ import { openDatabase } from './storage/database.js';
 import { createMessageStore } from './storage/messageStore.js';
 import { createBotMessageStore } from './storage/botMessageStore.js';
 import { createProfileStore } from './storage/profileStore.js';
+import { createMetaStore } from './storage/metaStore.js';
 import { createVectorStore } from './storage/vectorStore.js';
 import { createIngestService } from './ingest/ingestService.js';
 import { createBurstProfile } from './retrieval/burstProfile.js';
@@ -43,6 +44,8 @@ import { createBotMessageImporter } from './backfill/botMessageImporter.js';
 import { createHistoryImporter } from './backfill/historyImporter.js';
 import { createVectorSync } from './backfill/vectorSync.js';
 
+export const GENERATION_KEY = 'chroma_generation';
+
 // Lazy wrappers: global mocks of Date, Math.random and setInterval are honoured at call time.
 export const defaultClock = () => {
   const clock = {
@@ -67,7 +70,7 @@ export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logge
   return createGifResolver({ engines, config, random: clock.random, logger, clock });
 };
 
-const buildVectorStore = ({ config, vendor }) => {
+const buildVectorStore = ({ config, vendor, generation }) => {
   const { chroma, embedding } = config;
   const client = new vendor.ChromaClient({ port: chroma.port });
   const embeddingFunction = new vendor.OpenAIEmbeddingFunction({
@@ -75,7 +78,7 @@ const buildVectorStore = ({ config, vendor }) => {
     modelName: embedding.modelName,
     dimensions: embedding.dimensions,
   });
-  return createVectorStore({ client, embeddingFunction, config });
+  return createVectorStore({ client, embeddingFunction, config, generation });
 };
 
 const buildGenerator = ({
@@ -94,7 +97,8 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
   const messageStore = createMessageStore({ db, config });
   const botMessageStore = createBotMessageStore({ db, config });
   const profileStore = createProfileStore({ db });
-  const vectorStore = buildVectorStore({ config, vendor });
+  const metaStore = createMetaStore({ db });
+  const vectorStore = buildVectorStore({ config, vendor, generation: metaStore.get(GENERATION_KEY) });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
   const ingest = createIngestService({ messageStore, vectorStore, messageFilter, botMessageStore });
   const retriever = createRetriever({ vectorStore, messageStore, config, logger });
@@ -107,7 +111,7 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
     config, vendor, retriever, userDirectory, botMessageStore, messageStore, burstProfile, logger,
   });
   return {
-    db, messageStore, botMessageStore, profileStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
+    db, messageStore, botMessageStore, profileStore, metaStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
     personaSelector, burstProfile, generator,
   };
 };
@@ -168,10 +172,10 @@ const buildBackfill = ({ config, clock, logger, client, core, channelHistory, we
 };
 
 export const buildContainer = ({
-  config, vendor, data, clock = defaultClock(), logger = createLogger(), cacheMessages = true,
+  config, vendor, data, clock = defaultClock(), logger = createLogger(), cacheMessages = true, client: given = null,
 }) => {
   const core = buildCore({ config, vendor, data, clock, logger });
-  const client = createDiscordClient(vendor.Client, { cacheMessages });
+  const client = given ?? createDiscordClient(vendor.Client, { cacheMessages });
   const gifResolver = buildGifResolver({ config, vendor, clock, logger });
   const composer = createComposer({ generator: core.generator, gifResolver, config });
   const { botMessageStore, userDirectory, profileStore } = core;

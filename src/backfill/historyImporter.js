@@ -1,5 +1,6 @@
 import { toMessageRecord } from '../discord/messageRecord.js';
 import { classifyMessages } from './classify.js';
+import { listOwnWebhookIds } from './ownWebhooks.js';
 
 const chunksOf = (items, size) => {
   const chunks = [];
@@ -13,19 +14,9 @@ export const createHistoryImporter = ({
 }) => {
   const { batchSize } = config.backfill;
 
-  // Without Manage Webhooks only webhook messages already known by id are recognised as ours.
-  const ownWebhookIds = async (channel) => {
-    try {
-      return await webhooks.ownedIds(channel);
-    } catch (error) {
-      logger.warn('Could not list the bot webhooks; only known webhook messages count as the bot\'s own:', error);
-      return new Set();
-    }
-  };
-
   const classify = async (messages, { channel, botMessageLookup }) => classifyMessages(messages, {
     botUserId: getBotUserId(),
-    ownWebhookIds: await ownWebhookIds(channel),
+    ownWebhookIds: await listOwnWebhookIds({ webhooks, logger }, channel),
     isKnownBotMessage: (id) => Boolean(botMessageStore.getById(id) ?? botMessageLookup?.(id)),
   });
 

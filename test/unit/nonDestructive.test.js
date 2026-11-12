@@ -87,3 +87,33 @@ test('the UPDATE rule rejects overwrites of user data', () => {
   ].forEach((sql) => assert.doesNotMatch(sql, SOFT_DELETE_UPDATE));
   assert.match('UPDATE messages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', SOFT_DELETE_UPDATE);
 });
+
+const FILE_REMOVAL = /\b(unlink|unlinkSync|rm|rmSync|rmdir|rmdirSync|truncate|truncateSync|ftruncate|ftruncateSync)\(/;
+const FILE_MOVE = /\b(renameSync|linkSync|copyFileSync)\(/;
+const DATABASE_SWITCH = 'src/backfill/databaseSwitch.js';
+// The snapshot reader removes only the temporary copy it created itself, never user data.
+const TEMP_COPY_CLEANUP = ['src/storage/snapshot.js'];
+
+test('no source file removes or truncates a file', () => {
+  const checked = sources.filter(({ file }) => !TEMP_COPY_CLEANUP.includes(file));
+  assert.deepEqual(offenders((text) => FILE_REMOVAL.test(text), checked), []);
+});
+
+test('only the temporary-copy cleanup removes anything, and only from the OS temp directory', () => {
+  const removing = sources.filter(({ text }) => FILE_REMOVAL.test(text)).map(({ file }) => file);
+  assert.deepEqual(removing, TEMP_COPY_CLEANUP);
+  const snapshot = sources.find(({ file }) => file === TEMP_COPY_CLEANUP[0]).text;
+  assert.ok(snapshot.includes('os.tmpdir()'));
+});
+
+test('rename, link and copy of files appear only in the database switch', () => {
+  const moving = sources.filter(({ text }) => FILE_MOVE.test(text)).map(({ file }) => file);
+  assert.deepEqual(moving, [DATABASE_SWITCH]);
+});
+
+test('the file rules catch each forbidden call', () => {
+  ['fs.unlinkSync(p)', 'fs.rm(p)', 'rmSync(p)', 'fs.rmdir(p)', 'fs.truncateSync(p)', 'fs.promises.unlink(p)']
+    .forEach((code) => assert.match(code, FILE_REMOVAL));
+  ['fs.renameSync(a, b)', 'linkSync(a, b)', 'fs.copyFileSync(a, b)'].forEach((code) => assert.match(code, FILE_MOVE));
+  assert.doesNotMatch('truncateForDiscord(text)', FILE_REMOVAL);
+});
