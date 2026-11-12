@@ -1,6 +1,6 @@
 # Spec 21: Reply chains on bot messages
 
-**Depends on:** 15, 16, 17, 19. **Blocks:** 22, 24.
+**Depends on:** 15, 17, 19. **Blocks:** 22, 24.
 
 ## Problem
 

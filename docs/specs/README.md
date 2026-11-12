@@ -2,6 +2,16 @@
 
 Each spec defines one change completely: behaviour, interfaces, schema and config changes, edge cases, required tests, and what it depends on. Implement a spec only when everything it depends on is merged. `CLAUDE.md` applies to all of them.
 
+## Rules for implementing any spec
+
+1. **Existing tests that pin superseded behaviour must be updated.** A spec's Tests section names the important ones, but the list is not exhaustive: run the whole suite, and for every existing test (characterization, unit, harness) that fails because the spec deliberately changes that behaviour, update the assertion to the new behaviour. Never weaken or delete a test for behaviour the spec does not change. List every changed existing test in the hand-back report.
+2. **A later spec supersedes earlier contracts.** Where a spec changes a signature or rule from spec 02 or another earlier spec, the later spec wins. Do not edit earlier specs.
+3. **Scenario tests** live in `test/scenarios/` (created by the first spec that needs it) and drive the bot through `createWorld()` exactly like the characterization tests.
+4. **Harness changes are additive** unless the spec says otherwise, and every new fake capability gets a smoke test in `test/harness/harness.test.js`.
+5. **Config.** Every new key goes in `src/config.js` with the stated default, is validated in `loadConfig` when the spec gives a valid range, is covered in `test/unit/config.test.js`, and is documented in the README configuration section.
+6. **README.** The Docs section names topics; update every statement in `README.md` that the change makes inaccurate, including the known-issues list.
+7. **Wiring.** New services are constructed in `src/container.js` and exposed on the container when tests need them.
+
 ## Index
 
 | Spec | Title | Depends on |
@@ -20,7 +30,7 @@ Each spec defines one change completely: behaviour, interfaces, schema and confi
 | [18](18-paired-examples.md) | Paired reply examples | 10, 17 |
 | [19](19-rag-dedup.md) | Deduplicating retrieved examples | 15, 18 |
 | [20](20-revive-context.md) | Context for revives | 17, 19 |
-| [21](21-reply-chains.md) | Reply chains on bot messages | 15, 16, 17, 19 |
+| [21](21-reply-chains.md) | Reply chains on bot messages | 15, 17, 19 |
 | [22](22-typing-and-bursts.md) | Typing indicator and multi-message bursts | 21 |
 | [23](23-webhook-delivery.md) | Webhook persona display (opt-in) | 22 |
 | [24](24-edits-and-deletes.md) | Message edits and deletes (soft) | 15, 19, 21 |

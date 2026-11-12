@@ -10,16 +10,25 @@
 
 ## Required behaviour
 
-- `ingestService.recordMessage` passes the **StoredMessage** returned by `insertFiltered` (resolved `reference`, `hasGif`) to `vectorStore.upsertMessages`.
+- `messageStore.insertFiltered(record)` returns the **StoredMessage** it inserted, or `null` when a row with that id already existed (`ON CONFLICT DO NOTHING` changed nothing; detect it from the statement's `changes`). A duplicate delivery must never re-resolve a reference and write a different embedding under an existing Chroma id.
+- `ingestService.recordMessage` passes the StoredMessage (resolved `reference`, `hasGif`) to `vectorStore.upsertMessages`, and makes no vector call when `insertFiltered` returned `null`.
 - `vectorStore.upsertMessages(messages)`:
   - writes metadata `{ author, timestamp, has_gif }` with `has_gif` always a boolean (`Boolean(m.hasGif)`) in both collections;
-  - writes a row to the replies collection for every message whose `reference` is non-null **and** whose parent embedding exists in the messages collection (after this batch's own upsert); messages whose parent is missing are skipped for the replies collection only, never sent with an undefined embedding;
-  - makes no Chroma call for the replies collection when nothing qualifies.
+  - writes a row to the replies collection for every message whose `reference` is non-null **and** whose parent embedding exists in the messages collection (after this batch's own upsert). "Exists" means the looked-up embedding is a non-empty array. Messages whose parent is missing are skipped for the replies collection only, never sent with an undefined embedding;
+  - skips the parent lookup when no message has a reference, and makes no Chroma call for the replies collection when nothing qualifies.
 - No schema change. Existing Chroma rows are not modified here (spec 25 adds a non-destructive sync for old rows).
 
 ## Interfaces
 
-No signature changes. `ingestService.recordMessage(record)` still returns `{ filtered }`, where `filtered` is now the StoredMessage (a superset of MessageRecord).
+- `messageStore.insertFiltered(record) → StoredMessage | null`.
+- `ingestService.recordMessage(record) → { filtered, stored }`: `filtered` is the filter output as before (`null` when dropped); `stored` is the StoredMessage, or `null` when the message was dropped or was a duplicate.
+
+This supersedes the spec 02 contract that ingest passes the filter output to the vector store.
+
+## Accepted limitations
+
+- If Chroma fails after the SQLite insert, the SQLite rows exist without vectors, and a later child of that message gets no reply row. Spec 25's sync repairs both from `filtered_messages`.
+- Inferred references link any two messages by different authors within `storage.inferredReferenceWindowMs`, related or not. That is the existing heuristic; this spec only makes the vector store agree with SQLite.
 
 ## Edge cases
 
@@ -29,12 +38,14 @@ No signature changes. `ingestService.recordMessage(record)` still returns `{ fil
 - Resolved reference `null`: messages collection only.
 - Batch of `[parent, child]` where the parent is new in the same batch: the child's reply row uses the parent's embedding.
 - Batch where one child's parent is missing from Chroma and another's is present: only the second gets a reply row.
+- The same message recorded twice: one row in each table and collection, and the second call makes no Chroma call at all (assert the fake collections' `upserts` length).
 
 ## Tests
 
 - Flip both `KNOWN BUG (spec 10)` tests in `test/characterization/storage.test.js`: rename them (drop the prefix) and assert `has_gif` is `true`/`false`, and that an inferred reference produces a reply row with the parent's embedding.
 - Unit (`vectorStore`, `ingestService`): every edge case above; assert no `undefined` embedding is ever passed to the fake collection.
-- Scenario (`test/scenarios/ingest.test.js`): two messages by different authors within the window, the second not a Discord reply → `searchLikelyRepliers` for a message similar to the first returns the second's author; a seeded GIF message by the persona appears in the GIF bucket of a later retrieval.
+- The characterization test that expects reply-row metadata of exactly `{ author, timestamp }` gains `has_gif: false`; the unit tests named `KNOWN BUG` in `test/unit/storage/vectorStore.test.js` and `test/unit/ingest/ingestService.test.js` are flipped likewise.
+- Scenario (`test/scenarios/ingest.test.js`): two messages by different authors within the window, the second not a Discord reply → `searchLikelyRepliers` for a later message by a third author, similar to the first, returns the second's author; a seeded GIF message by the persona appears in the GIF bucket of a later retrieval.
 
 ## Docs
 
@@ -42,4 +53,4 @@ Remove the two corresponding entries from README "Known issues".
 
 ## Acceptance
 
-`npm test` passes; no other characterization test changes.
+`npm test` passes; only tests pinning the two fixed bugs change.
