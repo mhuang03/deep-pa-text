@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDatabase } from '../../../src/storage/database.js';
 import { createMessageStore } from '../../../src/storage/messageStore.js';
+import { PAGE_FILTERED } from '../../../src/storage/messageSql.js';
 
 const HOUR = 3600000;
 const config = { storage: { inferredReferenceWindowMs: HOUR } };
@@ -393,4 +394,23 @@ test('the migration adds an index on messages (timestamp, id)', () => {
   const { db } = setup();
   const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name);
   assert.ok(names.includes('idx_messages_timestamp_id'));
+});
+
+test('pageFiltered seeks on the timestamp index instead of scanning', () => {
+  const { db } = setup();
+  const plan = db.prepare(`EXPLAIN QUERY PLAN ${PAGE_FILTERED}`).all(-1, '', 10).map((row) => row.detail).join('\n');
+  assert.match(plan, /SEARCH filtered_messages USING INDEX idx_filtered_messages_timestamp/);
+  assert.doesNotMatch(plan, /SCAN filtered_messages/);
+});
+
+test('pageFiltered starts at the first row when there is no cursor, including at timestamp 0', () => {
+  const { store } = setup();
+  store.insertFiltered(msg('z', 'a', 0), { inferReference: false });
+  assert.deepEqual(store.pageFiltered({ limit: 5 }).map((r) => r.id), ['z']);
+});
+
+test('pageFiltered with a time cursor and an empty id includes rows at exactly that time', () => {
+  const { store } = setup();
+  seedCorpus(store);
+  assert.deepEqual(store.pageFiltered({ after: { timestamp: 20, id: '' }, limit: 5 }).map((r) => r.id), ['d', 'c']);
 });

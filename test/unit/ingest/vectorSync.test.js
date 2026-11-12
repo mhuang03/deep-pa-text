@@ -4,18 +4,22 @@ import { createFakeChroma, fakeEmbed } from '../../support/fakes/chroma.js';
 import { openDatabase } from '../../../src/storage/database.js';
 import { createMessageStore } from '../../../src/storage/messageStore.js';
 import { createVectorStore } from '../../../src/storage/vectorStore.js';
-import { createVectorSync } from '../../../src/backfill/vectorSync.js';
+import { createVectorSync } from '../../../src/ingest/vectorSync.js';
+import { inertClock, CHROMA_LIMITS } from '../../support/clocks.js';
 
 const config = {
   storage: { inferredReferenceWindowMs: 3600000 },
-  chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
+  chroma: {
+    messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings', ...CHROMA_LIMITS,
+  },
+  embedding: { dimensions: 64 },
   backfill: { batchSize: 2 },
 };
 
 const setup = async () => {
   const fake = createFakeChroma();
   const embeddingFunction = new fake.OpenAIEmbeddingFunction({});
-  const vectorStore = createVectorStore({ client: new fake.ChromaClient({}), embeddingFunction, config });
+  const vectorStore = createVectorStore({ client: new fake.ChromaClient({}), embeddingFunction, config, clock: inertClock() });
   await vectorStore.connect();
   const db = openDatabase(':memory:');
   const messageStore = createMessageStore({ db, config });
@@ -179,4 +183,43 @@ test('embeddings of added rows come from the embedding function', async () => {
   add('1', 1);
   await sync.run({});
   assert.deepEqual(messages.rows.get('1').embedding, fakeEmbed('message 1'));
+});
+
+test('sinceMs checks only rows at or after that time', async () => {
+  const { sync, add, messages } = await setup();
+  ['1', '2', '3', '4'].forEach((id, i) => add(id, (i + 1) * 10));
+  const result = await sync.run({ sinceMs: 30 });
+  assert.equal(result.checked, 2);
+  assert.deepEqual([...messages.rows.keys()].sort(), ['3', '4']);
+});
+
+test('sinceMs with no rows in range reports zeros and calls Chroma not at all', async () => {
+  const { sync, add, messages } = await setup();
+  add('1', 10);
+  assert.deepEqual(await sync.run({ sinceMs: 99 }), ZERO);
+  assert.equal(messages.upserts.length, 0);
+});
+
+test('quiet suppresses the per-page progress line', async () => {
+  const fake = createFakeChroma();
+  const vectorStore = createVectorStore({
+    client: new fake.ChromaClient({}), embeddingFunction: new fake.OpenAIEmbeddingFunction({}), config, clock: inertClock(),
+  });
+  const db = openDatabase(':memory:');
+  const messageStore = createMessageStore({ db, config });
+  const lines = [];
+  const sync = createVectorSync({ messageStore, vectorStore, logger: { info: (m) => lines.push(m) }, config });
+  const record = { id: '1', author: 'alice', content: 'message 1', timestamp: 1, reference: null };
+  messageStore.insertRaw(record);
+  messageStore.insertFiltered(record, { inferReference: false });
+  await sync.run({ quiet: true });
+  assert.deepEqual(lines, []);
+  await sync.run({});
+  assert.equal(lines.length, 1);
+});
+
+test('a SQLite failure is not tagged as a vector error', async () => {
+  const { sync, db } = await setup();
+  db.close();
+  await assert.rejects(sync.run({}), (error) => error.isVectorError === undefined);
 });

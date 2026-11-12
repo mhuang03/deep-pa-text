@@ -626,3 +626,54 @@ test('preload runs against the container before ready, and config overrides repl
   assert.equal(world.container.metaStore.get('seeded'), 'yes');
   assert.equal(world.discord.loginTokens.length, 1);
 });
+
+const never = (promise) => Promise.race([promise.then(() => 'settled', () => 'settled'), new Promise((r) => setImmediate(() => r('pending')))]);
+
+test('the fake chroma hang switch stalls the heartbeat, collection lookup and every operation until cleared', async () => {
+  const chroma = createFakeChroma();
+  const client = new chroma.ChromaClient({});
+  const collection = await client.getOrCreateCollection({ name: 'c' });
+  chroma.state.hang(true);
+  assert.equal(await never(client.heartbeat()), 'pending');
+  assert.equal(await never(client.getOrCreateCollection({ name: 'other' })), 'pending');
+  assert.equal(await never(collection.upsert({ ids: ['1'], documents: ['text'] })), 'pending');
+  assert.equal(await never(collection.get({ ids: ['1'] })), 'pending');
+  assert.equal(await never(collection.peek({ limit: 1 })), 'pending');
+  assert.equal(await never(collection.query({ queryTexts: ['x'] })), 'pending');
+  chroma.state.hang(false);
+  assert.equal(await client.heartbeat(), 1);
+  await collection.upsert({ ids: ['1'], documents: ['text'] });
+  assert.equal(collection.rows.size, 1);
+});
+
+test('the fake embedding function can hang or fail on its own', async () => {
+  const chroma = createFakeChroma();
+  const embedder = new chroma.OpenAIEmbeddingFunction({});
+  assert.equal(chroma.state.embedder, embedder);
+  embedder.hang(true);
+  assert.equal(await never(embedder.generate(['x'])), 'pending');
+  embedder.hang(false);
+  const boom = new Error('429');
+  embedder.setFailing(boom);
+  await assert.rejects(embedder.generate(['x']), boom);
+  embedder.setFailing(null);
+  assert.equal((await embedder.generate(['x']))[0].length, 64);
+});
+
+test('the fake chroma rejects an upsert with no ids or duplicate ids, as the server does', async () => {
+  const chroma = createFakeChroma();
+  const collection = await new chroma.ChromaClient({}).getOrCreateCollection({ name: 'c' });
+  await assert.rejects(collection.upsert({ ids: [], documents: [] }), /non-empty/);
+  await assert.rejects(collection.upsert({ ids: ['1', '1'], documents: ['a', 'b'] }), /unique/);
+  assert.equal(collection.rows.size, 0);
+});
+
+test('failCollection can be limited to some operations and peek lists rows without ids', async () => {
+  const chroma = createFakeChroma();
+  const collection = await new chroma.ChromaClient({}).getOrCreateCollection({ name: 'c' });
+  collection.seed([{ id: '1', document: 'a', metadata: {} }, { id: '2', document: 'b', metadata: {} }]);
+  chroma.state.failCollection('c', new Error('no writes'), ['upsert']);
+  await assert.rejects(collection.upsert({ ids: ['3'], documents: ['c'] }), /no writes/);
+  assert.deepEqual((await collection.peek({ limit: 1 })).ids, ['1']);
+  assert.deepEqual((await collection.get({ limit: 5, include: ['embeddings'] })).ids, ['1', '2']);
+});

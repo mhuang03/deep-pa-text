@@ -27,6 +27,12 @@ export const assertFilter = (filter) => {
   return filter;
 };
 
+export const assertChroma = (chroma) => checkRules('chroma', chroma, {
+  timeoutMs: above(0),
+  connectTimeoutMs: above(0),
+  batchTimeoutMs: above(0),
+});
+
 export const assertStorage = (storage) => checkRules('storage', storage, {
   busyTimeoutMs: integer(0),
 });

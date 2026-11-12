@@ -59,6 +59,9 @@ export const buildChroma = (env) => ({
   port: parsePort(env, 7429),
   messagesCollection: 'message_embeddings',
   repliesCollection: 'message_reply_embeddings',
+  timeoutMs: 30000,
+  connectTimeoutMs: 10000,
+  batchTimeoutMs: 120000,
 });
 
 export const buildEmbedding = () => ({

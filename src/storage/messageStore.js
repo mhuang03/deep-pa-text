@@ -3,6 +3,8 @@ import * as sql from './messageSql.js';
 const CHUNK_SIZE = 500;
 const GIF_TOKEN = '<gif!';
 const VISIBLE = 'deleted_at IS NULL';
+// Sorts before every real (timestamp, id) pair, so the first page starts at the beginning.
+const NO_CURSOR = { timestamp: -1, id: '' };
 
 const chunksOf = (items) => {
   const chunks = [];
@@ -107,8 +109,8 @@ export const createMessageStore = ({ db, config }) => {
     transaction(() => applyInTransaction({ ...edit, inferReference: shouldInfer }));
 
   const pageFiltered = ({ after = null, limit }) => {
-    const { timestamp, id } = after ?? { timestamp: null, id: null };
-    return pageSql.all(timestamp, timestamp, timestamp, id, limit).map((row) => ({
+    const { timestamp, id } = after ?? NO_CURSOR;
+    return pageSql.all(timestamp, id, limit).map((row) => ({
       id: row.id,
       author: row.author,
       content: row.content,

@@ -99,12 +99,11 @@ test('the SQLite writes of a batch are atomic', async () => {
   assert.equal(upserts.length, 0);
 });
 
-test('a vector failure rejects after the batch was written and marks the error', async () => {
-  const boom = new Error('chroma down');
+test('a vector failure rejects after the batch was written and keeps the error as given', async () => {
+  const boom = Object.assign(new Error('chroma down'), { isVectorError: true });
   const { db, ingest } = setup({ vectorError: boom });
   await assert.rejects(ingest.recordMessages([{ record: rec('1', 'a', 10) }]), (error) => {
     assert.equal(error, boom);
-    assert.equal(error.isVectorError, true);
     return true;
   });
   assert.equal(count(db, 'filtered_messages'), 1);
@@ -116,6 +115,6 @@ test('recordMessage returns the same result as the first entry of recordMessages
   const options = { repliesToBot: true };
   const a = await single.ingest.recordMessage(rec('1', 'a', 10), options);
   const b = await batch.ingest.recordMessages([{ record: rec('1', 'a', 10), ...options }]);
-  assert.deepEqual(a, b.results[0]);
+  assert.deepEqual(a, { ...b.results[0], vectorFailed: false });
   assert.equal(single.upserts.length, 1);
 });

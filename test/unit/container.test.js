@@ -19,7 +19,7 @@ const SERVICES = [
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
   'botMessageStore', 'botMessageResolver', 'contextBuilder', 'chainBuilder', 'burstProfile',
   'profileStore', 'metaStore', 'memberProfiles', 'webhooks',
-  'historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync',
+  'historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync', 'vectorHealth',
 ];
 
 const setup = (overrides = {}, databasePath = ':memory:', env = ENV) => {

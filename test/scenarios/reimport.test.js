@@ -12,7 +12,7 @@ import { createDatabaseSwitch } from '../../src/backfill/databaseSwitch.js';
 import { createReimporter, buildGeneration } from '../../src/backfill/reimport.js';
 import { REPLY_LINK_PREFIX } from '../../src/discord/webhookDelivery.js';
 import { createFakeDiscord } from '../support/fakes/discord.js';
-import { createFakeChroma } from '../support/fakes/chroma.js';
+import { createFakeChroma, FAKE_DIMENSIONS } from '../support/fakes/chroma.js';
 import { createFakeOpenAI } from '../support/fakes/llm.js';
 import { createFakeGifs } from '../support/fakes/gifs.js';
 import { BASE_TIME, ENV, PING_CACHE, USERS } from '../support/fixtures.js';
@@ -44,7 +44,11 @@ const setup = (t) => {
   };
   const base = loadConfig(ENV);
   const databasePath = path.join(dir, 'messages.db');
-  const config = { ...base, storage: { ...base.storage, databasePath } };
+  const config = {
+    ...base,
+    storage: { ...base.storage, databasePath },
+    embedding: { ...base.embedding, dimensions: FAKE_DIMENSIONS },
+  };
   const clock = { ...defaultClock(), now: () => BASE_TIME, sleep: async () => {} };
   const data = { users: USERS, pingCache: PING_CACHE };
   return { dir, fakes, vendor, config, clock, data, databasePath };
@@ -303,7 +307,7 @@ test('when hard links are unsupported the backup is a copy, and an existing .old
 
 test('a Chroma batch rejection leaves the run in progress and --resume repairs the vectors', async (t) => {
   const env = await prepared(t);
-  env.fakes.chroma.state.failCollection(`message_embeddings_${GENERATION}`, new Error('batch rejected'));
+  env.fakes.chroma.state.failCollection(`message_embeddings_${GENERATION}`, new Error('batch rejected'), ['upsert']);
   await assert.rejects(makeReimporter(env).run({ yes: true }), /batch rejected/);
   assert.equal(metaOf(env.databasePath, 'reimport_completed_at'), null);
   const collection = env.fakes.chroma.state.collection(`message_embeddings_${GENERATION}`);

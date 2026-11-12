@@ -55,14 +55,14 @@ test('a duplicate makes no vector call and returns stored null', async () => {
   const { ingest, calls, filtered } = setup({ duplicate: true });
   const result = await ingest.recordMessage(record);
   assert.deepEqual(calls.map((c) => c[0]), ['insertRaw', 'filter', 'insertFiltered']);
-  assert.deepEqual(result, { filtered, stored: null });
+  assert.deepEqual(result, { filtered, stored: null, vectorFailed: false });
 });
 
 test('a dropped message is stored raw only', async () => {
   const { ingest, calls } = setup({ kept: false });
   const result = await ingest.recordMessage(record);
   assert.deepEqual(calls.map((c) => c[0]), ['insertRaw', 'filter']);
-  assert.deepEqual(result, { filtered: null, stored: null });
+  assert.deepEqual(result, { filtered: null, stored: null, vectorFailed: false });
 });
 
 test('a vector store failure rejects after the rows were written', async () => {
@@ -110,7 +110,7 @@ const edited = { id: '1', author: 'alice', content: 'new', timestamp: 5, referen
 
 test('recordEdit applies the edit and upserts the new corpus row', async () => {
   const { ingest, calls, filtered } = setupEdit();
-  assert.deepEqual(await ingest.recordEdit(edited), { changed: true });
+  assert.deepEqual(await ingest.recordEdit(edited), { changed: true, vectorFailed: false });
   assert.deepEqual(calls.map((c) => c[0]), ['getRaw', 'filter', 'applyEdit', 'upsert']);
   assert.deepEqual(calls[2][1], { id: '1', content: 'new', editedAt: 9, filtered, inferReference: true });
   assert.deepEqual(calls[3][1], [{ id: '1:9' }]);
@@ -124,22 +124,22 @@ test('recordEdit passes inferReference false for replies to the bot', async () =
 
 test('recordEdit of an unknown message records it as new', async () => {
   const { ingest, calls } = setupEdit({ raw: null });
-  assert.deepEqual(await ingest.recordEdit(edited), { changed: true });
+  assert.deepEqual(await ingest.recordEdit(edited), { changed: true, vectorFailed: false });
   assert.deepEqual(calls.map((c) => c[0]), ['getRaw', 'insertRaw', 'filter', 'upsert']);
   assert.equal(calls[1][1].editedAt, undefined);
 });
 
 test('recordEdit ignores a deleted message and unchanged content', async () => {
   const deleted = setupEdit({ raw: { content: 'old', deleted: true } });
-  assert.deepEqual(await deleted.ingest.recordEdit(edited), { changed: false });
+  assert.deepEqual(await deleted.ingest.recordEdit(edited), { changed: false, vectorFailed: false });
   const same = setupEdit({ raw: { content: 'new', deleted: false } });
-  assert.deepEqual(await same.ingest.recordEdit(edited), { changed: false });
+  assert.deepEqual(await same.ingest.recordEdit(edited), { changed: false, vectorFailed: false });
   assert.deepEqual([...deleted.calls, ...same.calls].map((c) => c[0]).filter((n) => n !== 'getRaw'), []);
 });
 
 test('recordEdit stores a revision without a vector when the filter drops the edit or the edit is a no-op', async () => {
   const dropped = setupEdit({ kept: false, stored: null });
-  assert.deepEqual(await dropped.ingest.recordEdit(edited), { changed: true });
+  assert.deepEqual(await dropped.ingest.recordEdit(edited), { changed: true, vectorFailed: false });
   assert.equal(dropped.calls.some((c) => c[0] === 'upsert'), false);
   assert.equal(dropped.calls.find((c) => c[0] === 'applyEdit')[1].filtered, null);
 });

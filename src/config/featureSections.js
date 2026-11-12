@@ -86,6 +86,11 @@ export const buildLifecycle = () => ({
   pollMs: 100,
 });
 
+export const buildVector = () => ({
+  repairIntervalMs: 600000,
+  repairWindowMs: 604800000,
+});
+
 export const buildCatchUp = (env) => ({
   enabled: parseBoolean(env, 'CATCH_UP', true),
   maxMessages: 2000,

@@ -28,8 +28,7 @@ export const HAS_RAW = 'SELECT 1 AS found FROM messages WHERE id = ?';
 // Keyset pagination over visible corpus rows; the (timestamp, id) cursor is exclusive.
 export const PAGE_FILTERED = `
   SELECT id, author, content, timestamp, reference, has_gif FROM filtered_messages
-  WHERE deleted_at IS NULL
-    AND (? IS NULL OR timestamp > ? OR (timestamp = ? AND id > ?))
+  WHERE deleted_at IS NULL AND (timestamp, id) > (?, ?)
   ORDER BY timestamp, id
   LIMIT ?
 `;

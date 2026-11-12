@@ -66,7 +66,9 @@ export const createMessageCreateHandler = (deps) => {
 
   const handleMessage = async (message, record) => {
     const parent = record.reference ? await parents.find(message, record) : null;
-    const { filtered } = await ingest.recordMessage(record, { repliesToBot: Boolean(parent) });
+    const { filtered } = await ingest.recordMessage(record, {
+      repliesToBot: Boolean(parent), tolerateVectorErrors: true,
+    });
     const lines = [formatReceived({ record, kept: filtered !== null, logging: config.logging })];
     const threaded = buildChain(record, parent);
     if (threaded) return chainReply(message, threaded.chain, threaded.target, lines);

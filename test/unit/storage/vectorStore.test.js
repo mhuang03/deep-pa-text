@@ -2,14 +2,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createFakeChroma, fakeEmbed } from '../../support/fakes/chroma.js';
 import { createVectorStore, collectionNames } from '../../../src/storage/vectorStore.js';
+import { inertClock, CHROMA_LIMITS } from '../../support/clocks.js';
 
-const config = { chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' } };
+const config = {
+  chroma: {
+    messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings', ...CHROMA_LIMITS,
+  },
+  embedding: { dimensions: 64 },
+};
 
 const setup = () => {
   const fake = createFakeChroma();
   const client = new fake.ChromaClient({ port: 1 });
   const embeddingFunction = new fake.OpenAIEmbeddingFunction({});
-  const store = createVectorStore({ client, embeddingFunction, config });
+  const store = createVectorStore({ client, embeddingFunction, config, clock: inertClock() });
   return { fake, client, embeddingFunction, store };
 };
 const m = (id, content, extra = {}) => ({
@@ -312,6 +318,7 @@ test('a vector store with a generation creates and uses only that generation\'s 
   const fake = createFakeChroma();
   const store = createVectorStore({
     client: new fake.ChromaClient({}), embeddingFunction: new fake.OpenAIEmbeddingFunction({}), config, generation: 'g1',
+    clock: inertClock(),
   });
   await store.upsertMessages([m('1', 'some text')]);
   assert.equal(fake.state.collection('message_embeddings_g1').rows.size, 1);

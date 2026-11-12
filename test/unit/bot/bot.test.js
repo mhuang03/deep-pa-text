@@ -30,6 +30,12 @@ const setup = (env = {}) => {
     login: async (token) => log.push(['login', token]),
   };
   const refreshes = [];
+  const health = [];
+  const vectorHealth = {
+    noteFailure: (error) => health.push(['noteFailure', error.message]),
+    repair: async () => health.push(['repair']),
+    startupRepair: async () => health.push(['startupRepair']),
+  };
   const handlers = {
     messageCreate: () => {}, replyCommand: () => {}, messageDelete: () => {}, messageBulkDelete: () => {},
     messageUpdate: () => {}, reviveTick: () => {}, profileRefresh: () => refreshes.push('run'),
@@ -41,9 +47,12 @@ const setup = (env = {}) => {
     handlers,
     lifecycle,
     startupTasks,
+    vectorHealth,
     logger: { info: (m) => infos.push(m), error: () => {}, warn: () => {} },
   });
-  return { bot, log, handlers, intervals, infos, refreshes, lifecycle, startupTasks, tasks };
+  return {
+    bot, log, handlers, intervals, infos, refreshes, lifecycle, startupTasks, tasks, health, vectorHealth,
+  };
 };
 
 test('start registers once and on listeners, then logs in', async () => {
@@ -69,12 +78,14 @@ test('start registers once and on listeners, then logs in', async () => {
 });
 
 test('ready logs the tag and starts the revive interval at the normal period', async () => {
-  const { bot, log, handlers, intervals, infos } = setup();
+  const { bot, log, handlers, intervals, infos, vectorHealth } = setup();
   await bot.start();
   assert.equal(intervals.length, 0);
   await ready(log)();
   assert.deepEqual(infos, ['Logged in as bot#1']);
-  assert.deepEqual(intervals, [[handlers.reviveTick, 600000], [handlers.profileRefresh, 3600000]]);
+  assert.deepEqual(intervals, [
+    [handlers.reviveTick, 600000], [handlers.profileRefresh, 3600000], [vectorHealth.repair, 600000],
+  ]);
 });
 
 test('ready uses the override period when revive override is on', async () => {
@@ -89,7 +100,7 @@ test('ready starts a profile refresh without awaiting it, then repeats it on the
   handlers.profileRefresh = () => new Promise(() => {});
   await bot.start();
   await ready(log)();
-  assert.equal(intervals.at(-1)[0], handlers.profileRefresh);
+  assert.equal(intervals[1][0], handlers.profileRefresh);
   assert.equal(refreshes.length, 0);
 });
 
@@ -109,11 +120,12 @@ test('a refresh interval of 0 disables the refresh at ready and the interval', a
     handlers,
     lifecycle: { track: (fn) => fn, every: (fn, ms) => intervals.push([fn, ms]), shutdown: async () => {} },
     startupTasks: { restoreState: () => {}, catchUp: async () => ({ capped: false }) },
+    vectorHealth: { noteFailure: () => {}, repair: async () => {}, startupRepair: async () => {} },
     logger: { info: () => {}, error: () => {}, warn: () => {} },
   });
   await off.start();
   await ready(log)();
-  assert.deepEqual(intervals.map(([, ms]) => ms), [600000]);
+  assert.deepEqual(intervals.map(([, ms]) => ms), [600000, 600000]);
   assert.equal(refreshes.length, 0);
   assert.ok(bot);
 });
@@ -130,7 +142,7 @@ test('ready restores state, starts the intervals, catches up, then restores agai
   await ready(log)();
   assert.deepEqual(order.map((o) => o[0]), ['restore', 'catchUp', 'restore']);
   assert.deepEqual(order[0].slice(1), [undefined, 0]);
-  assert.equal(order[1][1], 2);
+  assert.equal(order[1][1], 3);
   assert.deepEqual(order[2][1], { capped: true });
 });
 
@@ -144,7 +156,7 @@ test('a failing startup step is logged and the next step still runs', async () =
   startupTasks.catchUp = async () => { throw new Error('fetch'); };
   await bot.start();
   await ready(log)();
-  assert.equal(intervals.length, 2);
+  assert.equal(intervals.length, 3);
   assert.equal(restores, 1);
 });
 
@@ -153,6 +165,40 @@ test('ready runs its work once when emitted twice', async () => {
   await bot.start();
   await ready(log)();
   await ready(log)();
-  assert.equal(intervals.length, 2);
+  assert.equal(intervals.length, 3);
   assert.equal(tasks.filter(([name]) => name === 'catchUp').length, 1);
+});
+
+test('ready starts the startup repair after catch-up and state restore without awaiting it', async () => {
+  const { bot, log, startupTasks, vectorHealth, health } = setup();
+  const order = [];
+  startupTasks.restoreState = () => order.push('restore');
+  startupTasks.catchUp = async () => {
+    order.push('catchUp');
+    return { capped: false };
+  };
+  vectorHealth.startupRepair = () => {
+    order.push('startupRepair');
+    return new Promise(() => {});
+  };
+  await bot.start();
+  await ready(log)();
+  assert.deepEqual(order, ['restore', 'catchUp', 'restore', 'startupRepair']);
+  assert.deepEqual(health, []);
+});
+
+test('a failed catch-up notes a vector debt and the startup repair still runs', async () => {
+  const { bot, log, startupTasks, health } = setup();
+  startupTasks.catchUp = async () => { throw new Error('fetch'); };
+  await bot.start();
+  await ready(log)();
+  assert.deepEqual(health, [['noteFailure', 'catch-up failed'], ['startupRepair']]);
+});
+
+test('the repair interval runs the vector repair', async () => {
+  const { bot, log, intervals, health } = setup();
+  await bot.start();
+  await ready(log)();
+  await intervals.at(-1)[0]();
+  assert.deepEqual(health.filter(([name]) => name === 'repair'), [['repair']]);
 });

@@ -8,9 +8,9 @@ export { PERSONA_DISPLAYS } from './config/parse.js';
 export { assertRequired, buildGifKeyWarning } from './config/requirements.js';
 export { createConfigError, isConfigError } from './config/errors.js';
 export {
-  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertRetrieval, assertPersona,
+  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertRetrieval, assertPersona, assertChroma,
 } from './config/validate.js';
-export { assertChain, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp } from './config/validateFeatures.js';
+export { assertChain, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector } from './config/validateFeatures.js';
 
 const deepFreeze = (value) => {
   if (value === null || typeof value !== 'object') return value;
@@ -24,7 +24,7 @@ const buildConfig = (env) => ({
   revive: base.buildRevive(env),
   filter: check.assertFilter(base.buildFilter()),
   storage: check.assertStorage(base.buildStorage()),
-  chroma: base.buildChroma(env),
+  chroma: check.assertChroma(base.buildChroma(env)),
   embedding: base.buildEmbedding(),
   retrieval: check.assertRetrieval(base.buildRetrieval()),
   persona: check.assertPersona(base.buildPersona()),
@@ -38,6 +38,7 @@ const buildConfig = (env) => ({
   backfill: checkFeature.assertBackfill(feature.buildBackfill()),
   lifecycle: checkFeature.assertLifecycle(feature.buildLifecycle()),
   catchUp: checkFeature.assertCatchUp(feature.buildCatchUp(env)),
+  vector: checkFeature.assertVector(feature.buildVector()),
   logging: feature.buildLogging(),
 });
 

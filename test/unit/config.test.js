@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig,
-  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp } from '../../src/config.js';
+  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp, assertChroma, assertVector } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -33,7 +33,10 @@ const EXPECTED_DEFAULTS = {
     databasePath: 'messages.db', usersPath: 'data/users.json', pingCachePath: 'data/ping_caches.json',
     inferredReferenceWindowMs: 3600000, busyTimeoutMs: 5000,
   },
-  chroma: { port: 7429, messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
+  chroma: {
+    port: 7429, messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings',
+    timeoutMs: 30000, connectTimeoutMs: 10000, batchTimeoutMs: 120000,
+  },
   embedding: { apiKeyEnvVar: 'OPENAI_API_KEY', modelName: 'text-embedding-3-small', dimensions: 512 },
   retrieval: {
     replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 30, likelyRepliers: 20,
@@ -52,6 +55,7 @@ const EXPECTED_DEFAULTS = {
   backfill: { pageSize: 100, batchSize: 100, pageRetries: 3, retryDelayMs: 2000, pageTimeoutMs: 30000 },
   lifecycle: { graceMs: 10000, pollMs: 100 },
   catchUp: { enabled: true, maxMessages: 2000 },
+  vector: { repairIntervalMs: 600000, repairWindowMs: 604800000 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
@@ -325,4 +329,20 @@ test('CATCH_UP is a strict boolean that defaults to on', () => {
   assert.equal(loadConfig({}).catchUp.enabled, true);
   assert.equal(loadConfig({ CATCH_UP: 'false' }).catchUp.enabled, false);
   assert.throws(() => loadConfig({ CATCH_UP: 'maybe' }), /CATCH_UP must be/);
+});
+
+test('assertChroma requires positive timeouts', () => {
+  const ok = DEFAULTS.chroma;
+  ['timeoutMs', 'connectTimeoutMs', 'batchTimeoutMs'].forEach((key) => {
+    failsFor(assertChroma, ok, key, [0, -1, Number.NaN, undefined]);
+    passesFor(assertChroma, ok, key, [1, 50]);
+  });
+});
+
+test('assertVector requires a positive repair interval and window', () => {
+  const ok = DEFAULTS.vector;
+  ['repairIntervalMs', 'repairWindowMs'].forEach((key) => {
+    failsFor(assertVector, ok, key, [0, -1, Number.NaN, undefined]);
+    passesFor(assertVector, ok, key, [1, 604800000]);
+  });
 });

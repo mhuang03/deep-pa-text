@@ -1,5 +1,7 @@
 // What happens once the gateway is ready: restore state, start the timers, catch up on missed messages.
-export const createReady = ({ client, config, handlers, lifecycle, startupTasks, logger }) => {
+export const createReady = ({
+  client, config, handlers, lifecycle, startupTasks, vectorHealth, logger,
+}) => {
   const { track, every } = lifecycle;
   let started = false;
 
@@ -28,6 +30,12 @@ export const createReady = ({ client, config, handlers, lifecycle, startupTasks,
   const startIntervals = () => {
     every(track(handlers.reviveTick, 'reviveTick'), revivePeriod());
     startProfileRefresh();
+    every(track(vectorHealth.repair, 'vectorRepair'), config.vector.repairIntervalMs);
+  };
+
+  // Not awaited: the repair can take long and must not delay ready. It never throws.
+  const startupRepair = () => {
+    track(vectorHealth.startupRepair, 'vectorStartupRepair')();
   };
 
   const catchUp = async () => {
@@ -42,8 +50,9 @@ export const createReady = ({ client, config, handlers, lifecycle, startupTasks,
     await guarded('restore state', () => startupTasks.restoreState());
     startIntervals();
     const result = await guarded('catch up', catchUp, 'warn');
-    if (result === null) return;
-    await guarded('restore state after catch-up', () => startupTasks.restoreState({ capped: result.capped }));
+    if (result === null) vectorHealth.noteFailure(new Error('catch-up failed'));
+    else await guarded('restore state after catch-up', () => startupTasks.restoreState({ capped: result.capped }));
+    startupRepair();
   };
 
   return { onReady: track(onReady, 'ClientReady') };

@@ -77,7 +77,7 @@ test('replies in order: human noted before ingest, bot claimed before generation
   await handler(message);
   assert.deepEqual(events.map((e) => (e[0] === 'respond' ? 'respond' : e)), [
     ['noteHuman', { timestamp: 4242, author: 'alice' }],
-    ['ingest', { repliesToBot: false }], 'filter', 'decide', 'noteBot', 'pick',
+    ['ingest', { repliesToBot: false, tolerateVectorErrors: true }], 'filter', 'decide', 'noteBot', 'pick',
     'respond',
     ['noteReply', { resetMisses: true }], 'noteBot',
   ]);
@@ -95,7 +95,7 @@ test('replies in order: human noted before ingest, bot claimed before generation
 test('noteHuman runs synchronously before the first await', () => {
   const { handler, events, discord } = setup();
   const pending = handler(discord.makeMessage({ timestamp: 7 }));
-  assert.deepEqual(events, [['noteHuman', { timestamp: 7, author: 'alice' }], ['ingest', { repliesToBot: false }]]);
+  assert.deepEqual(events, [['noteHuman', { timestamp: 7, author: 'alice' }], ['ingest', { repliesToBot: false, tolerateVectorErrors: true }]]);
   return pending;
 });
 
@@ -112,7 +112,7 @@ test('a delivery failure is logged once, arms the rate limit without resetting m
 test('logs not replyable and neither decides nor claims activity', async () => {
   const { handler, events, logs, discord } = setup({ filtered: { target: null, filtered: null } });
   await handler(discord.makeMessage({ content: 'hi' }));
-  assert.deepEqual(events.slice(1), [['ingest', { repliesToBot: false }], 'filter']);
+  assert.deepEqual(events.slice(1), [['ingest', { repliesToBot: false, tolerateVectorErrors: true }], 'filter']);
   assert.match(logs.info[0], /filter kept: no[\s\S]*\[NOREPLY: not replyable\]$/);
 });
 
@@ -159,7 +159,7 @@ test('a reply to a bot message is ingested as such, chained, and answered by the
   assert.deepEqual(names(events), [
     'noteHuman', 'ingest', 'filterForChain', 'build', 'chainDecide', 'begin', 'respond', 'noteReply', 'end',
   ]);
-  assert.deepEqual(events[1], ['ingest', { repliesToBot: true }]);
+  assert.deepEqual(events[1], ['ingest', { repliesToBot: true, tolerateVectorErrors: true }]);
   const [, request] = events.find((e) => e[0] === 'respond');
   assert.equal(request.trigger, 'chain');
   assert.equal(request.persona, 'bob');
@@ -190,7 +190,7 @@ test('without a chain the message continues through the normal flow', async () =
   const unknownPersona = setup({ parent: PARENT, chain: null });
   await unknownPersona.handler(replyTo(unknownPersona.discord));
   assert.ok(unknownPersona.events.includes('decide'));
-  assert.deepEqual(unknownPersona.events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: true }]);
+  assert.deepEqual(unknownPersona.events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: true, tolerateVectorErrors: true }]);
   const emptyTarget = setup({ parent: PARENT, chain: CHAIN, chainTarget: null });
   await emptyTarget.handler(replyTo(emptyTarget.discord));
   assert.equal(emptyTarget.events.some((e) => e[0] === 'build'), false);
@@ -201,7 +201,7 @@ test('a message that does not reply to a bot message never builds a chain', asyn
   const { handler, events, discord } = setup({ parent: null });
   await handler(replyTo(discord));
   assert.equal(events.includes('filterForChain'), false);
-  assert.deepEqual(events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: false }]);
+  assert.deepEqual(events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: false, tolerateVectorErrors: true }]);
 });
 
 test('the chain is released and the rate limit armed when delivery fails', async () => {

@@ -38,3 +38,10 @@ test('an unreachable Chroma becomes a one-line config error naming the port; the
     && !e.message.includes('\n') && e.message.includes('7429') && e.message.includes('npx chroma run --port 7429'));
   assert.deepEqual(calls, ['connect']);
 });
+
+test('a configuration error from connect (for example a dimension mismatch) is not replaced by the unreachable message', async () => {
+  const mismatch = Object.assign(new Error('embedding.dimensions is 512'), { isConfigError: true });
+  const { startup, calls } = setup({ connect: async () => { throw mismatch; } });
+  await assert.rejects(startup.run(), (e) => e === mismatch);
+  assert.deepEqual(calls, ['connect']);
+});

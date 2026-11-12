@@ -2,13 +2,16 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createWorld } from '../support/world.js';
 import { BASE_TIME } from '../support/fixtures.js';
+import { FAKE_DIMENSIONS } from '../support/fakes/chroma.js';
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const HELLO = 'hello there friends';
 
-const newWorld = async (t, options) => {
-  const world = await createWorld(options);
+// Rows seeded before the start are fake vectors, which the startup dimension check compares with the config.
+const newWorld = async (t, options = {}) => {
+  const config = { ...options.config, embedding: { dimensions: FAKE_DIMENSIONS } };
+  const world = await createWorld({ ...options, config });
   t.after(() => world.close());
   return world;
 };

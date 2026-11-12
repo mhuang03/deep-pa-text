@@ -5,10 +5,14 @@ import { createMessageStore } from '../../../src/storage/messageStore.js';
 import { createVectorStore } from '../../../src/storage/vectorStore.js';
 import { createRetriever, BUCKET_ORDER } from '../../../src/retrieval/retriever.js';
 import { createFakeChroma, fakeEmbed } from '../../support/fakes/chroma.js';
+import { inertClock, CHROMA_LIMITS } from '../../support/clocks.js';
 
 const baseConfig = {
   storage: { inferredReferenceWindowMs: 3600000 },
-  chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
+  chroma: {
+    messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings', ...CHROMA_LIMITS,
+  },
+  embedding: { dimensions: 64 },
   retrieval: { replyResults: 2, similarResults: 3, gifResults: 2, otherResults: 4, reviveSamples: 5,
     overFetchFactor: 3, nearDuplicateThreshold: 0.95, nearDuplicateMinChars: 12,
     frequentMinCount: 3, frequentLimit: 10,
@@ -29,7 +33,7 @@ const setup = async ({ replyResults = 2, ...overrides } = {}) => {
     return generate(texts);
   };
   const client = new fake.ChromaClient({});
-  const vectorStore = createVectorStore({ client, embeddingFunction, config });
+  const vectorStore = createVectorStore({ client, embeddingFunction, config, clock: inertClock() });
   await vectorStore.connect();
   const db = openDatabase(':memory:');
   const messageStore = createMessageStore({ db, config });

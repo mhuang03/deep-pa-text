@@ -5,9 +5,13 @@ import { createVectorStore } from '../../../src/storage/vectorStore.js';
 import { openDatabase } from '../../../src/storage/database.js';
 import { createMessageStore } from '../../../src/storage/messageStore.js';
 import { createPersonaSelector } from '../../../src/retrieval/personaSelector.js';
+import { inertClock, CHROMA_LIMITS } from '../../support/clocks.js';
 
 const config = {
-  chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
+  chroma: {
+    messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings', ...CHROMA_LIMITS,
+  },
+  embedding: { dimensions: 64 },
   retrieval: { likelyRepliers: 3 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
 };
@@ -22,6 +26,7 @@ const setup = async (rolls = []) => {
     client: new fake.ChromaClient({}),
     embeddingFunction: new fake.OpenAIEmbeddingFunction({}),
     config,
+    clock: inertClock(),
   });
   await vectorStore.connect();
   const queue = [...rolls];
@@ -121,6 +126,7 @@ test('pickRandomUser uses everyone when the exclusion leaves nobody', async () =
     client: new fake.ChromaClient({}),
     embeddingFunction: new fake.OpenAIEmbeddingFunction({}),
     config,
+    clock: inertClock(),
   });
   const selector = createPersonaSelector({
     vectorStore, users: [{ username: 'alice', name: 'Alice' }], random: () => 0, config,

@@ -1,5 +1,3 @@
-import { markVectorError } from '../util/vectorError.js';
-
 const HAS_GIF_KEY = 'has_gif';
 const MESSAGES = 'messages';
 const REPLIES = 'replies';
@@ -81,26 +79,19 @@ export const createVectorSync = ({ messageStore, vectorStore, logger, config }) 
     };
   };
 
-  const run = async ({ dryRun = false } = {}) => {
+  // `sinceMs` limits the check to rows at or after that time, for the automatic repair.
+  const run = async ({ dryRun = false, sinceMs = null, quiet = false } = {}) => {
     let totals = emptyCounts();
-    let after = null;
+    let after = sinceMs === null ? null : { timestamp: sinceMs, id: '' };
     for (;;) {
       const rows = messageStore.pageFiltered({ after, limit: batchSize });
       if (rows.length === 0) return totals;
       totals = addCounts(totals, await syncPage(rows, dryRun));
       const last = rows.at(-1);
       after = { timestamp: last.timestamp, id: last.id };
-      logger.info(`Checked ${totals.checked} corpus rows against Chroma.`);
+      if (!quiet) logger.info(`Checked ${totals.checked} corpus rows against Chroma.`);
     }
   };
 
-  const guarded = async (options) => {
-    try {
-      return await run(options);
-    } catch (error) {
-      throw markVectorError(error);
-    }
-  };
-
-  return { run: guarded };
+  return { run };
 };

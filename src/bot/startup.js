@@ -1,4 +1,4 @@
-import { createConfigError } from '../config/errors.js';
+import { createConfigError, isConfigError } from '../config/errors.js';
 
 const STARTED_KEY = 'reimport_started_at';
 const COMPLETED_KEY = 'reimport_completed_at';
@@ -15,7 +15,9 @@ export const createStartup = ({ metaStore, vectorStore, bot, config }) => {
   const connectVectorStore = async () => {
     try {
       await vectorStore.connect();
-    } catch {
+    } catch (error) {
+      // A settings mismatch is not an unreachable server.
+      if (isConfigError(error)) throw error;
       const { port } = config.chroma;
       throw createConfigError(
         `Cannot reach Chroma on port ${port}. Start it with: npx chroma run --port ${port} --path ${CHROMA_PATH}`,

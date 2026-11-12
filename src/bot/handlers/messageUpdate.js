@@ -10,7 +10,7 @@ export const createMessageUpdateHandler = ({ config, ingest, botMessageStore, cl
     const { reference, ...rest } = toMessageRecord(message);
     const repliesToBot = Boolean(reference && botMessageStore.getById(reference));
     const editedAt = message.editedTimestamp ?? clock.now();
-    await ingest.recordEdit({ ...rest, reference, editedAt }, { repliesToBot });
+    await ingest.recordEdit({ ...rest, reference, editedAt }, { repliesToBot, tolerateVectorErrors: true });
   };
 
   // Edits are not channel activity: no tracker, no reply policy, never a reply.

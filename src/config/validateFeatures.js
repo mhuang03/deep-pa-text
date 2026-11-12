@@ -33,6 +33,11 @@ export const assertLifecycle = (lifecycle) => checkRules('lifecycle', lifecycle,
   pollMs: above(0),
 });
 
+export const assertVector = (vector) => checkRules('vector', vector, {
+  repairIntervalMs: above(0),
+  repairWindowMs: above(0),
+});
+
 export const assertCatchUp = (catchUp) => checkRules('catchUp', catchUp, {
   maxMessages: integer(1),
 });

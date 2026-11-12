@@ -2,9 +2,11 @@ import { Events } from 'discord.js';
 import { registerGatewayEvents } from './gatewayEvents.js';
 import { createReady } from './ready.js';
 
-export const createBot = ({ client, config, handlers, lifecycle, startupTasks, logger }) => {
+export const createBot = ({ client, config, handlers, lifecycle, startupTasks, vectorHealth, logger }) => {
   const { track } = lifecycle;
-  const { onReady } = createReady({ client, config, handlers, lifecycle, startupTasks, logger });
+  const { onReady } = createReady({
+    client, config, handlers, lifecycle, startupTasks, vectorHealth, logger,
+  });
 
   const start = async () => {
     registerGatewayEvents({ client, lifecycle, logger });

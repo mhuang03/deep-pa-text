@@ -32,7 +32,7 @@ test('records the edit with the edit time and the message record', async () => {
   await handler.onUpdate({}, message);
   assert.deepEqual(edits, [[
     { id: 'm1', author: 'alice', content: 'new', timestamp: 5, reference: null, editedAt: 99 },
-    { repliesToBot: false },
+    { repliesToBot: false, tolerateVectorErrors: true },
   ]]);
 });
 

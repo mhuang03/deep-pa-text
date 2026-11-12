@@ -46,7 +46,8 @@ import { createCatchUp } from './backfill/catchUp.js';
 import { createHistoryReader } from './backfill/historyReader.js';
 import { createBotMessageImporter } from './backfill/botMessageImporter.js';
 import { createHistoryImporter } from './backfill/historyImporter.js';
-import { createVectorSync } from './backfill/vectorSync.js';
+import { createVectorSync } from './ingest/vectorSync.js';
+import { createVectorHealth } from './ingest/vectorHealth.js';
 
 export const GENERATION_KEY = 'chroma_generation';
 
@@ -79,7 +80,7 @@ export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logge
   return createGifResolver({ engines, config, random: clock.random, logger, clock });
 };
 
-const buildVectorStore = ({ config, vendor, generation }) => {
+const buildVectorStore = ({ config, vendor, generation, clock }) => {
   const { chroma, embedding } = config;
   const client = new vendor.ChromaClient({ port: chroma.port });
   const embeddingFunction = new vendor.OpenAIEmbeddingFunction({
@@ -87,7 +88,7 @@ const buildVectorStore = ({ config, vendor, generation }) => {
     modelName: embedding.modelName,
     dimensions: embedding.dimensions,
   });
-  return createVectorStore({ client, embeddingFunction, config, generation });
+  return createVectorStore({ client, embeddingFunction, config, generation, clock });
 };
 
 // Without a key the SDK would fall back to OPENAI_API_KEY and send it to DeepSeek, so it is never constructed.
@@ -119,9 +120,13 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
   const botMessageStore = createBotMessageStore({ db, config });
   const profileStore = createProfileStore({ db });
   const metaStore = createMetaStore({ db });
-  const vectorStore = buildVectorStore({ config, vendor, generation: metaStore.get(GENERATION_KEY) });
+  const vectorStore = buildVectorStore({ config, vendor, generation: metaStore.get(GENERATION_KEY), clock });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
-  const ingest = createIngestService({ messageStore, vectorStore, messageFilter, botMessageStore });
+  const vectorSync = createVectorSync({ messageStore, vectorStore, logger, config });
+  const vectorHealth = createVectorHealth({ vectorSync, clock, config, logger });
+  const ingest = createIngestService({
+    messageStore, vectorStore, messageFilter, botMessageStore, onVectorError: vectorHealth.noteFailure,
+  });
   const retriever = createRetriever({ vectorStore, messageStore, config, logger });
   const userDirectory = buildUserDirectory(data.users);
   const personaSelector = createPersonaSelector({
@@ -132,8 +137,8 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
     config, vendor, retriever, userDirectory, botMessageStore, messageStore, burstProfile, logger,
   });
   return {
-    db, messageStore, botMessageStore, profileStore, metaStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
-    personaSelector, burstProfile, generator,
+    db, messageStore, botMessageStore, profileStore, metaStore, vectorStore, vectorSync, vectorHealth, messageFilter,
+    ingest, retriever, userDirectory, personaSelector, burstProfile, generator,
   };
 };
 
@@ -177,7 +182,7 @@ const buildDelivery = ({ config, client, memberProfiles, logger }) => {
 };
 
 const buildBackfill = ({ config, clock, logger, client, core, channelHistory, webhooks }) => {
-  const { messageStore, botMessageStore, profileStore, userDirectory, messageFilter, ingest, vectorStore } = core;
+  const { messageStore, botMessageStore, profileStore, userDirectory, messageFilter, ingest } = core;
   const historyReader = createHistoryReader({ channelHistory, config, clock, logger });
   const botMessageImporter = createBotMessageImporter({
     botMessageStore, profileStore, userDirectory, config, logger,
@@ -186,8 +191,7 @@ const buildBackfill = ({ config, clock, logger, client, core, channelHistory, we
     historyReader, botMessageImporter, ingest, messageStore, botMessageStore, messageFilter, webhooks,
     getBotUserId: () => client.user?.id, config, logger,
   });
-  const vectorSync = createVectorSync({ messageStore, vectorStore, logger, config });
-  return { historyReader, botMessageImporter, historyImporter, vectorSync };
+  return { historyReader, botMessageImporter, historyImporter };
 };
 
 const buildStartupTasks = ({ core, activity, replyPolicy, catchUp, clock }) => ({
@@ -239,7 +243,9 @@ export const buildContainer = ({
     lifecycle, clock, config, logger,
   });
   const startupTasks = buildStartupTasks({ core, activity, replyPolicy, catchUp, clock });
-  const bot = createBot({ client, config, handlers, lifecycle, startupTasks, logger });
+  const bot = createBot({
+    client, config, handlers, lifecycle, startupTasks, vectorHealth: core.vectorHealth, logger,
+  });
   return {
     bot, lifecycle, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder,
     chainBuilder, memberProfiles, webhooks, ...backfill, ...core,

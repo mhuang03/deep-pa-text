@@ -1,4 +1,6 @@
-const DIMENSIONS = 64;
+export const FAKE_DIMENSIONS = 64;
+const DIMENSIONS = FAKE_DIMENSIONS;
+const NEVER = new Promise(() => {});
 
 const fnv1a32 = (text) => {
   let hash = 0x811c9dc5;
@@ -64,15 +66,21 @@ const project = (entries, include) =>
       .map(([name, key]) => [name, entries.map((entry) => entry[key])]),
   );
 
-const createCollection = (name, embeddingFunction, onEmbed, failure = null) => {
+const createCollection = (name, embeddingFunction, { onEmbed, isHanging }, failure = null) => {
   const embedder = embeddingFunction ?? {
     generate: async (texts) => {
+      if (isHanging()) await NEVER;
       onEmbed();
       return texts.map(fakeEmbed);
     },
   };
-  const guard = () => {
-    if (failure) throw failure;
+  const guard = async (operation) => {
+    if (isHanging()) await NEVER;
+    if (failure && (!failure.operations || failure.operations.includes(operation))) throw failure.error;
+  };
+  const assertBatch = (ids) => {
+    if (ids.length === 0) throw new Error('fake chroma: expected IDs to be non-empty');
+    if (new Set(ids).size !== ids.length) throw new Error('fake chroma: expected IDs to be unique');
   };
 
   const collection = {
@@ -80,8 +88,9 @@ const createCollection = (name, embeddingFunction, onEmbed, failure = null) => {
     rows: new Map(),
     upserts: [],
     queries: [],
-    setFailing: (error) => {
-      failure = error ?? null;
+    // `operations` limits the failure to those operations (for example ['upsert']); the default is all of them.
+    setFailing: (error, operations = null) => {
+      failure = error ? { error, operations } : null;
     },
     seed: (records) => {
       records.forEach(({ id, document, metadata, embedding }) => {
@@ -94,7 +103,8 @@ const createCollection = (name, embeddingFunction, onEmbed, failure = null) => {
       });
     },
     async upsert(args) {
-      guard();
+      await guard('upsert');
+      assertBatch(args.ids);
       collection.upserts.push(args);
       const embeddings = args.embeddings ?? (await embedder.generate(args.documents));
       collection.seed(args.ids.map((id, i) => {
@@ -102,13 +112,17 @@ const createCollection = (name, embeddingFunction, onEmbed, failure = null) => {
         return { id, document: args.documents[i], metadata: args.metadatas?.[i], embedding: [...embeddings[i]] };
       }));
     },
-    async get({ ids, include = ['documents', 'metadatas'] }) {
-      guard();
-      const found = ids.filter((id) => collection.rows.has(id));
+    async get({ ids, limit, include = ['documents', 'metadatas'] }) {
+      await guard('get');
+      const known = ids ?? [...collection.rows.keys()];
+      const found = known.filter((id) => collection.rows.has(id)).slice(0, limit);
       return { ids: found, ...project(found.map((id) => collection.rows.get(id)), include) };
     },
+    async peek({ limit = 10 }) {
+      return collection.get({ limit });
+    },
     async query(args) {
-      guard();
+      await guard('query');
       collection.queries.push(args);
       const { queryEmbeddings, queryTexts, nResults = 10, where } = args;
       const include = args.include ?? ['documents', 'metadatas', 'distances'];
@@ -141,18 +155,28 @@ export const createFakeChroma = () => {
   // Failures armed by name, applied when the collection is created (a generation's name is not known earlier).
   const armed = new Map();
   let heartbeatError = null;
+  let hanging = false;
   const embeddingFunctions = [];
+  const embedders = [];
   const state = {
     constructed: [],
     // Number of embedding-function generate calls, to prove a repair did not re-embed anything.
     embeddingCalls: 0,
     embeddingFunctions,
+    // The constructed embedding function, whose hang/setFailing switches tests flip.
+    get embedder() {
+      return embedders.at(-1) ?? null;
+    },
     get embeddingFunctionOptions() {
       return embeddingFunctions.at(-1) ?? null;
     },
-    failCollection: (name, error) => {
-      armed.set(name, error ?? null);
-      collections.get(name)?.setFailing(error);
+    failCollection: (name, error, operations = null) => {
+      armed.set(name, error ? { error, operations } : null);
+      collections.get(name)?.setFailing(error, operations);
+    },
+    // While hanging, every collection operation, the heartbeat and the embedding function never settle.
+    hang: (value = true) => {
+      hanging = Boolean(value);
     },
     failHeartbeat: (error) => {
       heartbeatError = error ?? null;
@@ -163,12 +187,30 @@ export const createFakeChroma = () => {
     },
   };
 
+  const hooks = { onEmbed: () => { state.embeddingCalls += 1; }, isHanging: () => hanging };
+
   class OpenAIEmbeddingFunction {
     constructor(options) {
       embeddingFunctions.push(options);
+      embedders.push(this);
+    }
+
+    // Per-instance switches: hang(true) never settles, setFailing(error) rejects (for example with a 429).
+    hung = false;
+
+    failure = null;
+
+    hang(value = true) {
+      this.hung = Boolean(value);
+    }
+
+    setFailing(error) {
+      this.failure = error ?? null;
     }
 
     async generate(texts) {
+      if (hanging || this.hung) await NEVER;
+      if (this.failure) throw this.failure;
       state.embeddingCalls += 1;
       return texts.map(fakeEmbed);
     }
@@ -180,14 +222,14 @@ export const createFakeChroma = () => {
     }
 
     async heartbeat() {
+      if (hanging) await NEVER;
       if (heartbeatError) throw heartbeatError;
       return 1;
     }
 
     async getOrCreateCollection({ name, embeddingFunction }) {
-      if (!collections.has(name)) collections.set(name, createCollection(name, embeddingFunction, () => {
-        state.embeddingCalls += 1;
-      }, armed.get(name) ?? null));
+      if (hanging) await NEVER;
+      if (!collections.has(name)) collections.set(name, createCollection(name, embeddingFunction, hooks, armed.get(name) ?? null));
       return collections.get(name);
     }
   }

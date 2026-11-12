@@ -1,85 +1,59 @@
-const QUERY_INCLUDE = ['documents', 'metadatas', 'distances'];
+import { createConfigError } from '../config/errors.js';
+import { createVectorGuard } from './vectorGuard.js';
+import { createCollectionLoader } from './vectorCollections.js';
+import {
+  QUERY_INCLUDE, hasEmbedding, dedupeById, toHits, buildQueryInput, toUpsertBody,
+} from './vectorRecords.js';
 
-const buildMetadata = (m) => ({ author: m.author, timestamp: m.timestamp, has_gif: Boolean(m.hasGif) });
+export { collectionNames } from './vectorCollections.js';
 
-const toHits = (result) =>
-  result.ids[0].map((id, i) => ({
-    id,
-    document: result.documents[0][i],
-    metadata: result.metadatas[0][i],
-    distance: result.distances[0][i],
-  }));
+export const createVectorStore = ({ client, embeddingFunction, config, generation = null, clock }) => {
+  if (!clock) throw new Error('createVectorStore requires a clock');
+  const guard = createVectorGuard({ config, clock });
+  const { timed, limits } = guard;
+  const { collections } = createCollectionLoader({ client, embeddingFunction, config, generation, guard });
 
-const buildQueryInput = ({ embedding, text }) => {
-  if ((embedding === undefined) === (text === undefined)) {
-    throw new Error('vectorStore.query requires exactly one of embedding or text');
-  }
-  return embedding === undefined ? { queryTexts: [text] } : { queryEmbeddings: [embedding] };
-};
-
-// A database that names a generation (a full re-import) owns its own pair of collections.
-export const collectionNames = (config, generation) => {
-  const { messagesCollection, repliesCollection } = config.chroma;
-  if (!generation) return { messages: messagesCollection, replies: repliesCollection };
-  return { messages: `${messagesCollection}_${generation}`, replies: `${repliesCollection}_${generation}` };
-};
-
-export const createVectorStore = ({ client, embeddingFunction, config, generation = null }) => {
-  let pending = null;
-
-  const loadCollections = async () => {
-    const names = collectionNames(config, generation);
-    const messages = await client.getOrCreateCollection({ name: names.messages, embeddingFunction });
-    const replies = await client.getOrCreateCollection({ name: names.replies, embeddingFunction });
-    return { messages, replies };
+  const readStoredDimension = async (messages) => {
+    const found = await timed('peek', limits.connect, () => messages.get({ limit: 1, include: ['embeddings'] }));
+    return found.embeddings?.[0]?.length ?? null;
   };
 
-  // A rejected attempt is dropped so the next call retries.
-  const attempt = async () => {
-    try {
-      return await loadCollections();
-    } catch (error) {
-      pending = null;
-      throw error;
-    }
-  };
-
-  const collections = () => {
-    if (!pending) pending = attempt();
-    return pending;
+  // A model change with the same dimension cannot be seen without an embedding request.
+  const assertDimensions = (stored) => {
+    const expected = config.embedding.dimensions;
+    if (stored === null || stored === expected) return;
+    throw createConfigError(
+      `The Chroma collection holds ${stored}-dimension embeddings but embedding.dimensions is ${expected}. `
+      + 'Restore the original embedding settings, or start a new collection with a re-import.',
+    );
   };
 
   const connect = async () => {
-    await client.heartbeat();
-    await collections();
+    await timed('connect', limits.connect, () => client.heartbeat());
+    const { messages } = await collections(limits.connect);
+    assertDimensions(await readStoredDimension(messages));
   };
 
   const embed = async (text) => {
-    const [embedding] = await embeddingFunction.generate([text]);
+    const [embedding] = await timed('embed', limits.interactive, () => embeddingFunction.generate([text]));
     return embedding;
   };
 
-  const hasEmbedding = (embedding) => Array.isArray(embedding) && embedding.length > 0;
-
-  const loadParentEmbeddings = async (messagesCollection, withReference) => {
+  const loadParentEmbeddings = async (messagesCollection, withReference, ms) => {
     const ids = Array.from(new Set(withReference.map((m) => m.reference)));
-    const referenced = await messagesCollection.get({ ids, include: ['embeddings'] });
+    const referenced = await timed('upsertMessages', ms, () => messagesCollection.get({ ids, include: ['embeddings'] }));
     const entries = referenced.ids.map((id, i) => [id, referenced.embeddings?.[i]]);
     return new Map(entries.filter(([, embedding]) => hasEmbedding(embedding)));
   };
 
-  const upsertReplies = async (repliesCollection, rows, parents) => {
+  const upsertReplies = async (repliesCollection, rows, parents, ms) => {
     if (rows.length === 0) return;
-    await repliesCollection.upsert({
-      ids: rows.map((m) => m.id),
-      documents: rows.map((m) => m.content),
-      metadatas: rows.map(buildMetadata),
-      embeddings: rows.map((m) => parents.get(m.reference)),
-    });
+    const body = { ...toUpsertBody(rows), embeddings: rows.map((m) => parents.get(m.reference)) };
+    await timed('upsertMessages', ms, () => repliesCollection.upsert(body));
   };
 
-  const named = async (name) => {
-    const target = (await collections())[name];
+  const named = async (name, ms) => {
+    const target = (await collections(ms))[name];
     if (!target) throw new Error(`Unknown collection: ${name}`);
     return target;
   };
@@ -87,7 +61,10 @@ export const createVectorStore = ({ client, embeddingFunction, config, generatio
   // Stored rows as Chroma holds them, so a repair can pass them back unchanged.
   const getRecords = async (name, ids) => {
     if (ids.length === 0) return new Map();
-    const found = await (await named(name)).get({ ids, include: ['documents', 'metadatas', 'embeddings'] });
+    const target = await named(name, limits.batch);
+    const found = await timed('getRecords', limits.batch, () => target.get({
+      ids, include: ['documents', 'metadatas', 'embeddings'],
+    }));
     return new Map(found.ids.map((id, i) => [id, {
       document: found.documents?.[i],
       metadata: found.metadatas?.[i],
@@ -96,55 +73,54 @@ export const createVectorStore = ({ client, embeddingFunction, config, generatio
   };
 
   // Only for adding a missing metadata key: records carry the row's existing document and embedding.
-  const fillMetadata = async (name, records) => {
+  const fillMetadata = async (name, input) => {
+    const records = dedupeById(input, (r) => r.id);
     if (records.length === 0) return;
-    await (await named(name)).upsert({
+    const target = await named(name, limits.batch);
+    await timed('fillMetadata', limits.batch, () => target.upsert({
       ids: records.map((r) => r.id),
       documents: records.map((r) => r.document),
       metadatas: records.map((r) => r.metadata),
       embeddings: records.map((r) => r.embedding),
-    });
+    }));
   };
 
-  const addReplyRows = async (rows) => {
+  const addReplyRows = async (input) => {
+    const rows = dedupeById(input, (r) => r.message.id);
     if (rows.length === 0) return;
-    const { replies } = await collections();
-    await replies.upsert({
-      ids: rows.map((r) => r.message.id),
-      documents: rows.map((r) => r.message.content),
-      metadatas: rows.map((r) => buildMetadata(r.message)),
+    const { replies } = await collections(limits.batch);
+    await timed('addReplyRows', limits.batch, () => replies.upsert({
+      ...toUpsertBody(rows.map((r) => r.message)),
       embeddings: rows.map((r) => r.embedding),
-    });
+    }));
   };
 
-  const upsertMessages = async (msgs) => {
-    const { messages, replies } = await collections();
-    await messages.upsert({
-      ids: msgs.map((m) => m.id),
-      documents: msgs.map((m) => m.content),
-      metadatas: msgs.map(buildMetadata),
-    });
+  const upsertMessages = async (input) => {
+    const msgs = dedupeById(input, (m) => m.id);
+    if (msgs.length === 0) return;
+    const ms = msgs.length > 1 ? limits.batch : limits.interactive;
+    const { messages, replies } = await collections(ms);
+    await timed('upsertMessages', ms, () => messages.upsert(toUpsertBody(msgs)));
     const withReference = msgs.filter((m) => m.reference);
     if (withReference.length === 0) return;
-    const parents = await loadParentEmbeddings(messages, withReference);
-    const qualifying = withReference.filter((m) => parents.has(m.reference));
-    await upsertReplies(replies, qualifying, parents);
+    const parents = await loadParentEmbeddings(messages, withReference, ms);
+    await upsertReplies(replies, withReference.filter((m) => parents.has(m.reference)), parents, ms);
   };
 
   const getEmbeddings = async (ids) => {
     if (ids.length === 0) return new Map();
-    const { messages } = await collections();
-    const found = await messages.get({ ids, include: ['embeddings'] });
+    const { messages } = await collections(limits.interactive);
+    const found = await timed('getEmbeddings', limits.interactive, () => messages.get({ ids, include: ['embeddings'] }));
     const entries = found.ids.map((id, i) => [id, found.embeddings?.[i]]);
     return new Map(entries.filter(([, embedding]) => hasEmbedding(embedding)));
   };
 
   const query = async (name, { embedding, text, where, limit }) => {
     const input = buildQueryInput({ embedding, text });
-    const target = await named(name);
-    const result = await target.query({
+    const target = await named(name, limits.interactive);
+    const result = await timed('query', limits.interactive, () => target.query({
       ...input, nResults: limit, where, include: QUERY_INCLUDE,
-    });
+    }));
     return toHits(result);
   };
 
