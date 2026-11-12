@@ -148,3 +148,39 @@ test('latest queries return newest first and honour the limit', () => {
   assert.deepEqual(withRef.map((r) => r.id), ['f3', 'f2']);
   assert.equal(withRef[0].reference_content, '<gif! x>');
 });
+
+test('getParents maps ids to the content of their stored parent', () => {
+  const { store } = setup();
+  store.insertFiltered(msg('p', 'a', 10, { content: 'parent <gif! x>' }));
+  store.insertFiltered(msg('c', 'b', 20, { reference: 'p' }));
+  store.insertFiltered(msg('lonely', 'a', 99 * HOUR));
+  const parents = store.getParents(['c', 'lonely', 'unknown']);
+  assert.deepEqual([...parents], [['c', { content: 'parent <gif! x>' }]]);
+});
+
+test('getParents ignores a reference to a missing parent', () => {
+  const { store } = setup();
+  store.insertFiltered(msg('c', 'b', 20, { reference: 'gone' }));
+  assert.equal(store.getParents(['c']).size, 0);
+});
+
+test('getParents with no ids returns an empty map without touching the database', () => {
+  const store = createMessageStore({
+    db: { prepare: (sql) => { if (/IN \(/.test(sql)) throw new Error('queried'); return setup().db.prepare(sql); } },
+    config,
+  });
+  assert.equal(store.getParents([]).size, 0);
+});
+
+test('getParents handles more than 500 ids in chunks', () => {
+  const { store } = setup();
+  store.insertFiltered(msg('p', 'a', 10, { content: 'the parent' }));
+  const ids = [];
+  for (let i = 0; i < 1100; i += 1) {
+    ids.push(`c${i}`);
+    store.insertFiltered(msg(`c${i}`, 'b', 20 + i, { reference: 'p' }));
+  }
+  const parents = store.getParents(ids);
+  assert.equal(parents.size, 1100);
+  assert.equal(parents.get('c1099').content, 'the parent');
+});

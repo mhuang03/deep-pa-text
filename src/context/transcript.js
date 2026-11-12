@@ -2,7 +2,7 @@ const ELLIPSIS = '…';
 
 const clean = (text) => text.replace(/\r?\n/g, ' ').trim();
 
-const limit = (text, maxEntryChars) =>
+export const truncateEntry = (text, maxEntryChars) =>
   (text.length > maxEntryChars ? `${text.slice(0, maxEntryChars)}${ELLIPSIS}` : text);
 
 // Bot messages we cannot attribute to a persona, and other bots, carry no usable speaker.
@@ -16,7 +16,7 @@ const speakerAndContent = (message, { resolveBot, transform }) => {
 const toEntry = (message, options) => {
   const resolved = speakerAndContent(message, options);
   if (!resolved) return null;
-  const content = limit(clean(resolved.content ?? ''), options.maxEntryChars);
+  const content = truncateEntry(clean(resolved.content ?? ''), options.maxEntryChars);
   if (content === '') return null;
   if (message.createdTimestamp < options.notBefore) return null;
   return {

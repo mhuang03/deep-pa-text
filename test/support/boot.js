@@ -37,7 +37,9 @@ const buildConfig = (env) => {
   return { ...config, storage: { ...config.storage, databasePath: IN_MEMORY } };
 };
 
-const buildSubject = (container, contextTimeZone) => {
+const toExample = (entry) => (typeof entry === 'string' ? { you: entry, them: null } : entry);
+
+const buildSubject = (container, { timeZone: contextTimeZone, maxEntryChars }) => {
   const { messageFilter, ingest, retriever, personaSelector, generator, gifResolver } = container;
   return {
     filter: (msg) => messageFilter.filter(msg),
@@ -47,7 +49,7 @@ const buildSubject = (container, contextTimeZone) => {
     },
     semanticSearch: async (author, msg) => {
       const buckets = await retriever.retrieveForReply(author, msg);
-      return BUCKET_ORDER.map((key) => buckets[key]);
+      return BUCKET_ORDER.map((key) => (key === 'replies' ? buckets[key].map((e) => e.you) : buckets[key]));
     },
     randomSearch: (author) => retriever.retrieveForRevive(author),
     searchLikelyRepliers: (msg) => personaSelector.likelyRepliers(msg),
@@ -58,7 +60,8 @@ const buildSubject = (container, contextTimeZone) => {
     ragInput: (author, name, message, replies, similar, gifs, other, { messageAuthor, transcript = [] } = {}) =>
       buildReplyPrompt({
         author, name, message, messageAuthor, transcript, timeZone: contextTimeZone,
-        buckets: { replies, similar, gifs, other },
+        maxEntryChars,
+        buckets: { replies: replies.map(toExample), similar, gifs, other },
       }),
     contextlessInput: (author, name, examples) => buildRevivePrompt({ author, name, examples }),
   };
@@ -92,5 +95,5 @@ export const bootBot = async (world) => {
     dispose();
     throw error;
   }
-  return { subject: buildSubject(container, config.context.timeZone), sqlite: buildSqlite(container.db), dispose };
+  return { subject: buildSubject(container, config.context), sqlite: buildSqlite(container.db), dispose };
 };

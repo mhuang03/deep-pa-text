@@ -120,3 +120,18 @@ test('the command trigger uses the history before the selected target, not befor
   assert.ok(!prompt.includes('after the target'));
   assert.match(prompt, /received this message from "bob": "selected target message"/);
 });
+
+test('reply examples pair a similar past reply with the message it answered; Chroma-only rows have no parent', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  await world.seed([
+    { id: 'e1', author: 'dave', content: 'anyone up for food', timestamp: at(500) },
+    { id: 'e2', author: 'bob', content: 'im down, where', timestamp: at(499), reference: 'e1' },
+  ]);
+  world.chroma.collection('message_reply_embeddings').seed([
+    { id: 'ghost', document: 'only in chroma', metadata: { author: 'bob', timestamp: at(498) } },
+  ]);
+  await world.emitMessage({ author: 'alice', content: 'anyone up for food', timestamp: BASE_TIME });
+  const prompt = userPrompt(world);
+  assert.ok(prompt.includes('{"them":"anyone up for food","you":"im down, where"}'), prompt);
+  assert.ok(prompt.includes('{"you":"only in chroma"}'), prompt);
+});

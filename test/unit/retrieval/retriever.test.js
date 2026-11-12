@@ -6,13 +6,14 @@ import { createVectorStore } from '../../../src/storage/vectorStore.js';
 import { createRetriever, BUCKET_ORDER } from '../../../src/retrieval/retriever.js';
 import { createFakeChroma } from '../../support/fakes/chroma.js';
 
-const config = {
+const baseConfig = {
   storage: { inferredReferenceWindowMs: 3600000 },
   chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
   retrieval: { replyResults: 2, similarResults: 3, gifResults: 2, otherResults: 4, reviveSamples: 5 },
 };
 
-const setup = async () => {
+const setup = async ({ replyResults = 2 } = {}) => {
+  const config = { ...baseConfig, retrieval: { ...baseConfig.retrieval, replyResults } };
   const fake = createFakeChroma();
   const embeddingFunction = new fake.OpenAIEmbeddingFunction({});
   const generate = embeddingFunction.generate.bind(embeddingFunction);
@@ -82,7 +83,7 @@ test('restricts every bucket to the author and strictly earlier messages', async
   store(ctx, 's2', 'alice', 'cats same time', 100);
   store(ctx, 's3', 'bob', 'cats other author', 50);
   const buckets = await ctx.retriever.retrieveForReply('alice', record);
-  assert.deepEqual(buckets, { replies: ['cats early'], similar: [], gifs: [], other: [] });
+  assert.deepEqual(buckets, { replies: [{ you: 'cats early', them: null }], similar: [], gifs: [], other: [] });
 });
 
 test('similar is nearest first and the gif bucket only holds has_gif messages', async () => {
@@ -109,7 +110,7 @@ test('dedupes across buckets with reply > similar > gifs > other', async () => {
   store(ctx, 'x1', 'alice', 'same text', 1);
   store(ctx, 'x2', 'alice', 'only random', 3);
   const buckets = await ctx.retriever.retrieveForReply('alice', record);
-  assert.deepEqual(buckets.replies, ['same text']);
+  assert.deepEqual(buckets.replies, [{ you: 'same text', them: null }]);
   assert.deepEqual(buckets.similar, ['only similar']);
   assert.deepEqual(buckets.gifs, []);
   assert.deepEqual(buckets.other, ['only random']);
@@ -139,4 +140,40 @@ test('retrieveForReply embeds queryText when given, else the record content', as
   await ctx.retriever.retrieveForReply('alice', record, { queryText: 'line one\ncats rule' });
   await ctx.retriever.retrieveForReply('alice', record);
   assert.deepEqual(ctx.embedCalls.map(([text]) => text), ['line one\ncats rule', 'cats rule']);
+});
+
+test('reply examples pair each hit with the content of its parent message', async () => {
+  const ctx = await setup({ replyResults: 5 });
+  store(ctx, 'p1', 'bob', 'anyone up for food', 10);
+  ctx.messageStore.insertFiltered({ id: 'r1', author: 'alice', content: 'im down, where', timestamp: 20, reference: 'p1' });
+  store(ctx, 'solo', 'alice', 'no parent here', 30);
+  seed(ctx, 'message_reply_embeddings', [
+    ['r1', 'im down, where', meta('alice', 20)],
+    ['solo', 'no parent here', meta('alice', 30)],
+    ['chroma-only', 'only in chroma', meta('alice', 40)],
+  ]);
+  const { replies } = await ctx.retriever.retrieveForReply('alice', { ...record, timestamp: 100 });
+  const byYou = Object.fromEntries(replies.map((e) => [e.you, e.them]));
+  assert.equal(byYou['im down, where'], 'anyone up for food');
+  assert.equal(byYou['no parent here'], null);
+  assert.equal(byYou['only in chroma'], null);
+});
+
+test('hits sharing a document keep the nearest id and its parent; one getParents call', async () => {
+  const ctx = await setup();
+  store(ctx, 'p1', 'bob', 'first parent', 1);
+  store(ctx, 'p2', 'bob', 'second parent', 2);
+  ctx.messageStore.insertFiltered({ id: 'r1', author: 'alice', content: 'cats rule', timestamp: 20, reference: 'p1' });
+  ctx.messageStore.insertFiltered({ id: 'r2', author: 'alice', content: 'cats rule', timestamp: 30, reference: 'p2' });
+  seed(ctx, 'message_reply_embeddings', [
+    ['r2', 'cats rule', meta('alice', 30)],
+    ['r1', 'cats rule', meta('alice', 20)],
+  ]);
+  const calls = [];
+  const original = ctx.messageStore.getParents;
+  ctx.messageStore.getParents = (ids) => { calls.push(ids); return original(ids); };
+  const { replies } = await ctx.retriever.retrieveForReply('alice', { ...record, timestamp: 100 });
+  assert.equal(replies.length, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(replies[0].them, calls[0][0] === 'r1' ? 'first parent' : 'second parent');
 });

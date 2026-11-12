@@ -23,6 +23,7 @@ export const createGenerator = ({ chatClient, retriever, userDirectory, config }
       buckets,
       transcript,
       timeZone: config.context.timeZone,
+      maxEntryChars: config.context.maxEntryChars,
     });
     return complete(user);
   };

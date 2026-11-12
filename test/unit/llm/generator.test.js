@@ -6,7 +6,7 @@ import { SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src
 import { loadConfig } from '../../../src/config.js';
 
 const config = loadConfig({});
-const buckets = { replies: ['r'], similar: ['s1', 's2'], gifs: ['g'], other: ['o'] };
+const buckets = { replies: [{ you: 'r', them: 'q' }], similar: ['s1', 's2'], gifs: ['g'], other: ['o'] };
 
 const setup = ({ retrieverError = null, chatError = null } = {}) => {
   const calls = { chat: [], reply: [], revive: [] };
@@ -60,7 +60,7 @@ test('the reply prompt lists buckets in BUCKET_ORDER', async () => {
   const { calls, generator } = setup();
   await generator.generateReply('alice', record);
   const user = calls.chat[0].user;
-  const positions = ['["r"]', '["s1","s2"]', '["g"]', '["o"]'].map((s) => user.indexOf(s));
+  const positions = ['[{"them":"q","you":"r"}]', '["s1","s2"]', '["g"]', '["o"]'].map((s) => user.indexOf(s));
   assert.deepEqual([...positions].sort((a, b) => a - b), positions);
   assert.ok(positions.every((p) => p > 0));
 });

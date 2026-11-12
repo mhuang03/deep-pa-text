@@ -128,12 +128,12 @@ Chroma:
 
 For a reply (`retrieveForReply`), four buckets are fetched, all restricted to the persona's messages older than the target message:
 
-1. 10 nearest from `message_reply_embeddings` (their replies to similar messages)
+1. 10 nearest from `message_reply_embeddings` (their replies to similar messages), each paired with the message it answered: `messageStore.getParents` looks up the stored content of the reply's `reference`, giving `{ you, them }` (`them` is `null` when the row has no stored parent, including rows that exist only in Chroma)
 2. 20 nearest from `message_embeddings` (their own similar messages)
 3. 10 nearest from `message_embeddings` with `has_gif`
 4. 10 random rows from `filtered_messages`
 
-Buckets are deduplicated by exact content, with earlier buckets taking precedence.
+Buckets are deduplicated by exact content, with earlier buckets taking precedence. The reply bucket is rendered as JSON objects with `them` first (`{"them": ..., "you": ...}`, or `{"you": ...}` without a parent), and `them` is cut to `context.maxEntryChars` characters with `…`.
 
 `buildReplyPrompt` assembles the user message from ordered sections: the persona's username and real name, the recent channel transcript (omitted when empty), the target message naming its sender (`The user has just received this message from "<sender>": "<message>"`), then the four buckets. Sections are joined by a blank line.
 

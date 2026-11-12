@@ -76,7 +76,8 @@ test('getRAGResponse user message is ragInput built from the four semanticSearch
   const buckets = parseArrays(userContent);
   const expected = await world.subject.semanticSearch('alice', m);
   assert.equal(buckets.length, 4);
-  buckets.forEach((bucket, i) => assert.deepEqual(sorted(bucket), sorted(expected[i])));
+  const yous = (bucket) => bucket.map((e) => e.you ?? e);
+  buckets.forEach((bucket, i) => assert.deepEqual(sorted(yous(bucket)), sorted(expected[i])));
   assert.equal(userContent, world.subject.ragInput('alice', 'Alice Example', m.content, ...buckets, { messageAuthor: 'bob' }));
   assertRequestShape(world, userContent);
 });

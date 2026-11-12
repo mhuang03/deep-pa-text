@@ -27,6 +27,12 @@ const LATEST_WITH_REFERENCE = `
   ORDER BY m.timestamp DESC
   LIMIT ?
 `;
+const PARENT_CHUNK_SIZE = 500;
+const parentsSql = (count) => `
+  SELECT m.id AS id, r.content AS content FROM filtered_messages m
+  JOIN filtered_messages r ON m.reference = r.id
+  WHERE m.id IN (${Array(count).fill('?').join(', ')})
+`;
 const latestFrom = (table, where = '') =>
   `SELECT * FROM ${table} ${where} ORDER BY timestamp DESC LIMIT ?`;
 
@@ -76,8 +82,27 @@ export const createMessageStore = ({ db, config }) => {
   const randomContents = ({ author, before = null, limit }) =>
     randomSql.all(author, before, before, limit).map((row) => row.content);
 
+  const chunksOf = (items) => {
+    const chunks = [];
+    for (let i = 0; i < items.length; i += PARENT_CHUNK_SIZE) {
+      chunks.push(items.slice(i, i + PARENT_CHUNK_SIZE));
+    }
+    return chunks;
+  };
+
+  // Ids whose reference does not resolve to a stored message are simply absent.
+  const getParents = (ids) => {
+    const parents = new Map();
+    chunksOf(ids).forEach((chunk) => {
+      db.prepare(parentsSql(chunk.length)).all(...chunk)
+        .forEach((row) => parents.set(row.id, { content: row.content }));
+    });
+    return parents;
+  };
+
   return {
     insertRaw,
+    getParents,
     insertFiltered,
     randomContents,
     latestRaw: (limit) => latestRawSql.all(limit),

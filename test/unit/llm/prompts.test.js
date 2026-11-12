@@ -12,14 +12,14 @@ test('SYSTEM_PROMPT equals the fixture', () => {
 test('buildReplyPrompt equals a literal', () => {
   const out = buildReplyPrompt({
     author: 'alice', name: 'Alice Example', message: 'hi "there"', messageAuthor: 'alice', transcript: [],
-    buckets: { replies: ['r1'], similar: ['c1', 'c2'], gifs: [], other: ['o1'] },
+    buckets: { replies: [{ you: 'r1', them: 'q1' }], similar: ['c1', 'c2'], gifs: [], other: ['o1'] },
   });
   const expected = `The user you are emulating has username "alice", and their real name is "Alice Example".
 
 The user has just received this message from "alice": "hi "there"".
 
-Here are some examples of messages that the user has sent in response to messages that are similar in semantic meaning to the message they just received:
-["r1"]
+Here are examples of how the user replied to messages similar to the one they just received. "them" is the message the user was responding to and "you" is the user's reply:
+[{"them":"q1","you":"r1"}]
 
 Here are some examples of some messages that the user has sent that are similar in semantic meaning to the message they just received:
 ["c1","c2"]
@@ -41,13 +41,13 @@ Here are some examples of messages that the user has sent in the past:
 });
 
 test('buildReplyPrompt serialises awkward bucket contents as JSON', () => {
-  const buckets = { replies: ['a "q"', 'b\nc'], similar: [], gifs: ['<gif! x>'], other: ['é😀'] };
+  const buckets = { replies: [{ you: 'a "q"', them: null }, { you: 'b\nc', them: 'x' }], similar: [], gifs: ['<gif! x>'], other: ['é😀'] };
   const expected = `The user you are emulating has username "u", and their real name is "N".
 
 The user has just received this message from "s": "m".
 
-Here are some examples of messages that the user has sent in response to messages that are similar in semantic meaning to the message they just received:
-["a \\"q\\"","b\\nc"]
+Here are examples of how the user replied to messages similar to the one they just received. "them" is the message the user was responding to and "you" is the user's reply:
+[{"you":"a \\"q\\""},{"them":"x","you":"b\\nc"}]
 
 Here are some examples of some messages that the user has sent that are similar in semantic meaning to the message they just received:
 []
@@ -86,7 +86,7 @@ Here is the recent conversation in the channel, oldest first, for context:
 
 The user has just received this message from "alice": "want to get food".
 
-Here are some examples of messages that the user has sent in response to messages that are similar in semantic meaning to the message they just received:
+Here are examples of how the user replied to messages similar to the one they just received. "them" is the message the user was responding to and "you" is the user's reply:
 []
 
 `;
