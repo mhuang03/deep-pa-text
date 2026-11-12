@@ -36,9 +36,9 @@ test('stores every message raw in messages, including non-approved authors and f
     msg('m3', 'bob', 'hi', T0 + 3, null),
   );
   assert.deepEqual(world.sqlite.all('SELECT * FROM messages ORDER BY timestamp'), [
-    { id: 'm1', author: 'alice', content: '<@111> hello there', timestamp: T0 + 1, reference: null },
-    { id: 'm2', author: 'mallory', content: 'hello from outsider', timestamp: T0 + 2, reference: 'x9' },
-    { id: 'm3', author: 'bob', content: 'hi', timestamp: T0 + 3, reference: null },
+    { id: 'm1', author: 'alice', content: '<@111> hello there', timestamp: T0 + 1, reference: null, deleted_at: null },
+    { id: 'm2', author: 'mallory', content: 'hello from outsider', timestamp: T0 + 2, reference: 'x9', deleted_at: null },
+    { id: 'm3', author: 'bob', content: 'hi', timestamp: T0 + 3, reference: null, deleted_at: null },
   ]);
 });
 
@@ -58,7 +58,10 @@ test('a kept message gets a filtered_messages row with transformed content and h
   const world = await newWorld(t);
   await record(world, msg('m1', 'alice', '<@222> hello there', T0, null));
   assert.deepEqual(world.sqlite.all('SELECT * FROM filtered_messages'), [
-    { id: 'm1', author: 'alice', content: '@bob hello there', timestamp: T0, reference: null, has_gif: 0 },
+    {
+      id: 'm1', author: 'alice', content: '@bob hello there', timestamp: T0, reference: null, has_gif: 0,
+      deleted_at: null, source_id: null,
+    },
   ]);
 });
 

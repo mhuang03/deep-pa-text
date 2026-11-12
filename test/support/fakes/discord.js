@@ -80,6 +80,7 @@ const makeBotMessage = (id, payload, channel, reference = null) => {
     reference,
     createdTimestamp: Date.now(),
     channel,
+    channelId: channel.id,
     url: `https://discord.test/channels/${channel.guildId}/${channel.id}/${id}`,
   };
   channel.history.push(message);
@@ -157,14 +158,18 @@ export const createFakeDiscord = () => {
       author: { id: `user-${author}`, username: author, bot },
       content,
       createdTimestamp: timestamp,
+      editedTimestamp: null,
+      partial: false,
       reference: reference ? { messageId: reference } : null,
       channel: target,
+      channelId: target.id,
       guild: guildField,
       guildId: target.guildId,
       replies: [],
       referenceFetches: 0,
       url: `https://discord.test/channels/${target.guildId}/${target.id}/${id}`,
     };
+    message.fetch = async () => message;
     // Resolves to the history message with the referenced id, like discord.js; rejects when it is gone.
     message.fetchReference = async () => {
       message.referenceFetches += 1;
@@ -299,6 +304,26 @@ export const createFakeDiscord = () => {
     const message = makeMessage(fields);
     message.channel.history.push(message);
     return message;
+  };
+  // A deleted or uncached message arrives as an id and a channel id only.
+  const findMessage = (id) => [channel, otherChannel].flatMap((c) => c.history).find((m) => m.id === id);
+  state.partialOf = (messageOrId) => {
+    const id = typeof messageOrId === 'string' ? messageOrId : messageOrId.id;
+    const known = findMessage(id);
+    const channelId = (known ?? messageOrId).channelId ?? channel.id;
+    const owner = [channel, otherChannel].find((c) => c.id === channelId) ?? channel;
+    const index = owner.history.findIndex((m) => m.id === id);
+    if (index !== -1) owner.history.splice(index, 1);
+    return { id, channelId, partial: true };
+  };
+  // Updates the stored message in place, like a cache refresh, and returns the old and new views.
+  state.applyEdit = (message, { content, editedTimestamp, partial }) => {
+    const oldMessage = { ...message };
+    message.content = content;
+    message.editedTimestamp = editedTimestamp;
+    if (!partial) return { oldMessage, newMessage: message };
+    const stub = { id: message.id, channelId: message.channelId, partial: true, fetch: async () => message };
+    return { oldMessage: { id: message.id, channelId: message.channelId, partial: true }, newMessage: stub };
   };
   state.makeInteraction = makeInteraction;
   state.closePending = () => {

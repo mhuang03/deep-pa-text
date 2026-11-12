@@ -4,15 +4,23 @@ const INSERT = `
   ON CONFLICT(id) DO NOTHING
 `;
 const BY_ID = 'SELECT * FROM bot_messages WHERE id = ?';
-const RECENT = 'SELECT * FROM bot_messages ORDER BY timestamp DESC, id DESC LIMIT ?';
+const RECENT = `
+  SELECT * FROM bot_messages WHERE deleted_at IS NULL ORDER BY timestamp DESC, id DESC LIMIT ?
+`;
+const MARK_DELETED = 'UPDATE bot_messages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL';
 
 const SIBLINGS = `
   SELECT * FROM bot_messages
-  WHERE persona = ? AND trigger = ? AND reference IS ? AND ABS(timestamp - ?) <= ?
+  WHERE deleted_at IS NULL AND persona = ? AND trigger = ? AND reference IS ? AND ABS(timestamp - ?) <= ?
   ORDER BY timestamp, id
 `;
 
-const toBotMessage = (row) => (row ? { ...row } : null);
+// Invisible rows carry deleted: true; visible rows keep their original shape.
+const toBotMessage = (row) => {
+  if (!row) return null;
+  const { deleted_at: deletedAt, ...rest } = row;
+  return deletedAt === null || deletedAt === undefined ? rest : { ...rest, deleted: true };
+};
 
 export const createBotMessageStore = ({ db, config }) => {
   const windowMs = config.burst.siblingWindowMs;
@@ -20,6 +28,7 @@ export const createBotMessageStore = ({ db, config }) => {
   const byIdSql = db.prepare(BY_ID);
   const recentSql = db.prepare(RECENT);
   const siblingsSql = db.prepare(SIBLINGS);
+  const markDeletedSql = db.prepare(MARK_DELETED);
 
   const insert = ({ id, persona, content, timestamp, reference = null, trigger }) => {
     insertSql.run(id, persona, content, timestamp, reference ?? null, trigger);
@@ -40,5 +49,7 @@ export const createBotMessageStore = ({ db, config }) => {
       botMessage.persona, botMessage.trigger, botMessage.reference ?? null, botMessage.timestamp, windowMs,
     ).map(toBotMessage);
 
-  return { insert, getById, recent, siblings };
+  const softDelete = (id, at) => Number(markDeletedSql.run(at, id).changes) > 0;
+
+  return { insert, getById, recent, siblings, softDelete };
 };

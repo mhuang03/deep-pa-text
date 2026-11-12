@@ -20,8 +20,12 @@ export const createRetriever = ({ vectorStore, messageStore, config, logger }) =
     nearDuplicateMinChars: retrieval.nearDuplicateMinChars,
   };
 
-  const search = (collection, { embedding, where, limit }) =>
-    vectorStore.query(collection, { embedding, where, limit: fetchLimit(limit) });
+  // Hidden (deleted or superseded) rows stay in Chroma; SQLite decides what is visible.
+  const search = async (collection, { embedding, where, limit }) => {
+    const hits = await vectorStore.query(collection, { embedding, where, limit: fetchLimit(limit) });
+    const hidden = messageStore.hiddenIds(hits.map((hit) => hit.id));
+    return hits.filter((hit) => !hidden.has(hit.id));
+  };
 
   const fetchRaw = async (author, record, embedding) => {
     const where = buildWhere(author, record.timestamp);

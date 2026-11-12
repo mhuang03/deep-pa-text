@@ -1,93 +1,47 @@
-const INSERT_RAW = `
-  INSERT INTO messages (id, author, content, timestamp, reference)
-  VALUES (?, ?, ?, ?, ?)
-  ON CONFLICT(id) DO NOTHING
-`;
-const INSERT_FILTERED = `
-  INSERT INTO filtered_messages (id, author, content, timestamp, reference, has_gif)
-  VALUES (?, ?, ?, ?, ?, ?)
-  ON CONFLICT(id) DO NOTHING
-`;
-const PREVIOUS_FILTERED = `
-  SELECT * FROM filtered_messages
-  WHERE timestamp < ?
-  ORDER BY timestamp DESC
-  LIMIT 1
-`;
-const RAW_BY_ID = 'SELECT id, author, content, timestamp, reference FROM messages WHERE id = ?';
-const FILTERED_EXISTS = 'SELECT 1 as id_exists FROM filtered_messages WHERE id = ?';
-const RANDOM_MESSAGES = `
-  SELECT id, content FROM filtered_messages
-  WHERE author = ? AND (? IS NULL OR timestamp < ?)
-  ORDER BY RANDOM()
-  LIMIT ?
-`;
-// The gap is measured on the raw table so messages the corpus filter dropped still count as activity.
-const RANDOM_STARTERS = `
-  SELECT f.content
-  FROM (
-    SELECT id, timestamp - LAG(timestamp) OVER (ORDER BY timestamp, id) AS gap
-    FROM messages
-  ) g
-  JOIN filtered_messages f ON f.id = g.id
-  WHERE f.author = ? AND (g.gap IS NULL OR g.gap > ?)
-  ORDER BY RANDOM() LIMIT ?
-`;
-// Measured on the raw table: the corpus filter drops the short messages bursts are made of.
-const BURST_STATS = `
-  SELECT COUNT(*) AS samples, COALESCE(AVG(is_burst), 0) AS rate FROM (
-    SELECT author,
-           CASE WHEN LEAD(author) OVER w = author
-                 AND LEAD(timestamp) OVER w - timestamp <= ?
-                THEN 1.0 ELSE 0.0 END AS is_burst
-    FROM messages
-    WINDOW w AS (ORDER BY timestamp, id)
-  ) WHERE author = ?
-`;
-const LATEST_WITH_REFERENCE = `
-  SELECT m.*, r.content as reference_content FROM filtered_messages m
-  JOIN filtered_messages r ON m.reference = r.id
-  ORDER BY m.timestamp DESC
-  LIMIT ?
-`;
-const CHUNK_SIZE = 500;
-const countsSql = (count) => `
-  SELECT content, COUNT(*) AS times FROM filtered_messages
-  WHERE author = ? AND timestamp < ? AND content IN (${Array(count).fill('?').join(', ')})
-  GROUP BY content
-`;
-const parentsSql = (count) => `
-  SELECT m.id AS id, r.content AS content FROM filtered_messages m
-  JOIN filtered_messages r ON m.reference = r.id
-  WHERE m.id IN (${Array(count).fill('?').join(', ')})
-`;
-const latestFrom = (table, where = '') =>
-  `SELECT * FROM ${table} ${where} ORDER BY timestamp DESC LIMIT ?`;
+import * as sql from './messageSql.js';
 
+const CHUNK_SIZE = 500;
 const GIF_TOKEN = '<gif!';
+const VISIBLE = 'deleted_at IS NULL';
+
+const chunksOf = (items) => {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+    chunks.push(items.slice(i, i + CHUNK_SIZE));
+  }
+  return chunks;
+};
 
 export const createMessageStore = ({ db, config }) => {
   const windowMs = config.storage.inferredReferenceWindowMs;
-  const insertRawSql = db.prepare(INSERT_RAW);
-  const insertFilteredSql = db.prepare(INSERT_FILTERED);
-  const previousSql = db.prepare(PREVIOUS_FILTERED);
-  const rawByIdSql = db.prepare(RAW_BY_ID);
-  const existsSql = db.prepare(FILTERED_EXISTS);
-  const randomSql = db.prepare(RANDOM_MESSAGES);
-  const startersSql = db.prepare(RANDOM_STARTERS);
-  const burstSql = db.prepare(BURST_STATS);
-  const latestRawSql = db.prepare(latestFrom('messages'));
-  const latestFilteredSql = db.prepare(latestFrom('filtered_messages'));
-  const latestGifSql = db.prepare(latestFrom('filtered_messages', 'WHERE has_gif = 1'));
-  const latestRefSql = db.prepare(LATEST_WITH_REFERENCE);
+  const insertRawSql = db.prepare(sql.INSERT_RAW);
+  const insertFilteredSql = db.prepare(sql.INSERT_FILTERED);
+  const insertRevisionSql = db.prepare(sql.INSERT_REVISION);
+  const previousSql = db.prepare(sql.PREVIOUS_VISIBLE);
+  const rawByIdSql = db.prepare(sql.RAW_BY_ID);
+  const newestRevisionSql = db.prepare(sql.NEWEST_REVISION);
+  const anchoredSql = db.prepare(sql.ANCHORED_VISIBLE);
+  const rowExistsSql = db.prepare(sql.ROW_EXISTS);
+  const markRawSql = db.prepare(sql.MARK_RAW_DELETED);
+  const markCorpusSql = db.prepare(sql.MARK_CORPUS_DELETED);
+  const randomSql = db.prepare(sql.RANDOM_MESSAGES);
+  const startersSql = db.prepare(sql.RANDOM_STARTERS);
+  const burstSql = db.prepare(sql.BURST_STATS);
+  const latestRawSql = db.prepare(sql.latestFrom('messages', VISIBLE));
+  const latestFilteredSql = db.prepare(sql.latestFrom('filtered_messages', VISIBLE));
+  const latestGifSql = db.prepare(sql.latestFrom('filtered_messages', `has_gif = 1 AND ${VISIBLE}`));
+  const latestRefSql = db.prepare(sql.LATEST_WITH_REFERENCE);
 
   const resolveExplicit = (reference) =>
-    reference && existsSql.get(reference) ? reference : null;
+    reference && anchoredSql.get(reference) ? reference : null;
 
+  // References hold logical ids; the previous visible row may be an edit row whose logical id is its source.
   const inferReference = (record) => {
     const previous = previousSql.get(record.timestamp);
     if (!previous || previous.author === record.author) return null;
-    return record.timestamp - previous.timestamp < windowMs ? previous.id : null;
+    if (record.timestamp - previous.timestamp >= windowMs) return null;
+    const logical = previous.source_id ?? previous.id;
+    return rowExistsSql.get(logical) ? logical : null;
   };
 
   const resolveReference = (record, shouldInfer) =>
@@ -99,16 +53,45 @@ export const createMessageStore = ({ db, config }) => {
     );
   };
 
-  // Replies to bot messages pass inferReference: false so they are not linked to an unrelated human message.
-  const insertFiltered = (record, { inferReference: shouldInfer = true } = {}) => {
+  const insertCorpusRow = (record, { rowId, sourceId, shouldInfer }) => {
     const hasGif = record.content.includes(GIF_TOKEN);
     const reference = resolveReference(record, shouldInfer);
     const { changes } = insertFilteredSql.run(
-      record.id, record.author, record.content, record.timestamp, reference, hasGif ? 1 : 0,
+      rowId, record.author, record.content, record.timestamp, reference, hasGif ? 1 : 0, sourceId,
     );
     // A duplicate id inserts nothing; callers must not treat it as a new message.
     if (Number(changes) === 0) return null;
-    return { ...record, reference, hasGif };
+    return { ...record, id: rowId, reference, hasGif };
+  };
+
+  // Replies to bot messages pass inferReference: false so they are not linked to an unrelated human message.
+  const insertFiltered = (record, { inferReference: shouldInfer = true } = {}) =>
+    insertCorpusRow(record, { rowId: record.id, sourceId: null, shouldInfer });
+
+  const markCorpus = (id, at) => Number(markCorpusSql.run(at, id, id).changes) > 0;
+
+  const softDelete = (id, at) => {
+    const raw = Number(markRawSql.run(at, id).changes) > 0;
+    return markCorpus(id, at) || raw;
+  };
+
+  const applyInTransaction = ({ id, content, editedAt, filtered, inferReference: shouldInfer }) => {
+    if (Number(insertRevisionSql.run(id, content, editedAt).changes) === 0) return null;
+    markCorpus(id, editedAt);
+    if (!filtered) return null;
+    return insertCorpusRow(filtered, { rowId: `${id}:${editedAt}`, sourceId: id, shouldInfer });
+  };
+
+  const applyEdit = ({ inferReference: shouldInfer = true, ...edit }) => {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const stored = applyInTransaction({ ...edit, inferReference: shouldInfer });
+      db.exec('COMMIT');
+      return stored;
+    } catch (error) {
+      db.exec('ROLLBACK');
+      throw error;
+    }
   };
 
   const randomMessages = ({ author, before = null, limit }) =>
@@ -117,34 +100,35 @@ export const createMessageStore = ({ db, config }) => {
   const randomStarters = ({ author, minGapMs, limit }) =>
     startersSql.all(author, minGapMs, limit).map((row) => row.content);
 
-  const burstStats = ({ author, windowMs }) => {
-    const { samples, rate } = burstSql.get(windowMs, author);
+  const burstStats = ({ author, windowMs: burstWindowMs }) => {
+    const { samples, rate } = burstSql.get(burstWindowMs, author);
     return { samples: Number(samples), rate: Number(rate) };
   };
 
-  const chunksOf = (items) => {
-    const chunks = [];
-    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
-      chunks.push(items.slice(i, i + CHUNK_SIZE));
-    }
-    return chunks;
-  };
-
-  // Ids whose reference does not resolve to a stored message are simply absent.
+  // Ids whose reference does not resolve to a visible message are simply absent.
   const getParents = (ids) => {
     const parents = new Map();
     chunksOf(ids).forEach((chunk) => {
-      db.prepare(parentsSql(chunk.length)).all(...chunk)
+      db.prepare(sql.parentsSql(chunk.length)).all(...chunk)
         .forEach((row) => parents.set(row.id, { content: row.content }));
     });
     return parents;
+  };
+
+  // Row ids that exist but are no longer visible; unknown ids are not hidden.
+  const hiddenIds = (rowIds) => {
+    const hidden = new Set();
+    chunksOf(Array.from(new Set(rowIds))).forEach((chunk) => {
+      db.prepare(sql.hiddenSql(chunk.length)).all(...chunk).forEach((row) => hidden.add(row.id));
+    });
+    return hidden;
   };
 
   // Exact-content counts; contents never sent before the cutoff are absent from the map.
   const countContents = ({ author, contents, before }) => {
     const counts = new Map();
     chunksOf(Array.from(new Set(contents))).forEach((chunk) => {
-      db.prepare(countsSql(chunk.length)).all(author, before, ...chunk)
+      db.prepare(sql.countsSql(chunk.length)).all(author, before, ...chunk)
         .forEach((row) => counts.set(row.content, row.times));
     });
     return counts;
@@ -152,7 +136,10 @@ export const createMessageStore = ({ db, config }) => {
 
   const getRaw = (id) => {
     const row = rawByIdSql.get(id);
-    return row ? { ...row } : null;
+    if (!row) return null;
+    const { deleted_at: deletedAt, ...rest } = row;
+    const revision = newestRevisionSql.get(id);
+    return { ...rest, content: revision?.content ?? rest.content, deleted: deletedAt !== null };
   };
 
   return {
@@ -160,7 +147,10 @@ export const createMessageStore = ({ db, config }) => {
     getRaw,
     countContents,
     getParents,
+    hiddenIds,
     insertFiltered,
+    applyEdit,
+    softDelete,
     randomMessages,
     randomStarters,
     burstStats,

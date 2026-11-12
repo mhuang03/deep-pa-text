@@ -25,12 +25,15 @@ export const createChainBuilder = ({
   const step = (id, parent, persona) => {
     const bot = botAt(id, parent);
     if (bot) {
+      // A deleted bot message ends the walk (a deleted direct parent is rejected by build).
+      if (bot.deleted) return null;
       // A fallback parent has reference null, so its unknown ancestry ends the walk.
       return { turn: toBotTurn(burstOf(bot), persona), next: bot.reference ?? null, isBot: true };
     }
     const raw = messageStore.getRaw(id);
     if (!raw) return null;
-    const content = messageFilter.transform(raw.content);
+    // A deleted human turn is skipped; the walk continues through its reference.
+    const content = raw.deleted ? '' : messageFilter.transform(raw.content);
     const turn = content === '' ? null : { speaker: raw.author, content, isPersona: false };
     return { turn, next: raw.reference ?? null, isBot: false };
   };
@@ -53,7 +56,7 @@ export const createChainBuilder = ({
 
   const build = (target, parent) => {
     const { persona } = parent;
-    if (!userDirectory.nameOf(persona)) return null;
+    if (parent.deleted || !userDirectory.nameOf(persona)) return null;
     const { turns, botTurns } = walk(parent, persona);
     const kept = turns.reverse().slice(-(maxContextTurns - 1));
     const incoming = { speaker: target.author, content: target.content, isPersona: false };

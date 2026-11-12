@@ -9,6 +9,9 @@ const FORBIDDEN_SQL =
   /\b(DELETE\s+FROM|DROP\s+(TABLE|INDEX|COLUMN|VIEW)|TRUNCATE|REPLACE\s+INTO|INSERT\s+OR\s+REPLACE)\b/i;
 const FORBIDDEN_CALLS = ['deleteCollection(', '.reset('];
 const STORAGE_DELETE = '.delete(';
+const UPDATE_STATEMENT = /\bUPDATE\s+\w+\s+SET\b[^`'"]*/gi;
+const SOFT_DELETE_UPDATE =
+  /^UPDATE\s+\w+\s+SET\s+deleted_at\s*=\s*\?\s+WHERE\b[\s\S]*\bdeleted_at\s+IS\s+NULL\b/i;
 const ADDITIVE_SQL = /^\s*CREATE\s+(TABLE|INDEX)\s+IF\s+NOT\s+EXISTS\b/i;
 
 const listJsFiles = (dir) =>
@@ -66,4 +69,21 @@ test('every migration is a valid additive descriptor', () => {
     [table, column, definition].forEach((part) => assert.equal(typeof part, 'string'));
     assert.ok(table && column && definition);
   });
+});
+
+const updatesIn = (text) => text.match(UPDATE_STATEMENT) ?? [];
+
+test('every SQL UPDATE in src and scripts is a soft-delete marker guarded by deleted_at IS NULL', () => {
+  const updates = sources.flatMap(({ text }) => updatesIn(text));
+  assert.ok(updates.length >= 3);
+  updates.forEach((statement) => assert.match(statement.trim(), SOFT_DELETE_UPDATE));
+});
+
+test('the UPDATE rule rejects overwrites of user data', () => {
+  [
+    'UPDATE messages SET content = ? WHERE id = ?',
+    'UPDATE messages SET deleted_at = ? WHERE id = ?',
+    'UPDATE messages SET deleted_at = ?, content = ? WHERE deleted_at IS NULL',
+  ].forEach((sql) => assert.doesNotMatch(sql, SOFT_DELETE_UPDATE));
+  assert.match('UPDATE messages SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', SOFT_DELETE_UPDATE);
 });

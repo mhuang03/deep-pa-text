@@ -49,6 +49,8 @@ const buildSubject = (container, { timeZone: contextTimeZone, maxEntryChars }) =
     recordMessage: async (msg) => {
       await ingest.recordMessage({ ...msg, reference: msg.reference ?? null });
     },
+    recordEdit: (msg, options) => ingest.recordEdit({ ...msg, reference: msg.reference ?? null }, options),
+    recordDelete: (id, at) => ingest.recordDelete(id, at),
     semanticSearch: async (author, msg) => {
       const buckets = await retriever.retrieveForReply(author, msg);
       return BUCKET_ORDER.map((key) => (key === 'replies' ? buckets[key].map((e) => e.you) : buckets[key]));

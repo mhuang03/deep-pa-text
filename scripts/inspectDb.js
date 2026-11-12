@@ -1,6 +1,6 @@
 import { loadConfig } from '../src/config.js';
 import { formatTimestamp } from '../src/logger.js';
-import { openDatabase } from '../src/storage/database.js';
+import { openReadable } from '../src/storage/snapshot.js';
 import { createMessageStore } from '../src/storage/messageStore.js';
 import { createBotMessageStore } from '../src/storage/botMessageStore.js';
 
@@ -8,7 +8,7 @@ const LIMIT = 10;
 const BOT_TABLE = 'bot_messages';
 
 const config = loadConfig({});
-const db = openDatabase(config.storage.databasePath, { readOnly: true });
+const { db, source, close } = await openReadable(config.storage.databasePath);
 const store = createMessageStore({ db, config });
 const NO_BOT_TABLE = '(no bot_messages table yet)';
 
@@ -29,7 +29,7 @@ print('Latest filtered messages with gif', store.latestWithGif(LIMIT), (m) => `h
 
 // Read-only mode runs no migrations, so the table may not exist yet.
 const hasBotTable = () =>
-  db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?").get(BOT_TABLE) !== undefined;
+  source.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?").get(BOT_TABLE) !== undefined;
 
 if (hasBotTable()) {
   const rows = createBotMessageStore({ db, config }).recent({ limit: LIMIT })
@@ -39,3 +39,5 @@ if (hasBotTable()) {
   console.log('Latest bot messages:');
   console.log(NO_BOT_TABLE);
 }
+
+close();

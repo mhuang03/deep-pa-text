@@ -128,3 +128,28 @@ test('a fallback parent is never looked up for siblings', () => {
   assert.equal(asked, false);
   assert.equal(chain.botTurns, 1);
 });
+
+test('a deleted human turn is skipped and the walk continues through its reference', () => {
+  const parent = bot('b2', 'bob', 'second', 'h1');
+  const chain = setup({
+    bots: { b1: bot('b1', 'bob', 'first') },
+    raws: { h1: { ...raw('h1', 'alice', 'removed text', 'b1'), deleted: true } },
+  }).build(target, parent);
+  assert.deepEqual(chain.turns.map((t) => t.content), ['first', 'second', 'why']);
+  assert.equal(chain.botTurns, 2);
+});
+
+test('a deleted bot message as the direct parent means no chain', () => {
+  const parent = { ...bot('b1', 'bob', 'gone'), deleted: true };
+  assert.equal(setup().build(target, parent), null);
+});
+
+test('a deleted bot message further up ends the walk', () => {
+  const parent = bot('b2', 'bob', 'second', 'h1');
+  const chain = setup({
+    bots: { b1: { ...bot('b1', 'bob', 'first'), deleted: true } },
+    raws: { h1: raw('h1', 'alice', 'question', 'b1') },
+  }).build(target, parent);
+  assert.deepEqual(chain.turns.map((t) => t.content), ['question', 'second', 'why']);
+  assert.equal(chain.botTurns, 1);
+});

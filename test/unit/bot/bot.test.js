@@ -15,7 +15,8 @@ const setup = (env = {}) => {
   };
   const refreshes = [];
   const handlers = {
-    messageCreate: () => {}, replyCommand: () => {}, reviveTick: () => {}, profileRefresh: () => refreshes.push('run'),
+    messageCreate: () => {}, replyCommand: () => {}, messageDelete: () => {}, messageBulkDelete: () => {},
+    messageUpdate: () => {}, reviveTick: () => {}, profileRefresh: () => refreshes.push('run'),
   };
   const infos = [];
   const bot = createBot({
@@ -35,6 +36,9 @@ test('start registers once and on listeners, then logs in', async () => {
     ['once', Events.ClientReady],
     ['on', Events.MessageCreate],
     ['on', Events.InteractionCreate],
+    ['on', Events.MessageDelete],
+    ['on', Events.MessageBulkDelete],
+    ['on', Events.MessageUpdate],
     ['login', 'tok'],
   ]);
   assert.equal(log[1][2], handlers.messageCreate);

@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createFakeChroma } from '../../support/fakes/chroma.js';
 import { createVectorStore } from '../../../src/storage/vectorStore.js';
+import { openDatabase } from '../../../src/storage/database.js';
+import { createMessageStore } from '../../../src/storage/messageStore.js';
 import { createPersonaSelector } from '../../../src/retrieval/personaSelector.js';
 
 const config = {
@@ -28,11 +30,13 @@ const setup = async (rolls = []) => {
     state.rolls += 1;
     return queue.shift();
   };
-  const selector = createPersonaSelector({ vectorStore, users, random, config });
+  const db = openDatabase(':memory:');
+  const messageStore = createMessageStore({ db, config: { storage: { inferredReferenceWindowMs: 1 } } });
+  const selector = createPersonaSelector({ vectorStore, messageStore, users, random, config });
   const seed = (rows) => fake.state.collection('message_reply_embeddings').seed(
     rows.map(([id, document, author, timestamp]) => ({ id, document, metadata: { author, timestamp } })),
   );
-  return { selector, seed, state, fake };
+  return { selector, seed, state, fake, messageStore, db };
 };
 const record = { author: 'alice', content: 'cats rule', timestamp: 100 };
 const seedReplies = (seed) => seed([
@@ -122,4 +126,15 @@ test('pickRandomUser uses everyone when the exclusion leaves nobody', async () =
     vectorStore, users: [{ username: 'alice', name: 'Alice' }], random: () => 0, config,
   });
   assert.equal(selector.pickRandomUser({ exclude: 'alice' }), 'alice');
+});
+
+test('likelyReplierHits drops hits whose corpus row was deleted', async () => {
+  const { selector, seed, messageStore } = await setup();
+  seedReplies(seed);
+  ['1', '3'].forEach((id) => messageStore.insertFiltered({
+    id, author: 'bob', content: 'x', timestamp: 1, reference: null,
+  }));
+  messageStore.softDelete('1', 9);
+  assert.deepEqual((await selector.likelyReplierHits(record)).map((hit) => hit.id).sort(), ['2', '3']);
+  assert.deepEqual(await selector.likelyRepliers(record), ['bob', 'carol']);
 });

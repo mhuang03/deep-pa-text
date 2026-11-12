@@ -285,3 +285,49 @@ test('retrieveForRevive over-fetches, dedupes by key and cuts to reviveSamples',
   assert.equal(out.length, 2);
   assert.equal(new Set(out.map((t) => t.toLowerCase().replace(/l+$/, 'l'))).size, 2);
 });
+
+test('drops vector hits whose corpus row is hidden, in every bucket', async () => {
+  const ctx = await setup();
+  const rows = [
+    ['1', 'cats rule', meta('alice', 1, { has_gif: true })],
+    ['2', 'cats rule too', meta('alice', 2, { has_gif: true })],
+  ];
+  seed(ctx, 'message_embeddings', rows);
+  seed(ctx, 'message_reply_embeddings', rows);
+  store(ctx, '1', 'alice', 'cats rule', 1);
+  store(ctx, '2', 'alice', 'cats rule too', 2);
+  ctx.messageStore.softDelete('1', 50);
+  const buckets = await ctx.retriever.retrieveForReply('alice', record);
+  const all = [...buckets.similar, ...buckets.gifs, ...buckets.other, ...buckets.replies.map((r) => r.you)];
+  assert.ok(all.includes('cats rule too'));
+  assert.equal(all.includes('cats rule'), false);
+});
+
+test('an edited message is retrieved only by its new text', async () => {
+  const ctx = await setup();
+  const original = { id: '1', author: 'alice', content: 'see you at 5', timestamp: 1, reference: null };
+  ctx.messageStore.insertFiltered(original);
+  seed(ctx, 'message_embeddings', [['1', 'see you at 5', meta('alice', 1)]]);
+  const stored = ctx.messageStore.applyEdit({
+    id: '1', content: 'see you at 6', editedAt: 9, filtered: { ...original, content: 'see you at 6' },
+  });
+  await ctx.vectorStore.upsertMessages([stored]);
+  const buckets = await ctx.retriever.retrieveForReply('alice', record);
+  assert.deepEqual(buckets.similar, ['see you at 6']);
+});
+
+test('asks for embeddings only for surviving candidates', async () => {
+  const ctx = await setup();
+  seed(ctx, 'message_embeddings', [
+    ['1', 'cats rule', meta('alice', 1)], ['2', 'cats rule two', meta('alice', 2)],
+  ]);
+  store(ctx, '1', 'alice', 'cats rule', 1);
+  store(ctx, '2', 'alice', 'cats rule two', 2);
+  ctx.messageStore.softDelete('1', 5);
+  const asked = [];
+  const original = ctx.vectorStore.getEmbeddings;
+  ctx.vectorStore.getEmbeddings = (ids) => (asked.push(...ids), original(ids));
+  await ctx.retriever.retrieveForReply('alice', record);
+  assert.equal(asked.includes('1'), false);
+  assert.equal(asked.includes('2'), true);
+});

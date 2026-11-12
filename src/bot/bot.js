@@ -22,6 +22,9 @@ export const createBot = ({ client, config, handlers, clock, logger }) => {
     client.once(Events.ClientReady, onReady);
     client.on(Events.MessageCreate, handlers.messageCreate);
     client.on(Events.InteractionCreate, handlers.replyCommand);
+    client.on(Events.MessageDelete, handlers.messageDelete);
+    client.on(Events.MessageBulkDelete, handlers.messageBulkDelete);
+    client.on(Events.MessageUpdate, handlers.messageUpdate);
     await client.login(config.discord.token);
   };
 

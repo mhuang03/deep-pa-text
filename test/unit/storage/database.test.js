@@ -67,7 +67,7 @@ test('addColumn is skipped when the column already exists', () => {
   const db = new DatabaseSync(':memory:');
   runMigrations(db);
   runMigrations(db, [{ addColumn: { table: 'messages', column: 'author', definition: 'TEXT' } }]);
-  assert.deepEqual(columns(db, 'messages'), ['id', 'author', 'content', 'timestamp', 'reference']);
+  assert.deepEqual(columns(db, 'messages'), ['id', 'author', 'content', 'timestamp', 'reference', 'deleted_at']);
 });
 
 test('readOnly rejects writes and does not run migrations', () => {
@@ -85,6 +85,28 @@ test('adds the bot_messages table and index, idempotently, to a legacy database'
   db.exec(MIGRATIONS[0].sql);
   runMigrations(db);
   runMigrations(db);
-  assert.deepEqual(columns(db, 'bot_messages'), ['id', 'persona', 'content', 'timestamp', 'reference', 'trigger']);
+  assert.deepEqual(columns(db, 'bot_messages'), ['id', 'persona', 'content', 'timestamp', 'reference', 'trigger', 'deleted_at']);
   assert.ok(names(db, 'index').includes('idx_bot_messages_timestamp'));
+});
+
+test('spec 24 migrations add the soft-delete columns, index and revisions table to a legacy database, once', () => {
+  const db = new DatabaseSync(':memory:');
+  MIGRATIONS.slice(0, 7).forEach((m) => db.exec(m.sql));
+  db.prepare('INSERT INTO messages (id, author, content, timestamp) VALUES (?, ?, ?, ?)').run('1', 'a', 'raw', 5);
+  db.prepare('INSERT INTO filtered_messages (id, author, content, timestamp, reference, has_gif) VALUES (?, ?, ?, ?, ?, ?)')
+    .run('1', 'a', 'kept', 5, null, 0);
+  db.prepare('INSERT INTO bot_messages (id, persona, content, timestamp, reference, trigger) VALUES (?, ?, ?, ?, ?, ?)')
+    .run('b', 'bob', 'hi', 6, null, 'auto');
+  runMigrations(db);
+  runMigrations(db);
+  assert.ok(columns(db, 'messages').includes('deleted_at'));
+  assert.ok(columns(db, 'filtered_messages').includes('deleted_at'));
+  assert.ok(columns(db, 'filtered_messages').includes('source_id'));
+  assert.ok(columns(db, 'bot_messages').includes('deleted_at'));
+  assert.deepEqual(columns(db, 'message_revisions'), ['message_id', 'content', 'edited_at']);
+  assert.ok(names(db, 'index').includes('idx_filtered_messages_source_id'));
+  assert.deepEqual(db.prepare('SELECT content, deleted_at, source_id FROM filtered_messages').all()
+    .map((r) => ({ ...r })), [{ content: 'kept', deleted_at: null, source_id: null }]);
+  assert.equal(db.prepare('SELECT content FROM messages').get().content, 'raw');
+  assert.equal(db.prepare('SELECT deleted_at FROM bot_messages').get().deleted_at, null);
 });

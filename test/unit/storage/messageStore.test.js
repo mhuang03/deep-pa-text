@@ -249,7 +249,7 @@ test('getRaw returns the raw row or null', () => {
   const { store } = setup();
   store.insertRaw(msg('1', 'a', 10, { content: '<@1> raw', reference: 'r' }));
   assert.deepEqual(store.getRaw('1'), {
-    id: '1', author: 'a', content: '<@1> raw', timestamp: 10, reference: 'r',
+    id: '1', author: 'a', content: '<@1> raw', timestamp: 10, reference: 'r', deleted: false,
   });
   assert.equal(store.getRaw('nope'), null);
 });

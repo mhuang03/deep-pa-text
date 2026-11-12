@@ -63,8 +63,8 @@ const normalizeOptions = ({
 
 const createDriver = (world) => {
   const settle = () => world.fakes.discord.state.settle();
-  const emit = async (event, payload) => {
-    world.fakes.discord.state.client.emit(event, payload);
+  const emit = async (event, ...payloads) => {
+    world.fakes.discord.state.client.emit(event, ...payloads);
     await settle();
   };
   const advance = async (ms) => {
@@ -104,6 +104,16 @@ const buildWorld = (options, random) => {
       return message;
     },
     addHistory: (fields) => discordState().addHistory(fields),
+    emitDelete: (messageOrId) => driver.emit(Events.MessageDelete, discordState().partialOf(messageOrId)),
+    emitBulkDelete: (ids) => {
+      const partials = ids.map((id) => discordState().partialOf(id));
+      return driver.emit(Events.MessageBulkDelete, new Map(partials.map((m) => [m.id, m])), discordState().channel);
+    },
+    emitEdit: async (message, { content, editedTimestamp = Date.now(), partial = false }) => {
+      const { oldMessage, newMessage } = discordState().applyEdit(message, { content, editedTimestamp, partial });
+      await driver.emit(Events.MessageUpdate, oldMessage, newMessage);
+      return newMessage;
+    },
     emitInteraction: (interaction) => driver.emit(Events.InteractionCreate, interaction),
     openReplyCommand: async ({ target, user }) => {
       const targetMessage = isFakeMessage(target) ? target : discordState().makeMessage(target);

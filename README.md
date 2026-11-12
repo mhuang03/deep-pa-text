@@ -20,9 +20,9 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/main.js` | Entry point (`npm start`): loads `.env`, config and data files, builds the container, connects Chroma, starts the bot. |
 | `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
 | `src/config.js` | Every tunable, ID, model name and limit, with environment overrides. |
-| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (typing, compose, deliver the parts), `bot.js`. |
+| `src/bot/` | Triggers and orchestration: `handlers/` (message, message edit, message delete, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate, per burst part), responder (typing, compose, deliver the parts), `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
-| `src/storage/` | SQLite schema, migrations and queries; the Chroma vector store. |
+| `src/storage/` | SQLite schema, migrations and queries (including soft deletes and edit revisions); the Chroma vector store; a migrated read-only snapshot for `inspectDb.js`. |
 | `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
 | `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
@@ -84,7 +84,7 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm start
    ```
 
-Other npm scripts: `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
+Other npm scripts: `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed; a database from before the soft-delete columns is read through a migrated temporary copy and never written) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
 
 ### Configuration overrides
 
@@ -133,6 +133,14 @@ SQLite (`messages.db`):
 - `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
 - `user_profiles`: append-only observations of members' Discord profiles (`username`, `user_id`, `display_name`, `avatar_url`, `observed_at` ms; primary key `(username, observed_at)`). The newest row per user is their stored profile; every distinct display name ever seen stays available.
 - `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
+
+- `message_revisions`: append-only edit history (`message_id` logical id, `content`, `edited_at` ms; primary key `(message_id, edited_at)`).
+
+### Edits and deletes (soft)
+
+Nothing is ever removed or overwritten. `messages`, `filtered_messages` and `bot_messages` have a nullable `deleted_at` (ms) marker; `filtered_messages` also has `source_id`. Every message has one logical id, its Discord message id; a corpus row's logical id is `COALESCE(source_id, id)`, and `reference` columns hold logical ids. A deleted message gets `deleted_at` on its raw row and on every corpus row of that logical id (and on its `bot_messages` row if the bot sent it). An edit appends a `message_revisions` row, marks the visible corpus row as superseded and, when the new text passes the filter, adds a corpus row `<id>:<editedAt>` with `source_id = <id>` and the original timestamp; the raw `messages` row keeps the original text. A logical message has at most one visible corpus row, and every read (retrieval, random and starter samples, frequency counts, burst statistics, reply parents, recent bot output, the inspect script) ignores rows that are not visible. Chroma is never modified for a delete: hits whose SQLite row is hidden are dropped after each vector query, and an edit's new row is simply added. A reply row in Chroma stays under the embedding its parent had when the reply was stored, even if the parent is later edited. In a reply chain, a deleted human turn is skipped, and a deleted bot message ends the walk (no chain at all when it is the direct parent). The bot listens to message delete, bulk delete and update events in the configured channel (partial messages are enabled, so uncached edits cost one REST fetch); these are not channel activity and never trigger a reply. Edits that change nothing in the text (link previews, pins) are ignored.
+
+Limitations: edits and deletes that happen while the bot is offline are not seen (the full re-import reconciles them, spec 26). "Deleted" means the bot no longer uses the text, not that it is erased: it remains in the SQLite file and in Chroma, hidden and never used.
 
 Chroma:
 

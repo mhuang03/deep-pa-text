@@ -461,3 +461,61 @@ test('llm.hold parks the next completion, settle still returns, and release lets
   await world.settle();
   assert.equal(message.replies.length, 1);
 });
+
+test('fake messages carry channelId, partial, editedTimestamp and a fetch that resolves to the full message', async (t) => {
+  const world = await newWorld(t);
+  const message = world.discord.makeMessage({ content: 'a message' });
+  assert.equal(message.channelId, CHANNEL_ID);
+  assert.equal(message.partial, false);
+  assert.equal(message.editedTimestamp, null);
+  assert.equal(await message.fetch(), message);
+});
+
+test('world.emitDelete emits MessageDelete with a partial message and removes it from the history', async (t) => {
+  const world = await newWorld(t);
+  const message = world.addHistory({ content: 'to be removed' });
+  const seen = [];
+  world.discord.client.on('messageDelete', (m) => seen.push(m));
+  await world.emitDelete(message);
+  assert.deepEqual(seen, [{ id: message.id, channelId: CHANNEL_ID, partial: true }]);
+  assert.equal(world.discord.channel.history.includes(message), false);
+  await world.emitDelete('some-id');
+  assert.equal(seen[1].id, 'some-id');
+});
+
+test('world.emitBulkDelete emits a Map of partial messages and the channel', async (t) => {
+  const world = await newWorld(t);
+  const seen = [];
+  world.discord.client.on('messageDeleteBulk', (messages, channel) => seen.push([messages, channel]));
+  await world.emitBulkDelete(['a', 'b']);
+  const [[messages, channel]] = seen;
+  assert.ok(messages instanceof Map);
+  assert.deepEqual([...messages.keys()], ['a', 'b']);
+  assert.equal(messages.get('a').partial, true);
+  assert.equal(channel, world.discord.channel);
+});
+
+test('world.emitEdit updates the channel history, emits MessageUpdate and can emit a partial', async (t) => {
+  const world = await newWorld(t);
+  const message = world.addHistory({ content: 'before' });
+  const seen = [];
+  world.discord.client.on('messageUpdate', (oldMessage, newMessage) => seen.push([oldMessage, newMessage]));
+  await world.emitEdit(message, { content: 'after', editedTimestamp: 42 });
+  assert.equal(seen[0][0].content, 'before');
+  assert.equal(seen[0][1].content, 'after');
+  assert.equal(seen[0][1].editedTimestamp, 42);
+  assert.equal(world.discord.channel.history.find((m) => m.id === message.id).content, 'after');
+  await world.emitEdit(message, { content: 'again', editedTimestamp: 43, partial: true });
+  assert.equal(seen[1][1].partial, true);
+  assert.equal((await seen[1][1].fetch()).content, 'again');
+});
+
+test('the subject records edits and deletes', async (t) => {
+  const world = await newWorld(t);
+  const record = { id: 'x1', author: 'alice', content: 'first version words', timestamp: BASE_TIME - HOUR };
+  await world.subject.recordMessage(record);
+  await world.subject.recordEdit({ ...record, content: 'second version words', editedAt: BASE_TIME });
+  assert.equal(world.sqlite.all('SELECT * FROM message_revisions').length, 1);
+  await world.subject.recordDelete('x1', BASE_TIME);
+  assert.equal(world.sqlite.get('SELECT deleted_at FROM messages WHERE id = ?', 'x1').deleted_at, BASE_TIME);
+});

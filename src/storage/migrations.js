@@ -65,4 +65,23 @@ export const MIGRATIONS = [
   )
 `,
   },
+  { addColumn: { table: 'messages', column: 'deleted_at', definition: 'INTEGER' } },
+  { addColumn: { table: 'filtered_messages', column: 'deleted_at', definition: 'INTEGER' } },
+  { addColumn: { table: 'filtered_messages', column: 'source_id', definition: 'TEXT' } },
+  { addColumn: { table: 'bot_messages', column: 'deleted_at', definition: 'INTEGER' } },
+  {
+    sql: `
+  CREATE INDEX IF NOT EXISTS idx_filtered_messages_source_id ON filtered_messages (source_id)
+`,
+  },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS message_revisions (
+    message_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    edited_at INTEGER NOT NULL,
+    PRIMARY KEY (message_id, edited_at)
+  )
+`,
+  },
 ];

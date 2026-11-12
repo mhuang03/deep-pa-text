@@ -73,3 +73,20 @@ test('siblings of a revive burst match a null reference and keep separate revive
   store.insert(row('r3', 10_000_000, { trigger: 'revive' }));
   assert.deepEqual(store.siblings(store.getById('r2')).map((r) => r.id), ['r1', 'r2']);
 });
+
+test('softDelete marks a bot message once and keeps its row', () => {
+  const store = setup();
+  store.insert(row('1', 10));
+  assert.equal(store.softDelete('1', 50), true);
+  assert.equal(store.softDelete('1', 99), false);
+  assert.equal(store.softDelete('nope', 99), false);
+  assert.deepEqual(store.getById('1'), { ...row('1', 10), deleted: true });
+});
+
+test('recent and siblings exclude deleted bot messages', () => {
+  const store = setup();
+  [row('a', 1000), row('b', 2000), row('c', 3000)].forEach(store.insert);
+  store.softDelete('b', 5000);
+  assert.deepEqual(store.recent({ limit: 10 }).map((m) => m.id), ['c', 'a']);
+  assert.deepEqual(store.siblings(store.getById('a')).map((m) => m.id), ['a', 'c']);
+});

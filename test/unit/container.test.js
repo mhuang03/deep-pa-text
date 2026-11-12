@@ -69,7 +69,7 @@ test('constructs nothing that connects until the bot starts', async () => {
 test('opens the configured database and creates the schema', () => {
   const { container } = setup();
   const tables = container.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'messages', 'user_profiles']);
+  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'message_revisions', 'messages', 'user_profiles']);
   container.db.close();
 });
 

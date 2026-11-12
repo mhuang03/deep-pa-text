@@ -82,3 +82,74 @@ test('references are inferred by default', async () => {
   await ingest.recordMessage(record);
   assert.deepEqual(calls.find(([name]) => name === 'insertFiltered')[2], { inferReference: true });
 });
+
+const setupEdit = ({ raw = { content: 'old', deleted: false }, kept = true, stored = { id: '1:9' }, vectorError = null } = {}) => {
+  const calls = [];
+  const filtered = { id: '1', content: 'new' };
+  const messageStore = {
+    insertRaw: (r) => calls.push(['insertRaw', r]),
+    insertFiltered: () => ({ id: '1' }),
+    getRaw: (id) => (calls.push(['getRaw', id]), raw),
+    applyEdit: (args) => (calls.push(['applyEdit', args]), stored),
+    softDelete: (id, at) => calls.push(['softDelete', id, at]),
+  };
+  const botMessageStore = { softDelete: (id, at) => calls.push(['botSoftDelete', id, at]) };
+  const messageFilter = { filter: (r) => (calls.push(['filter', r]), kept ? filtered : null) };
+  const vectorStore = {
+    upsertMessages: async (msgs) => {
+      calls.push(['upsert', msgs]);
+      if (vectorError) throw vectorError;
+    },
+  };
+  const ingest = createIngestService({ messageStore, vectorStore, messageFilter, botMessageStore });
+  return { ingest, calls, filtered };
+};
+const edited = { id: '1', author: 'alice', content: 'new', timestamp: 5, reference: null, editedAt: 9 };
+
+test('recordEdit applies the edit and upserts the new corpus row', async () => {
+  const { ingest, calls, filtered } = setupEdit();
+  assert.deepEqual(await ingest.recordEdit(edited), { changed: true });
+  assert.deepEqual(calls.map((c) => c[0]), ['getRaw', 'filter', 'applyEdit', 'upsert']);
+  assert.deepEqual(calls[2][1], { id: '1', content: 'new', editedAt: 9, filtered, inferReference: true });
+  assert.deepEqual(calls[3][1], [{ id: '1:9' }]);
+});
+
+test('recordEdit passes inferReference false for replies to the bot', async () => {
+  const { ingest, calls } = setupEdit();
+  await ingest.recordEdit(edited, { repliesToBot: true });
+  assert.equal(calls.find((c) => c[0] === 'applyEdit')[1].inferReference, false);
+});
+
+test('recordEdit of an unknown message records it as new', async () => {
+  const { ingest, calls } = setupEdit({ raw: null });
+  assert.deepEqual(await ingest.recordEdit(edited), { changed: true });
+  assert.deepEqual(calls.map((c) => c[0]), ['getRaw', 'insertRaw', 'filter', 'upsert']);
+  assert.equal(calls[1][1].editedAt, undefined);
+});
+
+test('recordEdit ignores a deleted message and unchanged content', async () => {
+  const deleted = setupEdit({ raw: { content: 'old', deleted: true } });
+  assert.deepEqual(await deleted.ingest.recordEdit(edited), { changed: false });
+  const same = setupEdit({ raw: { content: 'new', deleted: false } });
+  assert.deepEqual(await same.ingest.recordEdit(edited), { changed: false });
+  assert.deepEqual([...deleted.calls, ...same.calls].map((c) => c[0]).filter((n) => n !== 'getRaw'), []);
+});
+
+test('recordEdit stores a revision without a vector when the filter drops the edit or the edit is a no-op', async () => {
+  const dropped = setupEdit({ kept: false, stored: null });
+  assert.deepEqual(await dropped.ingest.recordEdit(edited), { changed: true });
+  assert.equal(dropped.calls.some((c) => c[0] === 'upsert'), false);
+  assert.equal(dropped.calls.find((c) => c[0] === 'applyEdit')[1].filtered, null);
+});
+
+test('recordEdit rejects when the vector store fails, after SQLite was updated', async () => {
+  const { ingest, calls } = setupEdit({ vectorError: new Error('chroma down') });
+  await assert.rejects(ingest.recordEdit(edited), /chroma down/);
+  assert.ok(calls.some((c) => c[0] === 'applyEdit'));
+});
+
+test('recordDelete soft-deletes in both stores', () => {
+  const { ingest, calls } = setupEdit();
+  ingest.recordDelete('7', 42);
+  assert.deepEqual(calls, [['softDelete', '7', 42], ['botSoftDelete', '7', 42]]);
+});

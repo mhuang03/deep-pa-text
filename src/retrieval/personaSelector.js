@@ -2,15 +2,18 @@ import { pickWeighted, weighAuthors } from './personaWeights.js';
 
 const pickIndex = (roll, length) => Math.floor(roll * length);
 
-export const createPersonaSelector = ({ vectorStore, users, random, config }) => {
-  const likelyReplierHits = (record) =>
-    vectorStore.query('replies', {
+export const createPersonaSelector = ({ vectorStore, messageStore, users, random, config }) => {
+  const likelyReplierHits = async (record) => {
+    const hits = await vectorStore.query('replies', {
       text: record.content,
       where: {
         $and: [{ author: { $ne: record.author } }, { timestamp: { $lt: record.timestamp } }],
       },
       limit: config.retrieval.likelyRepliers,
     });
+    const hidden = messageStore.hiddenIds(hits.map((hit) => hit.id));
+    return hits.filter((hit) => !hidden.has(hit.id));
+  };
 
   const likelyRepliers = async (record) =>
     (await likelyReplierHits(record)).map((hit) => hit.metadata.author);

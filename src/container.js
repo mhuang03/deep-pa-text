@@ -31,6 +31,8 @@ import { createChainBuilder } from './context/chainBuilder.js';
 import { createComposer } from './bot/composer.js';
 import { createBotMessageResolver } from './bot/botMessageResolver.js';
 import { createResponder } from './bot/responder.js';
+import { createMessageDeleteHandler } from './bot/handlers/messageDelete.js';
+import { createMessageUpdateHandler } from './bot/handlers/messageUpdate.js';
 import { createMessageCreateHandler } from './bot/handlers/messageCreate.js';
 import { createReplyCommandHandler } from './bot/handlers/replyCommand.js';
 import { createReviveTick } from './bot/handlers/reviveTick.js';
@@ -90,11 +92,11 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
   const profileStore = createProfileStore({ db });
   const vectorStore = buildVectorStore({ config, vendor });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
-  const ingest = createIngestService({ messageStore, vectorStore, messageFilter });
+  const ingest = createIngestService({ messageStore, vectorStore, messageFilter, botMessageStore });
   const retriever = createRetriever({ vectorStore, messageStore, config, logger });
   const userDirectory = buildUserDirectory(data.users);
   const personaSelector = createPersonaSelector({
-    vectorStore, users: data.users, random: clock.random, config,
+    vectorStore, messageStore, users: data.users, random: clock.random, config,
   });
   const burstProfile = createBurstProfile({ messageStore, config, now: clock.now });
   const generator = buildGenerator({
@@ -114,7 +116,13 @@ const buildHandlers = ({
   const replyPolicy = createReplyPolicy({ config, now: clock.now, random: clock.random });
   const chainPolicy = createChainPolicy({ config, random: clock.random });
   const { ingest, messageFilter, personaSelector, botMessageStore, messageStore } = core;
+  const deleteHandler = createMessageDeleteHandler({ config, ingest, clock, logger });
   return {
+    messageDelete: deleteHandler.onDelete,
+    messageBulkDelete: deleteHandler.onBulkDelete,
+    messageUpdate: createMessageUpdateHandler({
+      config, ingest, botMessageStore, clock: { now: clock.now }, logger,
+    }).onUpdate,
     messageCreate: createMessageCreateHandler({
       config, activity, ingest, messageFilter, replyPolicy, personaSelector, responder, logger,
       botMessageStore, messageStore, botMessageResolver, chainBuilder, chainPolicy,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GatewayIntentBits } from 'discord.js';
+import { GatewayIntentBits, Partials } from 'discord.js';
 import { createDiscordClient } from '../../../src/discord/client.js';
 
 test('constructs the client with Guilds, GuildMessages and MessageContent intents', () => {
@@ -14,6 +14,7 @@ test('constructs the client with Guilds, GuildMessages and MessageContent intent
   assert.ok(client instanceof FakeClient);
   assert.deepEqual(calls, [{
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+    partials: [Partials.Message],
     allowedMentions: { parse: [] },
   }]);
 });

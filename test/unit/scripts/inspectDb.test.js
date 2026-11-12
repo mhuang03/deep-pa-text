@@ -88,3 +88,14 @@ test('prints a placeholder when the bot_messages table does not exist yet', (t) 
   const lines = result.stdout.split('\n');
   assert.equal(lines[lines.indexOf('Latest bot messages:') + 1], '(no bot_messages table yet)');
 });
+
+test('hides soft-deleted rows', (t) => {
+  const dir = makeDir(t);
+  seed(dir);
+  const db = openDatabase(path.join(dir, 'messages.db'));
+  createMessageStore({ db, config: loadConfig({}) }).softDelete('a', T0 + 10);
+  db.close();
+  const result = run(dir);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(!result.stdout.includes('first message here (reference'));
+});
