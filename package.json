@@ -7,7 +7,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --experimental-test-module-mocks --test \"test/**/*.test.js\""
   },
   "dependencies": {
     "@chroma-core/openai": "^0.1.10",

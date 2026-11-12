@@ -32,7 +32,7 @@
 
 ## Config
 
-`gifs.candidates: 5`, `gifs.timeoutMs: 5000`. `klipyPerPage` stays 8.
+`gifs.candidates: 5`, `gifs.timeoutMs: 5000`. `klipyPerPage` stays 8. `gifs.giphyLimit` and `gifs.humorNumber` are removed; both requests use `candidates`.
 
 ## Random call order
 

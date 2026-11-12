@@ -50,7 +50,7 @@ Steps: `composer.compose({ persona, target })` → `{ response, content, gifLink
 
 ## Harness change
 
-Fake `message.reply`, `channel.send`, `modalInteraction.editReply` resolve to a fake bot message `{ id (unique), author: { id: 'bot-user', bot: true }, content, embeds, createdTimestamp: world.now(), channel, reference }`. Add `message.failReplies(error)` alongside the existing `channel.failSends(error)`.
+Fake `message.reply`, `channel.send`, `modalInteraction.editReply` resolve to a fake bot message `{ id (unique), author: { id: 'bot-user', bot: true }, content, embeds, createdTimestamp: world.now(), channel, reference }`. Add `message.failReplies(error)` and `channel.failSends(error)` (making `reply`/`send` reject); they are safe now that sends are awaited inside the handler boundary.
 
 ## Edge cases
 
