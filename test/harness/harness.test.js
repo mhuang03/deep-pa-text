@@ -275,21 +275,32 @@ test('message.failReplies and channel.failSends reject one call by default, then
   assert.deepEqual(channel.sent, [{ content: 'c' }]);
 });
 
-test('modal-submit failReply and failEdits honour times, and submit can arm them up front', async (t) => {
+test('modal-submit failReply and failEdits honour times', async (t) => {
   const world = await newWorld(t);
   const boom = new Error('boom');
   const command = await world.openReplyCommand({ target: { content: 'hello there friends' } });
-  const submitted = await command.submit({
-    author: 'bob', failReply: { error: boom }, failEdits: { error: boom, times: 2 },
-  });
-  assert.deepEqual(submitted.replies, []);
-  assert.deepEqual(submitted.edits, []);
-  await assert.rejects(submitted.reply({ content: 'x' }), boom.constructor);
+  const submitted = await command.submit({ author: 'bob' });
+  submitted.failReply(boom);
+  await assert.rejects(submitted.reply({ content: 'x' }), boom);
   await submitted.reply({ content: 'x' });
-  submitted.failEdits(boom);
+  submitted.failEdits(boom, { times: 2 });
+  await assert.rejects(submitted.editReply({ content: 'y' }), boom);
   await assert.rejects(submitted.editReply({ content: 'y' }), boom);
   await submitted.editReply({ content: 'z' });
-  assert.deepEqual(submitted.edits, [{ content: 'z' }]);
+  assert.equal(submitted.edits.at(-1).content, 'z');
+});
+
+test('submit arms failReply and failEdits before the handler sees the submission', async (t) => {
+  const world = await newWorld(t);
+  const boom = new Error('boom');
+  const command = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  const submitted = await command.submit({ author: 'bob', failReply: { error: boom } });
+  assert.deepEqual(submitted.replies, []);
+  assert.deepEqual(submitted.edits, []);
+  const second = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  const edited = await second.submit({ author: 'bob', failEdits: { error: boom, times: 2 } });
+  assert.equal(edited.replies.length, 1);
+  assert.deepEqual(edited.edits, []);
 });
 
 test('createWorld env option overrides the environment the bot boots with', async (t) => {

@@ -20,11 +20,11 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/main.js` | Entry point (`npm start`): loads `.env`, config and data files, builds the container, connects Chroma, starts the bot. |
 | `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
 | `src/config.js` | Every tunable, ID, model name and limit, with environment overrides. |
-| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply and revive policies, activity tracker, composer, `bot.js`. |
+| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply and revive policies, activity tracker, composer (generate, resolve GIFs, truncate), responder (compose then deliver), `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
 | `src/storage/` | SQLite schema, migrations and queries; the Chroma vector store. |
 | `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/` | Recording a message, retrieval and persona choice, prompts and the chat client, GIF resolution. |
-| `src/discord/` | Discord client construction, payloads, embeds, the reply modal and the command definition. |
+| `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
 | `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js` (see the npm scripts below). |
 
@@ -95,6 +95,7 @@ Everything else is defined in `src/config.js`. These optional environment variab
 | `CHROMA_PORT` | `7429` | Chroma server port (must be a number) |
 | `REPLY_OVERRIDE` | off | `true` replies to every message, ignoring randomness and the rate limit (testing) |
 | `REVIVE_OVERRIDE` | off | `true` checks every minute and revives regardless of idle time (testing) |
+| `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
 
 The corpus is only filled by live messages (`ingest.recordMessage`). There is no history backfill script in this repo; the vector store accepts batches, but nothing calls it in bulk.
 
@@ -151,10 +152,15 @@ Predicates: approved author, non-empty, 5–200 characters, no bot-command prefi
 
 The chat client is built with `llm.timeoutMs` (120 s) and `llm.maxRetries` (1), so the SDK aborts a slow attempt and retries connection errors, timeouts, 408, 409, 429 and 5xx. A completion with no content is retried up to `llm.emptyRetries` (1) more times, then fails with `LLM returned an empty response`; the handler logs it and nothing is sent. Every completion is cleaned before use: surrounding quotes are removed (a JSON string is decoded) and stray `\n`, `\t` and `\"` escapes become the real characters. Delivered text is cut to `discord.maxMessageLength` (2000) characters, at whitespace within the last `discord.truncateLookbackChars` (200) characters when possible; the untruncated cleaned text is what is logged.
 
+## Delivery and mentions
+
+Every outbound message is awaited, so reply state (rate limit, miss counter, activity) only changes after a send succeeded. The bot never pings anyone: every payload, including the thinking placeholder, the failure notice and the ephemeral refusals, carries `allowedMentions: { parse: [] }`, and the Discord client is constructed with the same default, so `@everyone`, `@here` or `<@id>` in model output stays plain text. Replies keep the reply ping unless `PING_REPLIED_USER=false`.
+
+If an auto reply cannot be sent (for example the message was deleted), the failure is logged and the rate limit is armed, so a persistent send failure costs at most one LLM call per window. If a `reply` command fails after its "thinking..." placeholder, the placeholder is edited to `Could not generate a reply.`
+
 ## Known issues
 
 These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
 
 - The bot's own messages are not stored, so there is no record of which persona wrote a given bot message.
 - There is no history backfill.
-- `message.reply` and `channel.send` are not awaited: a failed send is logged, but the bot's state is updated as if it had succeeded.
