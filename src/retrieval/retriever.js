@@ -14,8 +14,8 @@ export const createRetriever = ({ vectorStore, messageStore, config }) => {
   const search = async (collection, { embedding, where, limit }) =>
     documentsOf(await vectorStore.query(collection, { embedding, where, limit }));
 
-  const retrieveForReply = async (author, record) => {
-    const embedding = await vectorStore.embed(record.content);
+  const retrieveForReply = async (author, record, { queryText } = {}) => {
+    const embedding = await vectorStore.embed(queryText ?? record.content);
     const where = buildWhere(author, record.timestamp);
     const gifWhere = buildWhere(author, record.timestamp, [{ has_gif: true }]);
     const similar = await search('messages', { embedding, where, limit: retrieval.similarResults });

@@ -96,10 +96,11 @@ const buildWorld = (options, random) => {
     setRandom: random.set,
     ready: () => driver.emit(Events.ClientReady, discordState().client),
     emitMessage: async (fields) => {
-      const message = discordState().makeMessage(fields);
+      const message = discordState().addHistory(fields);
       await driver.emit(Events.MessageCreate, message);
       return message;
     },
+    addHistory: (fields) => discordState().addHistory(fields),
     emitInteraction: (interaction) => driver.emit(Events.InteractionCreate, interaction),
     openReplyCommand: async ({ target, user }) => {
       const targetMessage = isFakeMessage(target) ? target : discordState().makeMessage(target);

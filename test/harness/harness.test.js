@@ -310,3 +310,38 @@ test('createWorld env option overrides the environment the bot boots with', asyn
   const message = await world.emitMessage({ content: 'hello there friends' });
   assert.equal(message.replies[0].allowedMentions.repliedUser, false);
 });
+
+test('channel.messages.fetch returns the messages before an id, newest first, as a Map', async (t) => {
+  const world = await newWorld(t);
+  const ids = ['h1', 'h2', 'h3', 'h4'];
+  ids.forEach((id) => world.addHistory({ id, content: `line ${id}` }));
+  const { messages } = world.discord.channel;
+  const before = await messages.fetch({ limit: 2, before: 'h4' });
+  assert.ok(before instanceof Map);
+  assert.deepEqual([...before.keys()], ['h3', 'h2']);
+  assert.deepEqual([...(await messages.fetch({ limit: 3 })).keys()], ['h4', 'h3', 'h2']);
+  assert.deepEqual([...(await messages.fetch({ limit: 1, before: 'unknown' })).keys()], ['h4']);
+  assert.deepEqual(messages.calls, [{ limit: 2, before: 'h4' }, { limit: 3, before: undefined }, { limit: 1, before: 'unknown' }]);
+});
+
+test('channel history records emitted messages and bot messages in order; addHistory emits nothing', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  world.addHistory({ id: 'pre', content: 'earlier' });
+  assert.equal(world.llm.calls.length, 0);
+  const message = await world.emitMessage({ id: 'm1', content: 'hello there friends' });
+  const ids = world.discord.channel.history.map((m) => m.id);
+  assert.equal(ids[0], 'pre');
+  assert.equal(ids[1], 'm1');
+  assert.equal(ids[2], message.replies.length === 1 ? world.discord.channel.history[2].id : null);
+  assert.equal(world.discord.channel.history[2].author.bot, true);
+  assert.ok(Array.isArray(world.discord.channel.history[2].embeds));
+});
+
+test('channel.messages.setFailing makes fetch reject until cleared', async (t) => {
+  const world = await newWorld(t);
+  const boom = new Error('no access');
+  world.discord.channel.messages.setFailing(boom);
+  await assert.rejects(world.discord.channel.messages.fetch({ limit: 1 }), boom);
+  world.discord.channel.messages.setFailing(null);
+  assert.equal((await world.discord.channel.messages.fetch({ limit: 1 })).size, 0);
+});

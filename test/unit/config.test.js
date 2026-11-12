@@ -31,7 +31,9 @@ const EXPECTED_DEFAULTS = {
   embedding: { apiKeyEnvVar: 'OPENAI_API_KEY', modelName: 'text-embedding-3-small', dimensions: 512 },
   retrieval: {
     replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 50, likelyRepliers: 20,
+    shortMessageChars: 25, queryContextMessages: 2,
   },
+  context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,

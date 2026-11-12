@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import { createGenerator } from '../../../src/llm/generator.js';
 import { SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src/llm/prompts.js';
 
+import { loadConfig } from '../../../src/config.js';
+
+const config = loadConfig({});
 const buckets = { replies: ['r'], similar: ['s1', 's2'], gifs: ['g'], other: ['o'] };
 
 const setup = ({ retrieverError = null, chatError = null } = {}) => {
@@ -26,18 +29,31 @@ const setup = ({ retrieverError = null, chatError = null } = {}) => {
     },
   };
   const userDirectory = { nameOf: (u) => ({ alice: 'Alice Example' })[u] };
-  return { calls, generator: createGenerator({ chatClient, retriever, userDirectory }) };
+  return { calls, generator: createGenerator({ chatClient, retriever, userDirectory, config }) };
 };
 const record = { author: 'bob', content: 'hello', timestamp: 5 };
 
 test('generateReply assembles the prompt and returns the sanitised response', async () => {
   const { calls, generator } = setup();
   assert.equal(await generator.generateReply('alice', record), 'raw response');
-  assert.deepEqual(calls.reply, [['alice', record]]);
+  assert.deepEqual(calls.reply, [['alice', record, { queryText: 'hello' }]]);
   assert.deepEqual(calls.chat, [{
     system: SYSTEM_PROMPT,
-    user: buildReplyPrompt({ author: 'alice', name: 'Alice Example', message: 'hello', buckets }),
+    user: buildReplyPrompt({ author: 'alice', name: 'Alice Example', message: 'hello', messageAuthor: 'bob', buckets, transcript: [],
+      timeZone: config.context.timeZone,
+    }),
   }]);
+});
+
+test('a transcript is rendered in the prompt and short targets borrow its last lines for the query', async () => {
+  const { calls, generator } = setup();
+  const transcript = ['one', 'two', 'three'].map((content, i) => ({
+    id: String(i), speaker: 'carol', content, timestamp: Date.UTC(2026, 0, 1, 12, i), replyTo: null,
+  }));
+  await generator.generateReply('alice', { ...record, content: 'why' }, { transcript });
+  assert.deepEqual(calls.reply[0][2], { queryText: 'two\nthree\nwhy' });
+  assert.match(calls.chat[0].user, /\[06:00\] carol: one\n\[06:01\] carol: two\n\[06:02\] carol: three/);
+  assert.match(calls.chat[0].user, /received this message from "bob": "why"\./);
 });
 
 test('the reply prompt lists buckets in BUCKET_ORDER', async () => {
@@ -82,6 +98,7 @@ const setupWith = (completion) => {
     chatClient: { complete: async () => completion },
     retriever: { retrieveForReply: async () => buckets, retrieveForRevive: async () => [] },
     userDirectory: { nameOf: () => 'Alice Example' },
+    config,
   });
   return generator;
 };

@@ -17,7 +17,7 @@ export const createMessageCreateHandler = (deps) => {
   const respond = async (message, target, persona) => {
     try {
       return await responder.respond({
-        trigger: TRIGGERS.AUTO, persona, target, guild: message.guild, via: { type: 'reply', message },
+        trigger: TRIGGERS.AUTO, persona, target, guild: message.guild, channel: message.channel, via: { type: 'reply', message },
       });
     } catch (error) {
       if (error?.stage === DELIVERY_STAGE) replyPolicy.noteReply({ resetMisses: false });

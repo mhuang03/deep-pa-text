@@ -69,6 +69,8 @@ const buildRetrieval = () => ({
   otherResults: 10,
   reviveSamples: 50,
   likelyRepliers: 20,
+  shortMessageChars: 25,
+  queryContextMessages: 2,
 });
 
 export const assertPersona = (persona) => {
@@ -114,6 +116,13 @@ const buildGifs = (env) => ({
   timeoutMs: 5000,
 });
 
+const buildContext = () => ({
+  transcriptLimit: 20,
+  maxEntryChars: 300,
+  maxAgeMs: 21600000,
+  timeZone: 'America/Chicago',
+});
+
 const buildLogging = () => ({
   locale: 'en-US',
   timeZone: 'America/Chicago',
@@ -137,6 +146,7 @@ const buildConfig = (env) => ({
   persona: buildPersona(),
   llm: buildLlm(env),
   gifs: buildGifs(env),
+  context: buildContext(),
   logging: buildLogging(),
 });
 

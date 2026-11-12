@@ -23,7 +23,7 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply and revive policies, activity tracker, composer (generate, resolve GIFs, truncate), responder (compose then deliver), `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
 | `src/storage/` | SQLite schema, migrations and queries; the Chroma vector store. |
-| `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/` | Recording a message, retrieval and persona choice, prompts and the chat client, GIF resolution. |
+| `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies. |
 | `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
 | `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js` (see the npm scripts below). |
@@ -133,9 +133,19 @@ For a reply (`retrieveForReply`), four buckets are fetched, all restricted to th
 3. 10 nearest from `message_embeddings` with `has_gif`
 4. 10 random rows from `filtered_messages`
 
-Buckets are deduplicated by exact content, with earlier buckets taking precedence. `buildReplyPrompt` puts the persona's username, real name, the target message's content, and the four buckets into one user message.
+Buckets are deduplicated by exact content, with earlier buckets taking precedence.
 
-For a revive (`retrieveForRevive`), the prompt is just 50 random messages from the persona (`buildRevivePrompt`). No channel context is included.
+`buildReplyPrompt` assembles the user message from ordered sections: the persona's username and real name, the recent channel transcript (omitted when empty), the target message naming its sender (`The user has just received this message from "<sender>": "<message>"`), then the four buckets. Sections are joined by a blank line.
+
+### Conversation context
+
+Before composing a reply, the bot fetches up to `context.transcriptLimit` (20) messages that precede the target message in the channel (for the `reply` command, those before the selected message, not before now) and renders them as `[HH:MM] speaker: text` lines, oldest first, with `(replying to <speaker>)` when a line answers another line in the window. Times use `context.timeZone` (`America/Chicago`). Bot messages appear under the persona they imitated, with their stored text (GIF tokens included); bot messages with no stored row or persona embed, and other bots, are left out. Text is cleaned like corpus content (mentions, URLs), newlines become spaces, mention-only and empty lines are dropped, lines longer than `context.maxEntryChars` (300) are cut with `…`, and messages more than `context.maxAgeMs` (6 h) older than the target are dropped.
+
+**Privacy:** up to `context.transcriptLimit` recent channel messages, including those of people who are not listed in `users.json`, are now sent to the LLM provider as context (previously only the target message was). A failed history fetch is logged as a warning and the reply is sent without a transcript.
+
+Retrieval for a short target (fewer than `retrieval.shortMessageChars`, 25, characters after cleaning) embeds the last `retrieval.queryContextMessages` (2) transcript lines followed by the target, so a message like "why" still matches something; longer targets are embedded alone. Persona selection still queries with the target only.
+
+For a revive (`retrieveForRevive`), the prompt is just 50 random messages from the persona (`buildRevivePrompt`). No channel context is included (see spec 20).
 
 ## Filtering
 

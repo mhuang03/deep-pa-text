@@ -49,24 +49,25 @@ export const createReplyCommandHandler = (deps) => {
     }
   };
 
-  const deliverReply = async ({ modalInteraction, persona, target, guild }) => {
+  const deliverReply = async ({ modalInteraction, persona, target, guild, channel }) => {
     const { response } = await responder.respond({
       trigger: TRIGGERS.COMMAND,
       persona,
       target,
       guild,
+      channel,
       via: { type: 'interaction', interaction: modalInteraction },
     });
     return response;
   };
 
-  const answer = async ({ interaction, modalInteraction, target, guild }) => {
+  const answer = async ({ interaction, modalInteraction, target, guild, channel }) => {
     const persona = await chooseReplier(modalInteraction, target);
     const thinking = await authorEmbeds.make(persona, guild, { thinking: true });
     await modalInteraction.reply(withSafeMentions({ embeds: [thinking] }));
     let response;
     try {
-      response = await deliverReply({ modalInteraction, persona, target, guild });
+      response = await deliverReply({ modalInteraction, persona, target, guild, channel });
     } catch (error) {
       await notifyFailure(modalInteraction);
       throw error;
@@ -87,7 +88,7 @@ export const createReplyCommandHandler = (deps) => {
     if (message.channel.id !== config.discord.channelId) {
       return void (await refuse(interaction, WRONG_CHANNEL_MESSAGE));
     }
-    return { target, guild };
+    return { target, guild, channel: message.channel };
   };
 
   const run = async (interaction) => {

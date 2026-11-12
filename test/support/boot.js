@@ -37,7 +37,7 @@ const buildConfig = (env) => {
   return { ...config, storage: { ...config.storage, databasePath: IN_MEMORY } };
 };
 
-const buildSubject = (container) => {
+const buildSubject = (container, contextTimeZone) => {
   const { messageFilter, ingest, retriever, personaSelector, generator, gifResolver } = container;
   return {
     filter: (msg) => messageFilter.filter(msg),
@@ -55,8 +55,11 @@ const buildSubject = (container) => {
     getRandomResponse: (author) => generator.generateRevive(author),
     processGIFs: (text) => gifResolver.resolve(text),
     SYSTEM_PROMPT,
-    ragInput: (author, name, message, replies, similar, gifs, other) =>
-      buildReplyPrompt({ author, name, message, buckets: { replies, similar, gifs, other } }),
+    ragInput: (author, name, message, replies, similar, gifs, other, { messageAuthor, transcript = [] } = {}) =>
+      buildReplyPrompt({
+        author, name, message, messageAuthor, transcript, timeZone: contextTimeZone,
+        buckets: { replies, similar, gifs, other },
+      }),
     contextlessInput: (author, name, examples) => buildRevivePrompt({ author, name, examples }),
   };
 };
@@ -75,8 +78,9 @@ const buildSqlite = (db) => {
 export const bootBot = async (world) => {
   const fakes = createFakes(world.options);
   world.fakes = fakes;
+  const config = buildConfig(world.env);
   const container = buildContainer({
-    config: buildConfig(world.env),
+    config,
     vendor: buildVendor(fakes),
     data: { users: world.options.users, pingCache: world.options.pingCache },
   });
@@ -88,5 +92,5 @@ export const bootBot = async (world) => {
     dispose();
     throw error;
   }
-  return { subject: buildSubject(container), sqlite: buildSqlite(container.db), dispose };
+  return { subject: buildSubject(container, config.context.timeZone), sqlite: buildSqlite(container.db), dispose };
 };

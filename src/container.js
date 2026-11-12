@@ -9,6 +9,8 @@ import { createVectorStore } from './storage/vectorStore.js';
 import { createIngestService } from './ingest/ingestService.js';
 import { createRetriever } from './retrieval/retriever.js';
 import { createPersonaSelector } from './retrieval/personaSelector.js';
+import { createChannelHistory } from './discord/channelHistory.js';
+import { createContextBuilder } from './context/contextBuilder.js';
 import { createChatClient } from './llm/chatClient.js';
 import { createGenerator } from './llm/generator.js';
 import { createKlipyEngine, createGiphyEngine, createHumorEngine } from './gifs/engines.js';
@@ -60,7 +62,7 @@ const buildGenerator = ({ config, vendor, retriever, userDirectory }) => {
   const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
   const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
   const chatClient = createChatClient({ client, config });
-  return createGenerator({ chatClient, retriever, userDirectory });
+  return createGenerator({ chatClient, retriever, userDirectory, config });
 };
 
 const buildCore = ({ config, vendor, data, clock }) => {
@@ -113,10 +115,14 @@ export const buildContainer = ({
   const botMessageResolver = createBotMessageResolver({
     botMessageStore, userDirectory, getBotUserId: () => client.user?.id,
   });
+  const channelHistory = createChannelHistory({ logger });
+  const contextBuilder = createContextBuilder({
+    channelHistory, botMessageResolver, messageFilter: core.messageFilter, config,
+  });
   const responder = createResponder({
-    composer, delivery, botMessageStore, now: clock.now, logger,
+    composer, delivery, contextBuilder, botMessageStore, now: clock.now, logger,
   });
   const handlers = buildHandlers({ config, data, clock, logger, client, core, responder, authorEmbeds });
   const bot = createBot({ client, config, handlers, clock, logger });
-  return { bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, ...core };
+  return { bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder, ...core };
 };

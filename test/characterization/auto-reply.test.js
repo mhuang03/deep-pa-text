@@ -99,7 +99,7 @@ test('the LLM user prompt names the persona, its real name and the transformed m
   const prompt = userPrompt(world);
   assert.ok(prompt.includes('username "dave"'));
   assert.ok(prompt.includes('real name is "Dave Example"'));
-  assert.ok(prompt.includes('The user has just received the message: "@alice hello there".'));
+  assert.ok(prompt.includes('The user has just received this message from "alice": "@alice hello there".'));
   assert.ok(!prompt.includes('<@111>'));
 });
 

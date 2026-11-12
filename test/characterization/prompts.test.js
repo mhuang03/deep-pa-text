@@ -17,10 +17,13 @@ test('SYSTEM_PROMPT equals the checked-in fixture', async (t) => {
 
 test('ragInput builds the exact legacy template with the four JSON sections in order', async (t) => {
   const world = await newWorld(t);
-  const actual = world.subject.ragInput('alice', 'Alice Example', 'hi "there"', ['r1'], ['c1', 'c2'], [], ['o1']);
+  const actual = world.subject.ragInput('alice', 'Alice Example', 'hi "there"', ['r1'], ['c1', 'c2'], [], ['o1'], {
+    messageAuthor: 'alice',
+  });
   const expected = [
     'The user you are emulating has username "alice", and their real name is "Alice Example".',
-    'The user has just received the message: "hi "there"".',
+    '',
+    'The user has just received this message from "alice": "hi "there"".',
     '',
     "Here are some examples of messages that the user has sent in response to messages that are similar in semantic meaning to the message they just received:",
     '["r1"]',

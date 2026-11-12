@@ -6,8 +6,8 @@ import { loadConfig } from '../../../src/config.js';
 const setup = ({ links = [], text = 'hello', generate = null } = {}) => {
   const calls = [];
   const generator = {
-    generateReply: async (persona, record) => {
-      calls.push(['reply', persona, record]);
+    generateReply: async (persona, record, context) => {
+      calls.push(['reply', persona, record, context]);
       return generate ?? `reply ${text}`;
     },
     generateRevive: async (persona) => {
@@ -29,9 +29,10 @@ test('compose with a target generates a reply, resolves GIFs, then returns the p
   const links = [{ match: '<gif! a>', url: 'https://g.example/a.gif' }];
   const { composer, calls } = setup({ links });
   const target = { id: '1', author: 'alice', content: 'hi there', timestamp: 5, reference: null };
-  const result = await composer.compose({ persona: 'bob', target });
+  const context = { transcript: [] };
+  const result = await composer.compose({ persona: 'bob', target, context });
   assert.deepEqual(result, { response: 'reply hello', content: 'resolved reply hello', gifLinks: links });
-  assert.deepEqual(calls, [['reply', 'bob', target], ['resolve', 'reply hello']]);
+  assert.deepEqual(calls, [['reply', 'bob', target, context], ['resolve', 'reply hello']]);
 });
 
 test('compose with a null target generates a revive', async () => {

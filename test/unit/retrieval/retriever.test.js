@@ -133,3 +133,10 @@ test('retrieveForRevive returns up to reviveSamples contents of the author', asy
   assert.ok(out.every((c) => c.startsWith('msg ')));
   assert.deepEqual(await ctx.retriever.retrieveForRevive('bob'), ['bob msg']);
 });
+
+test('retrieveForReply embeds queryText when given, else the record content', async () => {
+  const ctx = await setup();
+  await ctx.retriever.retrieveForReply('alice', record, { queryText: 'line one\ncats rule' });
+  await ctx.retriever.retrieveForReply('alice', record);
+  assert.deepEqual(ctx.embedCalls.map(([text]) => text), ['line one\ncats rule', 'cats rule']);
+});

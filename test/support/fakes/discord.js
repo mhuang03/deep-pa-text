@@ -45,8 +45,28 @@ const createFailer = () => {
   };
 };
 
+// Mirrors discord.js: a Collection (here a Map) ordered newest first.
+const createMessages = (history) => {
+  let failure = null;
+  const messages = {
+    calls: [],
+    setFailing: (error) => {
+      failure = error ?? null;
+    },
+    async fetch({ limit, before } = {}) {
+      messages.calls.push({ limit, before });
+      if (failure) throw failure;
+      const index = history.findIndex((message) => message.id === before);
+      const preceding = index === -1 ? history : history.slice(0, index);
+      return new Map(preceding.slice(-limit).reverse().map((message) => [message.id, message]));
+    },
+  };
+  return messages;
+};
+
 const createChannel = (id, guild, nextId) => {
-  const channel = { id, guild, guildId: guild.id, sent: [], sentMessages: [] };
+  const channel = { id, guild, guildId: guild.id, sent: [], sentMessages: [], history: [] };
+  channel.messages = createMessages(channel.history);
   const failer = createFailer();
   channel.failSends = failer.arm;
   channel.send = async (payload) => {
@@ -59,15 +79,19 @@ const createChannel = (id, guild, nextId) => {
   return channel;
 };
 
-const makeBotMessage = (id, payload, channel, reference = null) => ({
-  id,
-  author: BOT,
-  content: payload?.content,
-  embeds: payload?.embeds,
-  reference,
-  createdTimestamp: Date.now(),
-  channel,
-});
+const makeBotMessage = (id, payload, channel, reference = null) => {
+  const message = {
+    id,
+    author: BOT,
+    content: payload?.content,
+    embeds: payload?.embeds,
+    reference,
+    createdTimestamp: Date.now(),
+    channel,
+  };
+  channel.history.push(message);
+  return message;
+};
 
 // Tracks every listener invocation so tests can wait for the bot to go quiet.
 const createTracker = () => {
@@ -261,6 +285,11 @@ export const createFakeDiscord = () => {
   };
 
   state.makeMessage = makeMessage;
+  state.addHistory = (fields) => {
+    const message = makeMessage(fields);
+    message.channel.history.push(message);
+    return message;
+  };
   state.makeInteraction = makeInteraction;
   state.closePending = () => {
     [...pendingWaits].forEach((pending) => {

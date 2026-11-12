@@ -162,7 +162,7 @@ test('makes one LLM call naming the chosen author and the target content', async
   const prompt = world.llm.calls[0].messages[1].content;
   assert.match(prompt, /username "bob"/);
   assert.match(prompt, /real name is "Bob Example"/);
-  assert.match(prompt, /just received the message: "@alice hello there"/);
+  assert.match(prompt, /just received this message from "alice": "@alice hello there"/);
 });
 
 test('does not reply to the target message or send through the channel', async (t) => {

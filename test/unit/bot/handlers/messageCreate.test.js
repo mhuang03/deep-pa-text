@@ -58,7 +58,8 @@ test('replies in order: human noted before ingest, bot claimed before generation
     ['noteHuman', { timestamp: 4242, author: 'alice' }],
     'ingest', 'filter', 'decide', 'noteBot', 'pick',
     ['respond', {
-      trigger: 'auto', persona: 'bob', target: record, guild: message.guild, via: { type: 'reply', message },
+      trigger: 'auto', persona: 'bob', target: record, guild: message.guild, channel: message.channel,
+      via: { type: 'reply', message },
     }],
     ['noteReply', { resetMisses: true }], 'noteBot',
   ]);

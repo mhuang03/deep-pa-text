@@ -2,11 +2,11 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createResponder, DELIVERY_STAGE } from '../../../src/bot/responder.js';
 
-const REQUEST = { trigger: 'auto', persona: 'bob', target: { id: '1' }, guild: { id: 'g' }, via: { type: 'channel' } };
+const REQUEST = { trigger: 'auto', persona: 'bob', target: { id: '1' }, guild: { id: 'g' }, channel: { id: 'c' }, via: { type: 'channel' } };
 
 const NOW = 777;
 
-const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', createdTimestamp: 55 }, failInsert = null } = {}) => {
+const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', createdTimestamp: 55 }, failInsert = null, failContext = null } = {}) => {
   const events = [];
   const rows = [];
   const logs = [];
@@ -17,6 +17,13 @@ const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', cr
     },
   };
   const logger = { warn: (...a) => logs.push(['warn', ...a]), error: (...a) => logs.push(['error', ...a]) };
+  const contextBuilder = {
+    forReply: async (arg) => {
+      events.push(['context', arg]);
+      if (failContext) throw failContext;
+      return { transcript: ['t'] };
+    },
+  };
   const composer = {
     compose: async (arg) => {
       events.push(['compose', arg]);
@@ -31,7 +38,7 @@ const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', cr
       return sent;
     },
   };
-  return { responder: createResponder({ composer, delivery, botMessageStore, now: () => NOW, logger }), events, rows, logs };
+  return { responder: createResponder({ composer, delivery, contextBuilder, botMessageStore, now: () => NOW, logger }), events, rows, logs };
 };
 
 test('composes then delivers and returns the response and the sent message', async () => {
@@ -39,7 +46,8 @@ test('composes then delivers and returns the response and the sent message', asy
   const result = await responder.respond(REQUEST);
   assert.deepEqual(result, { response: 'raw', message: { id: 'sent', createdTimestamp: 55 } });
   assert.deepEqual(events, [
-    ['compose', { persona: 'bob', target: { id: '1' } }],
+    ['context', { channel: { id: 'c' }, target: { id: '1' } }],
+    ['compose', { persona: 'bob', target: { id: '1' }, context: { transcript: ['t'] } }],
     ['deliver', {
       via: { type: 'channel' }, persona: 'bob', guild: { id: 'g' }, content: 'shown',
       gifLinks: [{ match: 'm', url: 'u' }],
@@ -50,14 +58,21 @@ test('composes then delivers and returns the response and the sent message', asy
 test('passes a null target through for a revive', async () => {
   const { responder, events } = setup();
   await responder.respond({ ...REQUEST, trigger: 'revive', target: null });
-  assert.deepEqual(events[0][1], { persona: 'bob', target: null });
+  assert.deepEqual(events[0], ['compose', { persona: 'bob', target: null, context: undefined }]);
+  assert.equal(events.some(([name]) => name === 'context'), false);
 });
 
 test('a generation failure propagates unmarked and nothing is delivered', async () => {
   const boom = new Error('llm down');
   const { responder, events } = setup({ failCompose: boom });
   await assert.rejects(responder.respond(REQUEST), (error) => error === boom && error.stage === undefined);
-  assert.equal(events.length, 1);
+  assert.deepEqual(events.map(([name]) => name), ['context', 'compose']);
+});
+
+test('a context failure propagates and nothing is composed or delivered', async () => {
+  const { responder, events } = setup({ failContext: new Error('history down') });
+  await assert.rejects(responder.respond(REQUEST), /history down/);
+  assert.deepEqual(events, [['context', { channel: { id: 'c' }, target: { id: '1' } }]]);
 });
 
 test('a delivery failure propagates marked with the delivery stage', async () => {

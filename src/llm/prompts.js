@@ -1,3 +1,5 @@
+import * as sections from './promptSections.js';
+
 export const SYSTEM_PROMPT =
 `You are emulating a user on a Discord server. Your task is to respond to this message in a way that is consistent with how the user has responded to messages in the past.
 
@@ -11,24 +13,13 @@ Respond with ONLY the message content, without any explanations or disclaimers. 
 
 Do not include any URLs in your response, even if the example responses include URLs. If it makes sense to reference a website or a video, you can just mention the name of the website or video without including the URL. Do not include wrapping quotation marks in your response.`;
 
-export const buildReplyPrompt = ({ author, name, message, buckets }) =>
-`The user you are emulating has username "${author}", and their real name is "${name}".
-The user has just received the message: "${message}".
+const REPLY_SECTIONS = [
+  sections.identity, sections.transcript, sections.target,
+  sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
+];
 
-Here are some examples of messages that the user has sent in response to messages that are similar in semantic meaning to the message they just received:
-${JSON.stringify(buckets.replies)}
+const REVIVE_SECTIONS = [sections.identity, sections.pastExamples];
 
-Here are some examples of some messages that the user has sent that are similar in semantic meaning to the message they just received:
-${JSON.stringify(buckets.similar)}
+export const buildReplyPrompt = (ctx) => sections.assemble(REPLY_SECTIONS, ctx);
 
-Here are some examples of responses to similar messages where the user's response included a GIF:
-${JSON.stringify(buckets.gifs)}
-
-Here are some examples of other messages that the user has sent that are not necessarily similar in semantic meaning to the message they just received, but are still representative of the user's general style and tone:
-${JSON.stringify(buckets.other)}`;
-
-export const buildRevivePrompt = ({ author, name, examples }) =>
-`The user you are emulating has username "${author}", and their real name is "${name}".
-
-Here are some examples of messages that the user has sent in the past:
-${JSON.stringify(examples)}`;
+export const buildRevivePrompt = (ctx) => sections.assemble(REVIVE_SECTIONS, ctx);

@@ -6,7 +6,9 @@ const markDelivery = (error) => {
   return Object.assign(marked, { stage: DELIVERY_STAGE });
 };
 
-export const createResponder = ({ composer, delivery, botMessageStore, now, logger }) => {
+export const createResponder = ({
+  composer, delivery, contextBuilder, botMessageStore, now, logger,
+}) => {
   const record = ({ message, response, persona, target, trigger }) => {
     if (!message?.id) {
       logger.warn(`Sent message has no id; bot message not recorded (${trigger}, ${persona})`);
@@ -34,8 +36,12 @@ export const createResponder = ({ composer, delivery, botMessageStore, now, logg
     }
   };
 
-  const respond = async ({ trigger, persona, target, guild, via }) => {
-    const { response, content, gifLinks } = await composer.compose({ persona, target });
+  const contextFor = async ({ channel, target }) =>
+    (target === null ? undefined : contextBuilder.forReply({ channel, target }));
+
+  const respond = async ({ trigger, persona, target, guild, via, channel }) => {
+    const context = await contextFor({ channel, target });
+    const { response, content, gifLinks } = await composer.compose({ persona, target, context });
     const message = await send({ via, persona, guild, content, gifLinks });
     record({ message, response, persona, target, trigger });
     return { response, message };
