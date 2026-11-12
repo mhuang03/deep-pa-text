@@ -23,7 +23,8 @@ const setup = ({ target = null, failCompose = false, resolveBot = () => null } =
         events.push(['respond', request.trigger, request.persona, request.target.content]);
         if (failCompose) throw new Error('llm down');
         const message = await request.via.interaction.editReply({ content: 'c', embeds: ['final'] });
-        return { response: 'resp', message };
+        request.onDelivered?.();
+        return { response: 'resp', messages: [message] };
       },
     },
     authorEmbeds: { make: async (author, guild, opts) => ({ author, thinking: opts.thinking }) },

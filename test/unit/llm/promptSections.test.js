@@ -107,3 +107,19 @@ test('starters renders JSON and is omitted when empty', () => {
   assert.equal(sections.starters({ starters: [] }), null);
   assert.equal(sections.starters({}), null);
 });
+
+const BURST_SETTINGS = { enabled: true, minRate: 0.2, maxMessages: 3 };
+
+test('burst explains the split marker with the configured maximum', () => {
+  assert.equal(
+    sections.burst({ burstRate: 0.5, burst: BURST_SETTINGS }),
+    'This user often sends several short messages in a row instead of one longer message. If that fits here, you may split your response into up to 3 separate messages by putting <split> on its own line between them. Only split where this user would.',
+  );
+  assert.match(sections.burst({ burstRate: 0.2, burst: { ...BURST_SETTINGS, maxMessages: 5 } }), /up to 5 separate/);
+});
+
+test('burst is absent below the minimum rate, when disabled, or without settings', () => {
+  assert.equal(sections.burst({ burstRate: 0.19, burst: BURST_SETTINGS }), null);
+  assert.equal(sections.burst({ burstRate: 0.9, burst: { ...BURST_SETTINGS, enabled: false } }), null);
+  assert.equal(sections.burst({}), null);
+});

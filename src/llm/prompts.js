@@ -30,18 +30,18 @@ export const REVIVE_SYSTEM_PROMPT = replaceOnce(
 const REPLY_SECTIONS = [
   sections.identity, sections.transcript, sections.target,
   sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
-  sections.frequentPhrases, sections.avoidRepeats,
+  sections.frequentPhrases, sections.burst, sections.avoidRepeats,
 ];
 
 const CHAIN_SECTIONS = [
   sections.identity,
   sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
-  sections.frequentPhrases, sections.avoidRepeats, sections.thread,
+  sections.frequentPhrases, sections.burst, sections.avoidRepeats, sections.thread,
 ];
 
 const REVIVE_SECTIONS = [
   sections.identity, sections.situation, sections.lastConversation, sections.starters,
-  sections.pastExamples, sections.avoidRepeats,
+  sections.pastExamples, sections.burst, sections.avoidRepeats,
 ];
 
 export const buildReplyPrompt = (ctx) => sections.assemble(REPLY_SECTIONS, ctx);

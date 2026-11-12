@@ -26,7 +26,8 @@ const setup = ({ env = {}, activity = { lastMessageTime: BASE_TIME - 4 * HOUR, l
         if (failCompose) throw new Error('llm down');
         if (request.via.type !== 'channel') throw new Error('unexpected via');
         const message = await request.via.channel.send({ content: 'c', embeds: [] });
-        return { response: 'resp', message };
+        request.onDelivered?.();
+        return { response: 'resp', messages: [message] };
       },
     },
     clock: { now: () => BASE_TIME },

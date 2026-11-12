@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from '../../../src/llm/prompts.js';
+import { SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt, buildChainPrompt } from '../../../src/llm/prompts.js';
 
 const fixture = fs.readFileSync(new URL('../../characterization/fixtures/system-prompt.txt', import.meta.url), 'utf8');
 
@@ -149,4 +149,26 @@ test('buildRevivePrompt keeps the time sentence without a quiet duration and omi
   });
   assert.equal(out.split('\n\n')[1], 'It is Thursday 3:10 PM.');
   assert.ok(!out.includes('last conversation') && !out.includes('start a conversation'));
+});
+
+const BURST_CTX = {
+  author: 'bob', name: 'Bob Example', burstRate: 0.5, recentBotMessages: ['earlier'],
+  burst: { enabled: true, minRate: 0.2, maxMessages: 3 },
+  buckets: { replies: [], similar: [], gifs: [], other: [] },
+};
+
+test('the burst section sits immediately before avoid-repeats in the reply, chain and revive prompts', () => {
+  const prompts = [
+    buildReplyPrompt({ ...BURST_CTX, message: 'hi', messageAuthor: 'alice' }),
+    buildChainPrompt(BURST_CTX),
+    buildRevivePrompt({ ...BURST_CTX, examples: [] }),
+  ];
+  prompts.forEach((prompt) => {
+    assert.match(prompt, /Only split where this user would\.\n\nThe bot you are part of recently sent/);
+  });
+});
+
+test('prompts contain no burst section without a burst rate', () => {
+  const { burstRate, ...rest } = BURST_CTX;
+  assert.doesNotMatch(buildChainPrompt(rest), /split/);
 });

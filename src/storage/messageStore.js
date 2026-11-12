@@ -33,6 +33,17 @@ const RANDOM_STARTERS = `
   WHERE f.author = ? AND (g.gap IS NULL OR g.gap > ?)
   ORDER BY RANDOM() LIMIT ?
 `;
+// Measured on the raw table: the corpus filter drops the short messages bursts are made of.
+const BURST_STATS = `
+  SELECT COUNT(*) AS samples, COALESCE(AVG(is_burst), 0) AS rate FROM (
+    SELECT author,
+           CASE WHEN LEAD(author) OVER w = author
+                 AND LEAD(timestamp) OVER w - timestamp <= ?
+                THEN 1.0 ELSE 0.0 END AS is_burst
+    FROM messages
+    WINDOW w AS (ORDER BY timestamp, id)
+  ) WHERE author = ?
+`;
 const LATEST_WITH_REFERENCE = `
   SELECT m.*, r.content as reference_content FROM filtered_messages m
   JOIN filtered_messages r ON m.reference = r.id
@@ -64,6 +75,7 @@ export const createMessageStore = ({ db, config }) => {
   const existsSql = db.prepare(FILTERED_EXISTS);
   const randomSql = db.prepare(RANDOM_MESSAGES);
   const startersSql = db.prepare(RANDOM_STARTERS);
+  const burstSql = db.prepare(BURST_STATS);
   const latestRawSql = db.prepare(latestFrom('messages'));
   const latestFilteredSql = db.prepare(latestFrom('filtered_messages'));
   const latestGifSql = db.prepare(latestFrom('filtered_messages', 'WHERE has_gif = 1'));
@@ -104,6 +116,11 @@ export const createMessageStore = ({ db, config }) => {
 
   const randomStarters = ({ author, minGapMs, limit }) =>
     startersSql.all(author, minGapMs, limit).map((row) => row.content);
+
+  const burstStats = ({ author, windowMs }) => {
+    const { samples, rate } = burstSql.get(windowMs, author);
+    return { samples: Number(samples), rate: Number(rate) };
+  };
 
   const chunksOf = (items) => {
     const chunks = [];
@@ -146,6 +163,7 @@ export const createMessageStore = ({ db, config }) => {
     insertFiltered,
     randomMessages,
     randomStarters,
+    burstStats,
     latestRaw: (limit) => latestRawSql.all(limit),
     latestFiltered: (limit) => latestFilteredSql.all(limit),
     latestWithReference: (limit) => latestRefSql.all(limit),

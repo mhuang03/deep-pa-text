@@ -1,4 +1,5 @@
 import { fakeEmbed } from './chroma.js';
+import { parkWhile } from './parking.js';
 
 const DEFAULT_RESPONSE = 'ok cool';
 
@@ -20,10 +21,26 @@ const pickResponder = (responder, consumed) =>
 export const createFakeOpenAI = () => {
   let responder = DEFAULT_RESPONSE;
   let consumed = 0;
+  const holds = [];
+  const open = new Set();
   const state = {
     calls: [],
     callClients: [],
     constructed: [],
+    // The next completion waits until the returned function is called; its handler is parked meanwhile.
+    hold: () => {
+      let release;
+      const gate = new Promise((resolve) => {
+        release = () => {
+          open.delete(release);
+          resolve();
+        };
+      });
+      open.add(release);
+      holds.push(gate);
+      return release;
+    },
+    releaseAll: () => [...open].forEach((release) => release()),
     respondWith: (x) => {
       responder = x;
       consumed = 0;
@@ -41,6 +58,8 @@ export const createFakeOpenAI = () => {
     async #complete(request) {
       state.calls.push(request);
       state.callClients.push(this.options);
+      const gate = holds.shift();
+      if (gate) await parkWhile(() => gate);
       // A responder function may return a promise, so a test can hold a completion open.
       const content = await resolveResponse(pickResponder(responder, consumed++), request);
       return toCompletion(content);

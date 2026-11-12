@@ -1,15 +1,23 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createResponder, DELIVERY_STAGE } from '../../../src/bot/responder.js';
+import { loadConfig } from '../../../src/config.js';
 
-const REQUEST = { trigger: 'auto', persona: 'bob', target: { id: '1' }, guild: { id: 'g' }, channel: { id: 'c' }, via: { type: 'channel' } };
+const channelStub = { id: 'c', sendTyping: async () => {} };
+const REQUEST = { trigger: 'auto', persona: 'bob', target: { id: '1' }, guild: { id: 'g' }, channel: channelStub, via: { type: 'channel' } };
 
 const NOW = 777;
 
-const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', createdTimestamp: 55 }, failInsert = null, failContext = null } = {}) => {
+const FIRST_PART = { text: 'raw', content: 'shown', gifLinks: [{ match: 'm', url: 'u' }] };
+
+const setup = ({
+  failCompose = null, failDeliver = null, sent = { id: 'sent', createdTimestamp: 55 }, failInsert = null,
+  failContext = null, parts = [FIRST_PART], failDeliverAt = null, configOverrides = {},
+} = {}) => {
   const events = [];
   const rows = [];
   const logs = [];
+  const timers = [];
   const botMessageStore = {
     insert: (row) => {
       if (failInsert) throw failInsert;
@@ -33,25 +41,38 @@ const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', cr
     compose: async (arg) => {
       events.push(['compose', arg]);
       if (failCompose) throw failCompose;
-      return { response: 'raw', content: 'shown', gifLinks: [{ match: 'm', url: 'u' }] };
+      return { response: parts.map((part) => part.text).join('\n<split>\n'), parts };
     },
   };
   const delivery = {
     deliver: async (arg) => {
       events.push(['deliver', arg]);
       if (failDeliver) throw failDeliver;
-      return sent;
+      const index = events.filter(([name]) => name === 'deliver').length;
+      if (failDeliverAt === index) throw new Error('later send failed');
+      return index === 1 ? sent : { id: `sent-${index}`, createdTimestamp: 55 + index };
     },
   };
-  return { responder: createResponder({ composer, delivery, contextBuilder, botMessageStore, now: () => NOW, logger }), events, rows, logs };
+  const clock = {
+    now: () => NOW,
+    sleep: async (ms) => events.push(['sleep', ms]),
+    setInterval: (fn, ms) => {
+      timers.push(['setInterval', ms]);
+      return 'handle';
+    },
+    clearInterval: (handle) => timers.push(['clearInterval', handle]),
+  };
+  const config = { ...loadConfig({}), ...configOverrides };
+  const responder = createResponder({ composer, delivery, contextBuilder, botMessageStore, clock, config, logger });
+  return { responder, events, rows, logs, timers };
 };
 
 test('composes then delivers and returns the response and the sent message', async () => {
   const { responder, events } = setup();
   const result = await responder.respond(REQUEST);
-  assert.deepEqual(result, { response: 'raw', message: { id: 'sent', createdTimestamp: 55 } });
+  assert.deepEqual(result, { response: 'raw', messages: [{ id: 'sent', createdTimestamp: 55 }] });
   assert.deepEqual(events, [
-    ['context', { channel: { id: 'c' }, target: { id: '1' } }],
+    ['context', { channel: channelStub, target: { id: '1' } }],
     ['compose', { persona: 'bob', target: { id: '1' }, context: { transcript: ['t'] } }],
     ['deliver', {
       via: { type: 'channel' }, persona: 'bob', guild: { id: 'g' }, content: 'shown',
@@ -63,7 +84,7 @@ test('composes then delivers and returns the response and the sent message', asy
 test('a revive builds the revive context with the injected clock and passes it to compose', async () => {
   const { responder, events } = setup();
   await responder.respond({ ...REQUEST, trigger: 'revive', target: null });
-  assert.deepEqual(events[0], ['reviveContext', { channel: { id: 'c' }, nowMs: NOW }]);
+  assert.deepEqual(events[0], ['reviveContext', { channel: channelStub, nowMs: NOW }]);
   assert.deepEqual(events[1], [
     'compose', { persona: 'bob', target: null, context: { transcript: [], quietMs: 9, nowMs: NOW } },
   ]);
@@ -88,7 +109,7 @@ test('a generation failure propagates unmarked and nothing is delivered', async 
 test('a context failure propagates and nothing is composed or delivered', async () => {
   const { responder, events } = setup({ failContext: new Error('history down') });
   await assert.rejects(responder.respond(REQUEST), /history down/);
-  assert.deepEqual(events, [['context', { channel: { id: 'c' }, target: { id: '1' } }]]);
+  assert.deepEqual(events, [['context', { channel: channelStub, target: { id: '1' } }]]);
 });
 
 test('a delivery failure propagates marked with the delivery stage', async () => {
@@ -144,7 +165,7 @@ test('a failing store is logged as an error and the response still counts as sen
   const boom = new Error('disk full');
   const { responder, logs } = setup({ failInsert: boom });
   const result = await responder.respond(REQUEST);
-  assert.deepEqual(result.message, { id: 'sent', createdTimestamp: 55 });
+  assert.deepEqual(result.messages, [{ id: 'sent', createdTimestamp: 55 }]);
   assert.equal(logs[0][0], 'error');
   assert.equal(logs[0][2], boom);
 });
@@ -162,4 +183,102 @@ test('a chain reply is recorded with the incoming message as its reference and t
   await responder.respond({ ...REQUEST, trigger: 'chain', chain: { turns: [] } });
   assert.equal(rows[0].trigger, 'chain');
   assert.equal(rows[0].reference, '1');
+});
+
+const BURST = [
+  { text: 'one', content: 'one', gifLinks: [] },
+  { text: 'two', content: 'two', gifLinks: [] },
+  { text: '<gif! cat>', content: '', gifLinks: [{ match: '<gif! cat>', url: 'g' }] },
+];
+
+const deliveries = (events) => events.filter(([name]) => name === 'deliver').map(([, arg]) => arg);
+
+test('part 1 goes through the request via and later parts through the channel, each after a sleep', async () => {
+  const { responder, events } = setup({ parts: BURST });
+  const via = { type: 'reply', message: { id: 'm' } };
+  const result = await responder.respond({ ...REQUEST, via });
+  const sent = deliveries(events);
+  assert.deepEqual(sent.map((d) => d.via), [via, { type: 'channel', channel: channelStub }, { type: 'channel', channel: channelStub }]);
+  assert.deepEqual(sent.map((d) => d.content), ['one', 'two', '']);
+  assert.deepEqual(events.filter(([name]) => name === 'sleep'), [['sleep', 800], ['sleep', 800]]);
+  assert.deepEqual(events.map(([name]) => name).slice(-5), ['deliver', 'sleep', 'deliver', 'sleep', 'deliver']);
+  assert.equal(result.messages.length, 3);
+  assert.equal(result.response, 'one\n<split>\ntwo\n<split>\n<gif! cat>');
+});
+
+test('every delivered part is recorded with its own text, the persona, trigger and reference', async () => {
+  const { responder, rows } = setup({ parts: BURST });
+  await responder.respond(REQUEST);
+  assert.deepEqual(rows.map((row) => [row.id, row.content, row.persona, row.trigger, row.reference]), [
+    ['sent', 'one', 'bob', 'auto', '1'],
+    ['sent-2', 'two', 'bob', 'auto', '1'],
+    ['sent-3', '<gif! cat>', 'bob', 'auto', '1'],
+  ]);
+});
+
+test('a command delivers later parts as follow-ups and never types', async () => {
+  const { responder, events, timers } = setup({ parts: BURST });
+  const interaction = { id: 'i' };
+  await responder.respond({ ...REQUEST, trigger: 'command', via: { type: 'interaction', interaction } });
+  assert.deepEqual(deliveries(events).slice(1).map((d) => d.via), [
+    { type: 'followUp', interaction }, { type: 'followUp', interaction },
+  ]);
+  assert.deepEqual(timers, []);
+});
+
+test('onDelivered is called once, right after part 1 and before the first sleep', async () => {
+  const { responder, events } = setup({ parts: BURST });
+  await responder.respond({ ...REQUEST, onDelivered: () => events.push(['onDelivered']) });
+  assert.deepEqual(events.map(([name]) => name).slice(-6), [
+    'deliver', 'onDelivered', 'sleep', 'deliver', 'sleep', 'deliver',
+  ]);
+  assert.equal(events.filter(([name]) => name === 'onDelivered').length, 1);
+});
+
+test('when part 1 fails onDelivered is not called and respond rejects', async () => {
+  const { responder, events } = setup({ parts: BURST, failDeliver: new Error('x') });
+  let called = false;
+  await assert.rejects(responder.respond({ ...REQUEST, onDelivered: () => { called = true; } }));
+  assert.equal(called, false);
+  assert.equal(deliveries(events).length, 1);
+});
+
+test('a failing later part is logged, the rest are skipped and respond resolves', async () => {
+  const { responder, events, rows, logs } = setup({ parts: BURST, failDeliverAt: 2 });
+  const result = await responder.respond(REQUEST);
+  assert.equal(deliveries(events).length, 2);
+  assert.equal(result.messages.length, 1);
+  assert.deepEqual(rows.map((row) => row.content), ['one']);
+  assert.equal(logs.filter(([level]) => level === 'error').length, 1);
+});
+
+test('the sleep before a later part follows its length within the configured bounds', async () => {
+  const long = { text: 'x'.repeat(200), content: 'x', gifLinks: [] };
+  const { responder, events } = setup({ parts: [BURST[0], long] });
+  await responder.respond(REQUEST);
+  assert.deepEqual(events.find(([name]) => name === 'sleep'), ['sleep', 4000]);
+});
+
+test('typing starts before the context, refreshes on an interval, pulses before each sleep and stops', async () => {
+  const order = [];
+  const channel = { id: 'c', sendTyping: async () => order.push('typing') };
+  const { responder, events, timers } = setup({ parts: BURST });
+  events.push = ((push) => (...entries) => {
+    entries.forEach(([name]) => order.push(name));
+    return push.apply(events, entries);
+  })(events.push);
+  await responder.respond({ ...REQUEST, channel });
+  assert.deepEqual(order.slice(0, 3), ['typing', 'context', 'compose']);
+  assert.equal(order.filter((name) => name === 'typing').length, 3);
+  assert.deepEqual(timers, [['setInterval', 8000], ['clearInterval', 'handle']]);
+});
+
+test('typing is stopped when generation fails and skipped when disabled', async () => {
+  const failing = setup({ failCompose: new Error('llm') });
+  await assert.rejects(failing.responder.respond(REQUEST));
+  assert.deepEqual(failing.timers.at(-1), ['clearInterval', 'handle']);
+  const typing = { ...loadConfig({}).typing, enabled: false };
+  const off = setup({ configOverrides: { typing } });
+  await off.responder.respond(REQUEST);
+  assert.deepEqual(off.timers, []);
 });

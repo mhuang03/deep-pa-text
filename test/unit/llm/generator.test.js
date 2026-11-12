@@ -10,7 +10,7 @@ const buckets = { replies: [{ you: 'r', them: 'q' }], similar: ['s1', 's2'], gif
 
 const setup = ({
   retrieverError = null, chatError = null, recent = [], recentError = null, starterRows = [], starterError = null,
-  examples = ['x', 'y'],
+  examples = ['x', 'y'], rate = 0, rateError = null, burst = config.burst,
 } = {}) => {
   const warnings = [];
   const recentCalls = [];
@@ -50,16 +50,26 @@ const setup = ({
     },
   };
   const logger = { warn: (line) => warnings.push(line) };
+  const rateCalls = [];
+  const burstProfile = {
+    rateFor: (persona) => {
+      rateCalls.push(persona);
+      if (rateError) throw rateError;
+      return rate;
+    },
+  };
   const generator = createGenerator({
-    chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
+    chatClient, retriever, userDirectory, botMessageStore, messageStore, burstProfile,
+    config: { ...config, burst }, logger,
   });
-  return { calls, warnings, recentCalls, starterCalls, generator };
+  return { calls, warnings, recentCalls, starterCalls, generator, rateCalls };
 };
+const RAW_RESULT = { response: 'raw response', parts: ['raw response'] };
 const record = { author: 'bob', content: 'hello', timestamp: 5 };
 
 test('generateReply assembles the prompt and returns the sanitised response', async () => {
   const { calls, generator } = setup();
-  assert.equal(await generator.generateReply('alice', record), 'raw response');
+  assert.deepEqual(await generator.generateReply('alice', record), RAW_RESULT);
   assert.deepEqual(calls.reply, [['alice', record, { queryText: 'hello' }]]);
   assert.deepEqual(calls.chat, [{
     system: SYSTEM_PROMPT,
@@ -97,7 +107,7 @@ test('an unknown persona renders undefined as the name', async () => {
 
 test('generateRevive without context builds the minimal prompt under the revive system prompt', async () => {
   const { calls, generator } = setup();
-  assert.equal(await generator.generateRevive('alice'), 'raw response');
+  assert.deepEqual(await generator.generateRevive('alice'), RAW_RESULT);
   assert.deepEqual(calls.revive, [['alice']]);
   assert.deepEqual(calls.chat, [{
     system: REVIVE_SYSTEM_PROMPT,
@@ -124,6 +134,7 @@ const setupWith = (completion) => {
     userDirectory: { nameOf: () => 'Alice Example' },
     botMessageStore: { recent: () => [] },
     messageStore: { randomStarters: () => [] },
+    burstProfile: { rateFor: () => 0 },
     config,
   });
   return generator;
@@ -131,8 +142,9 @@ const setupWith = (completion) => {
 
 test('sanitises replies and revives', async () => {
   const generator = setupWith('"line one\\nline two"');
-  assert.equal(await generator.generateReply('alice', record), 'line one\nline two');
-  assert.equal(await generator.generateRevive('alice'), 'line one\nline two');
+  const expected = { response: 'line one\nline two', parts: ['line one\nline two'] };
+  assert.deepEqual(await generator.generateReply('alice', record), expected);
+  assert.deepEqual(await generator.generateRevive('alice'), expected);
 });
 
 test('throws when the sanitised response is empty', async () => {
@@ -162,8 +174,8 @@ test('replies and revives pass the recent bot messages, newest first, into the p
 
 test('a failure to load recent bot messages is logged and treated as none', async () => {
   const { calls, warnings, generator } = setup({ recentError: new Error('db locked') });
-  assert.equal(await generator.generateReply('alice', record), 'raw response');
-  assert.equal(await generator.generateRevive('alice'), 'raw response');
+  assert.deepEqual(await generator.generateReply('alice', record), RAW_RESULT);
+  assert.deepEqual(await generator.generateRevive('alice'), RAW_RESULT);
   assert.equal(warnings.length, 2);
   assert.match(warnings[0], /db locked/);
   assert.ok(!calls.chat[0].user.includes('recently sent'));
@@ -202,7 +214,7 @@ test('starters are cut to starterSamples after deduplication', async () => {
 
 test('a starters failure is logged and the revive is built without starters', async () => {
   const { calls, warnings, generator } = setup({ starterError: new Error('db locked') });
-  assert.equal(await generator.generateRevive('alice'), 'raw response');
+  assert.deepEqual(await generator.generateRevive('alice'), RAW_RESULT);
   assert.match(warnings[0], /db locked/);
   assert.ok(!calls.chat[0].user.includes('start a conversation'));
   assert.ok(calls.chat[0].user.includes('["x","y"]'));
@@ -219,7 +231,7 @@ const chain = {
 
 test('a chain reply sends the preamble with the thread as chat turns and no transcript or target', async () => {
   const { calls, generator } = setup({ recent: [{ content: 'recent bot' }] });
-  assert.equal(await generator.generateReply('alice', { ...record, content: 'why' }, { chain }), 'raw response');
+  assert.deepEqual(await generator.generateReply('alice', { ...record, content: 'why' }, { chain }), RAW_RESULT);
   assert.equal(calls.chat.length, 1);
   assert.equal(calls.chat[0].system, SYSTEM_PROMPT);
   assert.deepEqual(calls.chat[0].turns, chain.turns);
@@ -251,4 +263,43 @@ test('a context without a chain keeps the plain request shape', async () => {
   const { calls, generator } = setup();
   await generator.generateReply('alice', record, { transcript: [] });
   assert.deepEqual(Object.keys(calls.chat[0]), ['system', 'user']);
+});
+
+test('a response with split markers resolves to its parts, sanitised one by one', async () => {
+  const generator = setupWith('"one"\n<split>\n"two"');
+  const result = await generator.generateReply('alice', record);
+  assert.deepEqual(result, { response: 'one\n<split>\ntwo', parts: ['one', 'two'] });
+});
+
+test('a bursty persona gets the burst section before avoid-repeats in each prompt', async () => {
+  const { calls, generator } = setup({ rate: 0.5, recent: ['earlier'] });
+  await generator.generateReply('alice', record);
+  await generator.generateRevive('alice');
+  calls.chat.forEach(({ user }) => {
+    assert.match(user, /split your response into up to 3 separate messages/);
+    assert.ok(user.indexOf('This user often sends') < user.indexOf('recently sent these messages'));
+  });
+});
+
+test('no burst section below the minimum rate or when bursts are disabled', async () => {
+  const quiet = setup({ rate: 0.1 });
+  await quiet.generator.generateReply('alice', record);
+  assert.doesNotMatch(quiet.calls.chat[0].user, /several short messages/);
+  const off = setup({ rate: 0.9, burst: { ...config.burst, enabled: false } });
+  await off.generator.generateReply('alice', record);
+  assert.doesNotMatch(off.calls.chat[0].user, /several short messages/);
+  assert.deepEqual(off.rateCalls, []);
+});
+
+test('a failing burst measurement is logged and the prompt omits the section', async () => {
+  const { calls, warnings, generator } = setup({ rateError: new Error('db gone') });
+  await generator.generateReply('alice', record);
+  assert.doesNotMatch(calls.chat[0].user, /several short messages/);
+  assert.match(warnings[0], /burst rate/);
+});
+
+test('a chain reply gets the burst section too', async () => {
+  const { calls, generator } = setup({ rate: 0.5 });
+  await generator.generateReply('alice', record, { chain: { turns: [{ speaker: 'bob', content: 'hi', isPersona: false }] } });
+  assert.match(calls.chat[0].user, /several short messages/);
 });

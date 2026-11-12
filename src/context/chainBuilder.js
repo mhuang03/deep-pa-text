@@ -1,5 +1,10 @@
-const toBotTurn = (bot, persona) => ({
-  speaker: bot.persona, content: bot.content, isPersona: bot.persona === persona,
+const JOINER = '\n';
+
+// The parts of one burst are a single turn.
+const toBotTurn = (group, persona) => ({
+  speaker: group[0].persona,
+  content: group.map((bot) => bot.content).join(JOINER),
+  isPersona: group[0].persona === persona,
 });
 
 export const createChainBuilder = ({
@@ -9,12 +14,19 @@ export const createChainBuilder = ({
 
   const botAt = (id, parent) => (parent.id === id ? parent : botMessageStore.getById(id));
 
+  // A fallback parent has no stored row, so it cannot have stored siblings.
+  const burstOf = (bot) => {
+    if (bot.fallback) return [bot];
+    const group = botMessageStore.siblings(bot);
+    return group.length > 0 ? group : [bot];
+  };
+
   // One step of the walk: the turn (or null), the next id (or null) and whether it was a bot message.
   const step = (id, parent, persona) => {
     const bot = botAt(id, parent);
     if (bot) {
       // A fallback parent has reference null, so its unknown ancestry ends the walk.
-      return { turn: toBotTurn(bot, persona), next: bot.reference ?? null, isBot: true };
+      return { turn: toBotTurn(burstOf(bot), persona), next: bot.reference ?? null, isBot: true };
     }
     const raw = messageStore.getRaw(id);
     if (!raw) return null;

@@ -49,7 +49,7 @@ export const createReplyCommandHandler = (deps) => {
     }
   };
 
-  const deliverReply = async ({ modalInteraction, persona, target, guild, channel }) => {
+  const deliverReply = async ({ modalInteraction, persona, target, guild, channel, onDelivered }) => {
     const { response } = await responder.respond({
       trigger: TRIGGERS.COMMAND,
       persona,
@@ -57,6 +57,7 @@ export const createReplyCommandHandler = (deps) => {
       guild,
       channel,
       via: { type: 'interaction', interaction: modalInteraction },
+      onDelivered,
     });
     return response;
   };
@@ -67,7 +68,8 @@ export const createReplyCommandHandler = (deps) => {
     await modalInteraction.reply(withSafeMentions({ embeds: [thinking] }));
     let response;
     try {
-      response = await deliverReply({ modalInteraction, persona, target, guild, channel });
+      const onDelivered = () => replyPolicy.noteReply({ resetMisses: false });
+      response = await deliverReply({ modalInteraction, persona, target, guild, channel, onDelivered });
     } catch (error) {
       await notifyFailure(modalInteraction);
       throw error;
@@ -76,7 +78,6 @@ export const createReplyCommandHandler = (deps) => {
       requester: interaction.user.username, record: target, logging: config.logging,
     }));
     logger.info(formatReply({ persona, response }));
-    replyPolicy.noteReply({ resetMisses: false });
   };
 
   // A bot message is attributed to its persona, so the reply continues as that persona by default.

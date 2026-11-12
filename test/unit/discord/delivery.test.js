@@ -77,3 +77,14 @@ test('rejects an unknown delivery type without building an embed', async () => {
   await assert.rejects(delivery.deliver(request({ type: 'toString' })), { message: 'unknown delivery type: toString' });
   assert.deepEqual(makeCalls, []);
 });
+
+test('a followUp delivery sends through interaction.followUp with safe mentions only', async () => {
+  const { delivery, sent, send } = setup();
+  const interaction = { followUp: send };
+  const result = await delivery.deliver({
+    via: { type: 'followUp', interaction }, persona: 'bob', guild: {}, content: 'two', gifLinks: [],
+  });
+  assert.deepEqual(result, { id: 'sent-1' });
+  assert.equal(sent[0].content, 'two');
+  assert.deepEqual(sent[0].allowedMentions, { parse: [] });
+});

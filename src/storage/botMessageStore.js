@@ -6,12 +6,20 @@ const INSERT = `
 const BY_ID = 'SELECT * FROM bot_messages WHERE id = ?';
 const RECENT = 'SELECT * FROM bot_messages ORDER BY timestamp DESC, id DESC LIMIT ?';
 
+const SIBLINGS = `
+  SELECT * FROM bot_messages
+  WHERE persona = ? AND trigger = ? AND reference IS ? AND ABS(timestamp - ?) <= ?
+  ORDER BY timestamp, id
+`;
+
 const toBotMessage = (row) => (row ? { ...row } : null);
 
-export const createBotMessageStore = ({ db }) => {
+export const createBotMessageStore = ({ db, config }) => {
+  const windowMs = config.burst.siblingWindowMs;
   const insertSql = db.prepare(INSERT);
   const byIdSql = db.prepare(BY_ID);
   const recentSql = db.prepare(RECENT);
+  const siblingsSql = db.prepare(SIBLINGS);
 
   const insert = ({ id, persona, content, timestamp, reference = null, trigger }) => {
     insertSql.run(id, persona, content, timestamp, reference ?? null, trigger);
@@ -26,5 +34,11 @@ export const createBotMessageStore = ({ db }) => {
     return recentSql.all(limit).map(toBotMessage);
   };
 
-  return { insert, getById, recent };
+  // The parts of one burst share persona, trigger and reference; the window keeps separate revives apart.
+  const siblings = (botMessage) =>
+    siblingsSql.all(
+      botMessage.persona, botMessage.trigger, botMessage.reference ?? null, botMessage.timestamp, windowMs,
+    ).map(toBotMessage);
+
+  return { insert, getById, recent, siblings };
 };

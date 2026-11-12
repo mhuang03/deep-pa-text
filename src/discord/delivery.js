@@ -7,6 +7,7 @@ const SENDERS = {
     send: (payload) => via.message.reply(payload),
   }),
   channel: (via) => ({ mentions: {}, send: (payload) => via.channel.send(payload) }),
+  followUp: (via) => ({ mentions: {}, send: (payload) => via.interaction.followUp(payload) }),
   interaction: (via) => ({ mentions: {}, send: (payload) => via.interaction.editReply(payload) }),
 };
 

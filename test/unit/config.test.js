@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
+import { DEFAULTS, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -38,6 +38,11 @@ const EXPECTED_DEFAULTS = {
   },
   context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
   chain: { enabled: true, fullDepth: 3, decay: 0.5, maxBotTurns: 8, maxContextTurns: 12, maxWalkSteps: 50 },
+  typing: { enabled: true, refreshMs: 8000 },
+  burst: {
+    enabled: true, maxMessages: 3, windowMs: 30000, minRate: 0.2, minSamples: 20, cacheMs: 3600000,
+    msPerChar: 40, minDelayMs: 800, maxDelayMs: 4000, siblingWindowMs: 60000,
+  },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
@@ -155,4 +160,17 @@ test('assertChain validates decay and the context size', () => {
   [1, 1.5, 0, NaN].forEach((maxContextTurns) =>
     assert.throws(() => assertChain({ ...ok, maxContextTurns }), /chain\.maxContextTurns/));
   assert.doesNotThrow(() => assertChain({ ...ok, maxContextTurns: 2 }));
+});
+
+test('BURSTS disables bursts only when it is the string false', () => {
+  assert.equal(loadConfig({ BURSTS: 'false' }).burst.enabled, false);
+  ['true', 'FALSE', '', '0'].forEach((value) => assert.equal(loadConfig({ BURSTS: value }).burst.enabled, true, value));
+});
+
+test('assertBurst requires maxMessages to be an integer of at least 1', () => {
+  const ok = { ...DEFAULTS.burst };
+  assert.equal(assertBurst(ok), ok);
+  [0, -1, 1.5, NaN, '3'].forEach((maxMessages) =>
+    assert.throws(() => assertBurst({ ...ok, maxMessages }), /burst\.maxMessages/));
+  assert.doesNotThrow(() => assertBurst({ ...ok, maxMessages: 1 }));
 });

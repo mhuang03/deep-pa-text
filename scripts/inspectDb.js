@@ -32,7 +32,7 @@ const hasBotTable = () =>
   db.prepare("SELECT 1 AS found FROM sqlite_master WHERE type = 'table' AND name = ?").get(BOT_TABLE) !== undefined;
 
 if (hasBotTable()) {
-  const rows = createBotMessageStore({ db }).recent({ limit: LIMIT })
+  const rows = createBotMessageStore({ db, config }).recent({ limit: LIMIT })
     .map((m) => ({ ...m, author: `${m.persona} [${m.trigger}]` }));
   print('Latest bot messages', rows, (m) => `reference: ${m.reference}`);
 } else {

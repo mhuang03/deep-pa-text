@@ -31,9 +31,12 @@ export const createMessageCreateHandler = (deps) => {
   const reply = async (message, target) => {
     activity.noteBot();
     const persona = await personaSelector.pickReplier(target);
-    const { response } = await respond(message, { trigger: TRIGGERS.AUTO, persona, target });
-    replyPolicy.noteReply({ resetMisses: true });
-    activity.noteBot();
+    // Armed on the first part, so a message arriving mid-burst cannot trigger a second reply.
+    const onDelivered = () => {
+      replyPolicy.noteReply({ resetMisses: true });
+      activity.noteBot();
+    };
+    const { response } = await respond(message, { trigger: TRIGGERS.AUTO, persona, target, onDelivered });
     return formatReply({ persona, response });
   };
 
@@ -45,8 +48,10 @@ export const createMessageCreateHandler = (deps) => {
     if (!decision.reply) return logger.info(joinLines([...lines, summary]));
     chainPolicy.begin();
     try {
-      const { response } = await respond(message, { trigger: TRIGGERS.CHAIN, persona, target, chain });
-      replyPolicy.noteReply({ resetMisses: false });
+      const onDelivered = () => replyPolicy.noteReply({ resetMisses: false });
+      const { response } = await respond(message, {
+        trigger: TRIGGERS.CHAIN, persona, target, chain, onDelivered,
+      });
       return logger.info(joinLines([...lines, summary, formatReply({ persona, response })]));
     } finally {
       chainPolicy.end();

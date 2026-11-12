@@ -7,6 +7,7 @@ import { createMessageStore } from './storage/messageStore.js';
 import { createBotMessageStore } from './storage/botMessageStore.js';
 import { createVectorStore } from './storage/vectorStore.js';
 import { createIngestService } from './ingest/ingestService.js';
+import { createBurstProfile } from './retrieval/burstProfile.js';
 import { createRetriever } from './retrieval/retriever.js';
 import { createPersonaSelector } from './retrieval/personaSelector.js';
 import { createChannelHistory } from './discord/channelHistory.js';
@@ -31,13 +32,18 @@ import { createReviveTick } from './bot/handlers/reviveTick.js';
 import { createBot } from './bot/bot.js';
 
 // Lazy wrappers: global mocks of Date, Math.random and setInterval are honoured at call time.
-export const defaultClock = () => ({
-  now: () => Date.now(),
-  random: () => Math.random(),
-  setInterval: (fn, ms) => setInterval(fn, ms),
-  setTimeout: (fn, ms) => setTimeout(fn, ms),
-  clearTimeout: (handle) => clearTimeout(handle),
-});
+export const defaultClock = () => {
+  const clock = {
+    now: () => Date.now(),
+    random: () => Math.random(),
+    setInterval: (fn, ms) => setInterval(fn, ms),
+    setTimeout: (fn, ms) => setTimeout(fn, ms),
+    clearTimeout: (handle) => clearTimeout(handle),
+    clearInterval: (handle) => clearInterval(handle),
+    sleep: (ms) => new Promise((resolve) => { clock.setTimeout(resolve, ms); }),
+  };
+  return clock;
+};
 
 export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logger = createLogger() }) => {
   const giphy = new vendor.GiphyFetch(config.gifs.giphyApiKey);
@@ -61,20 +67,20 @@ const buildVectorStore = ({ config, vendor }) => {
 };
 
 const buildGenerator = ({
-  config, vendor, retriever, userDirectory, botMessageStore, messageStore, logger,
+  config, vendor, retriever, userDirectory, botMessageStore, messageStore, burstProfile, logger,
 }) => {
   const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
   const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
   const chatClient = createChatClient({ client, config });
   return createGenerator({
-    chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
+    chatClient, retriever, userDirectory, botMessageStore, messageStore, burstProfile, config, logger,
   });
 };
 
 const buildCore = ({ config, vendor, data, clock, logger }) => {
   const db = openDatabase(config.storage.databasePath);
   const messageStore = createMessageStore({ db, config });
-  const botMessageStore = createBotMessageStore({ db });
+  const botMessageStore = createBotMessageStore({ db, config });
   const vectorStore = buildVectorStore({ config, vendor });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
   const ingest = createIngestService({ messageStore, vectorStore, messageFilter });
@@ -83,12 +89,13 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
   const personaSelector = createPersonaSelector({
     vectorStore, users: data.users, random: clock.random, config,
   });
+  const burstProfile = createBurstProfile({ messageStore, config, now: clock.now });
   const generator = buildGenerator({
-    config, vendor, retriever, userDirectory, botMessageStore, messageStore, logger,
+    config, vendor, retriever, userDirectory, botMessageStore, messageStore, burstProfile, logger,
   });
   return {
     db, messageStore, botMessageStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
-    personaSelector, generator,
+    personaSelector, burstProfile, generator,
   };
 };
 
@@ -132,7 +139,7 @@ export const buildContainer = ({
     channelHistory, botMessageResolver, messageFilter: core.messageFilter, config,
   });
   const responder = createResponder({
-    composer, delivery, contextBuilder, botMessageStore, now: clock.now, logger,
+    composer, delivery, contextBuilder, botMessageStore, clock, config, logger,
   });
   const chainBuilder = createChainBuilder({
     botMessageStore, messageStore: core.messageStore, messageFilter: core.messageFilter, userDirectory, config,

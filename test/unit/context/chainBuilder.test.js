@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { createChainBuilder } from '../../../src/context/chainBuilder.js';
 import { loadConfig } from '../../../src/config.js';
 
-const setup = ({ bots = {}, raws = {}, chain = {}, names = { bob: 'Bob', carol: 'Carol' } } = {}) => {
+const setup = ({ bots = {}, raws = {}, chain = {}, siblings = () => [], names = { bob: 'Bob', carol: 'Carol' } } = {}) => {
   const base = loadConfig({});
   const config = { ...base, chain: { ...base.chain, ...chain } };
   const builder = createChainBuilder({
-    botMessageStore: { getById: (id) => bots[id] ?? null },
+    botMessageStore: { getById: (id) => bots[id] ?? null, siblings },
     messageStore: { getRaw: (id) => raws[id] ?? null },
     messageFilter: { transform: (text) => text.replace(/<[^>]*>/g, '').trim() },
     userDirectory: { nameOf: (username) => names[username] },
@@ -105,4 +105,26 @@ test('a reference cycle terminates the walk', () => {
 test('the incoming turn is always present even when the context is two turns', () => {
   const chain = setup({ chain: { maxContextTurns: 2 } }).build(target, bot('b', 'bob', 'p', 'h'));
   assert.deepEqual(chain.turns.map((t) => t.content), ['p', 'why']);
+});
+
+test('the parts of a burst are one assistant turn, counted once, and the walk continues from their reference', () => {
+  const parts = [bot('p1', 'bob', 'one', 'h1'), bot('p2', 'bob', 'two', 'h1')];
+  const chain = setup({
+    raws: { h1: raw('h1', 'alice', 'question') },
+    siblings: (message) => (message.id === 'p2' ? parts : []),
+  }).build(target, parts[1]);
+  assert.equal(chain.botTurns, 1);
+  assert.deepEqual(chain.turns, [
+    { speaker: 'alice', content: 'question', isPersona: false },
+    { speaker: 'bob', content: 'one\ntwo', isPersona: true },
+    { speaker: 'alice', content: 'why', isPersona: false },
+  ]);
+});
+
+test('a fallback parent is never looked up for siblings', () => {
+  let asked = false;
+  const parent = { ...bot('f', 'bob', 'old'), fallback: true };
+  const chain = setup({ siblings: () => { asked = true; return []; } }).build(target, parent);
+  assert.equal(asked, false);
+  assert.equal(chain.botTurns, 1);
 });

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { runInEntry } from './parking.js';
 import { CHANNEL_ID, GUILD_ID, OTHER_CHANNEL_ID } from '../fixtures.js';
 
 // Interactions that define this symbol are told which tracked handler run they belong to.
@@ -65,10 +66,18 @@ const createMessages = (history) => {
 };
 
 const createChannel = (id, guild, nextId) => {
-  const channel = { id, guild, guildId: guild.id, sent: [], sentMessages: [], history: [] };
+  const channel = {
+    id, guild, guildId: guild.id, sent: [], sentMessages: [], history: [], typingCalls: 0,
+  };
   channel.messages = createMessages(channel.history);
   const failer = createFailer();
   channel.failSends = failer.arm;
+  const typingFailer = createFailer();
+  channel.failTyping = typingFailer.arm;
+  channel.sendTyping = async () => {
+    channel.typingCalls += 1;
+    typingFailer.check();
+  };
   channel.send = async (payload) => {
     failer.check();
     channel.sent.push(payload);
@@ -114,7 +123,7 @@ const createTracker = () => {
     started += 1;
     entries.add(entry);
     args.forEach((arg) => arg?.[INVOKED]?.(entry));
-    entry.promise = run(entry, listener, args);
+    entry.promise = runInEntry(entry, () => run(entry, listener, args));
     return entry.promise;
   };
 
@@ -207,12 +216,15 @@ export const createFakeDiscord = () => {
   const makeModalSubmit = ({ customId, user, author }) => {
     const replyFailer = createFailer();
     const editFailer = createFailer();
+    const followUpFailer = createFailer();
     const submit = {
       customId,
       user,
       fields: { getStringSelectValues: () => [author] },
       replies: [],
       edits: [],
+      followUps: [],
+      failFollowUps: followUpFailer.arm,
       failReply: replyFailer.arm,
       failEdits: editFailer.arm,
     };
@@ -224,6 +236,11 @@ export const createFakeDiscord = () => {
     submit.editReply = async (payload) => {
       editFailer.check();
       submit.edits.push(payload);
+      return makeBotMessage(nextId(), payload, channel);
+    };
+    submit.followUp = async (payload) => {
+      followUpFailer.check();
+      submit.followUps.push(payload);
       return makeBotMessage(nextId(), payload, channel);
     };
     return submit;

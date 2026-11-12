@@ -269,3 +269,41 @@ test('inferReference false still keeps an explicit reference to a stored message
   store.insertFiltered(msg('2', 'b', 20, { reference: '1' }), { inferReference: false });
   assert.equal(refOf(db, '2'), '1');
 });
+
+const BURST_WINDOW = 30000;
+const burst = (store, author) => store.burstStats({ author, windowMs: BURST_WINDOW });
+
+test('burstStats counts the author messages and the fraction followed at once by the same author', () => {
+  const { store } = setup();
+  ['1:0', '2:10000', '3:300000'].forEach((entry) => {
+    const [id, t] = entry.split(':');
+    store.insertRaw(msg(id, 'a', Number(t)));
+  });
+  assert.deepEqual(burst(store, 'a'), { samples: 3, rate: 1 / 3 });
+});
+
+test('burstStats is empty for an unknown author', () => {
+  const { store } = setup();
+  assert.deepEqual(burst(store, 'nobody'), { samples: 0, rate: 0 });
+});
+
+test('burstStats: another author in between breaks the burst', () => {
+  const { store } = setup();
+  store.insertRaw(msg('1', 'a', 0));
+  store.insertRaw(msg('2', 'b', 1000));
+  store.insertRaw(msg('3', 'a', 2000));
+  assert.deepEqual(burst(store, 'a'), { samples: 2, rate: 0 });
+});
+
+test('burstStats: the window is inclusive and equal timestamps are ordered by id', () => {
+  const { store } = setup();
+  store.insertRaw(msg('1', 'a', 0));
+  store.insertRaw(msg('2', 'a', BURST_WINDOW));
+  store.insertRaw(msg('3', 'a', BURST_WINDOW + BURST_WINDOW + 1));
+  assert.deepEqual(burst(store, 'a'), { samples: 3, rate: 1 / 3 });
+  store.insertRaw(msg('4', 'b', 500000));
+  store.insertRaw(msg('5', 'a', 500000));
+  store.insertRaw(msg('6', 'a', 500000));
+  assert.equal(burst(store, 'b').rate, 0);
+  assert.equal(burst(store, 'a').samples, 5);
+});

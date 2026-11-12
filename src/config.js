@@ -162,6 +162,31 @@ const buildChain = (env) => assertChain({
   maxWalkSteps: 50,
 });
 
+const buildTyping = () => ({
+  enabled: true,
+  refreshMs: 8000,
+});
+
+export const assertBurst = (burst) => {
+  if (!(Number.isInteger(burst.maxMessages) && burst.maxMessages >= 1)) {
+    throw new Error('burst.maxMessages must be an integer of at least 1');
+  }
+  return burst;
+};
+
+const buildBurst = (env) => assertBurst({
+  enabled: env.BURSTS !== 'false',
+  maxMessages: 3,
+  windowMs: 30000,
+  minRate: 0.2,
+  minSamples: 20,
+  cacheMs: 3600000,
+  msPerChar: 40,
+  minDelayMs: 800,
+  maxDelayMs: 4000,
+  siblingWindowMs: 60000,
+});
+
 const buildLogging = () => ({
   locale: 'en-US',
   timeZone: 'America/Chicago',
@@ -187,6 +212,8 @@ const buildConfig = (env) => ({
   gifs: buildGifs(env),
   context: buildContext(),
   chain: buildChain(env),
+  typing: buildTyping(),
+  burst: buildBurst(env),
   logging: buildLogging(),
 });
 

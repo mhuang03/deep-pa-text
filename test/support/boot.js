@@ -1,9 +1,10 @@
 // The only construction-aware file: it builds the app through buildContainer with the
 // world's fakes as the vendor, then maps the spec 00 subject surface onto the services.
 import { loadConfig } from '../../src/config.js';
-import { buildContainer } from '../../src/container.js';
+import { buildContainer, defaultClock } from '../../src/container.js';
 import { BUCKET_ORDER } from '../../src/retrieval/retriever.js';
 import { buildReplyPrompt, buildRevivePrompt, SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT } from '../../src/llm/prompts.js';
+import { parkWhile } from './fakes/parking.js';
 import { createFakeDiscord } from './fakes/discord.js';
 import { createFakeChroma } from './fakes/chroma.js';
 import { createFakeOpenAI } from './fakes/llm.js';
@@ -53,8 +54,8 @@ const buildSubject = (container, { timeZone: contextTimeZone, maxEntryChars }) =
     },
     randomSearch: (author) => retriever.retrieveForRevive(author),
     searchLikelyRepliers: (msg) => personaSelector.likelyRepliers(msg),
-    getRAGResponse: (author, msg) => generator.generateReply(author, msg),
-    getRandomResponse: (author) => generator.generateRevive(author),
+    getRAGResponse: async (author, msg) => (await generator.generateReply(author, msg)).response,
+    getRandomResponse: async (author) => (await generator.generateRevive(author)).response,
     processGIFs: (text) => gifResolver.resolve(text),
     SYSTEM_PROMPT,
     REVIVE_SYSTEM_PROMPT,
@@ -79,6 +80,15 @@ const buildSqlite = (db) => {
   };
 };
 
+// Records every sleep and resolves at once; a test's hook runs while the sleeping handler is parked.
+const buildClock = (world) => ({
+  ...defaultClock(),
+  sleep: async (ms) => {
+    world.sleeps.push(ms);
+    if (world.sleepHook) await parkWhile(() => world.sleepHook(ms));
+  },
+});
+
 export const bootBot = async (world) => {
   const fakes = createFakes(world.options);
   world.fakes = fakes;
@@ -86,6 +96,7 @@ export const bootBot = async (world) => {
   const container = buildContainer({
     config,
     vendor: buildVendor(fakes),
+    clock: buildClock(world),
     data: { users: world.options.users, pingCache: world.options.pingCache },
   });
   const dispose = () => container.db.close();

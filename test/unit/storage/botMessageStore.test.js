@@ -1,13 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDatabase } from '../../../src/storage/database.js';
+import { loadConfig } from '../../../src/config.js';
 import { createBotMessageStore } from '../../../src/storage/botMessageStore.js';
 
 const row = (id, timestamp, extra = {}) => ({
   id, persona: 'bob', content: `text ${id}`, timestamp, reference: null, trigger: 'auto', ...extra,
 });
 
-const setup = () => createBotMessageStore({ db: openDatabase(':memory:') });
+const setup = () => createBotMessageStore({ db: openDatabase(':memory:'), config: loadConfig({}) });
 
 test('inserts and reads a bot message by id', () => {
   const store = setup();
@@ -51,4 +52,24 @@ test('recent requires a limit', () => {
   const store = setup();
   assert.throws(() => store.recent({}), /limit/);
   assert.throws(() => store.recent(), /limit/);
+});
+
+test('siblings returns the rows sharing persona, trigger and reference within the window, oldest first', () => {
+  const store = setup();
+  store.insert(row('b', 2000, { reference: 'x' }));
+  store.insert(row('a', 1000, { reference: 'x' }));
+  store.insert(row('c', 1000 + 60000, { reference: 'x' }));
+  store.insert(row('late', 1000 + 60001, { reference: 'x' }));
+  store.insert(row('other-ref', 1500, { reference: 'y' }));
+  store.insert(row('other-persona', 1500, { reference: 'x', persona: 'carol' }));
+  store.insert(row('other-trigger', 1500, { reference: 'x', trigger: 'chain' }));
+  assert.deepEqual(store.siblings(store.getById('a')).map((r) => r.id), ['a', 'b', 'c']);
+});
+
+test('siblings of a revive burst match a null reference and keep separate revives apart', () => {
+  const store = setup();
+  store.insert(row('r1', 1000, { trigger: 'revive' }));
+  store.insert(row('r2', 5000, { trigger: 'revive' }));
+  store.insert(row('r3', 10_000_000, { trigger: 'revive' }));
+  assert.deepEqual(store.siblings(store.getById('r2')).map((r) => r.id), ['r1', 'r2']);
 });

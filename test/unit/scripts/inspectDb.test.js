@@ -32,7 +32,7 @@ const seed = (dir) => {
     store.insertRaw(row);
     store.insertFiltered(row);
   });
-  createBotMessageStore({ db }).insert({
+  createBotMessageStore({ db, config }).insert({
     id: 'x', persona: 'bob', content: 'bot says hi', timestamp: T0 + 2000, reference: null, trigger: 'revive',
   });
   db.close();

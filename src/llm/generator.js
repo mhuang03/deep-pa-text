@@ -1,20 +1,27 @@
-import { sanitizeResponse } from './sanitize.js';
+import { postProcess } from './postProcess.js';
 import { buildQueryText } from '../retrieval/queryText.js';
 import { normalizeForDedup } from '../retrieval/normalize.js';
 import {
   SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt, buildChainPrompt,
 } from './prompts.js';
 
-const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
-
 export const createGenerator = ({
-  chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
+  chatClient, retriever, userDirectory, botMessageStore, messageStore, burstProfile, config, logger,
 }) => {
   const complete = async (user, system = SYSTEM_PROMPT, turns = null) => {
     const request = turns ? { system, user, turns } : { system, user };
-    const response = sanitizeResponse(await chatClient.complete(request));
-    if (response === '') throw new Error(EMPTY_RESPONSE_MESSAGE);
-    return response;
+    return postProcess(await chatClient.complete(request), { burst: config.burst });
+  };
+
+  // A failed measurement is tolerated: the prompt just omits the burst section.
+  const loadBurstRate = (persona) => {
+    if (!config.burst.enabled) return 0;
+    try {
+      return burstProfile.rateFor(persona);
+    } catch (error) {
+      logger?.warn?.(`Could not measure the burst rate: ${error.message}`);
+      return 0;
+    }
   };
 
   // A failed load is tolerated: the prompt just omits the avoid-repeats section.
@@ -37,6 +44,8 @@ export const createGenerator = ({
       name: userDirectory.nameOf(persona),
       buckets,
       recentBotMessages: loadRecentBotMessages(),
+      burstRate: loadBurstRate(persona),
+      burst: config.burst,
       maxEntryChars: config.context.maxEntryChars,
     });
     return complete(user, SYSTEM_PROMPT, chain.turns);
@@ -55,6 +64,8 @@ export const createGenerator = ({
       buckets,
       transcript,
       recentBotMessages: loadRecentBotMessages(),
+      burstRate: loadBurstRate(persona),
+      burst: config.burst,
       timeZone: config.context.timeZone,
       maxEntryChars: config.context.maxEntryChars,
     });
@@ -95,6 +106,8 @@ export const createGenerator = ({
       nowMs: context.nowMs,
       timeZone: config.context.timeZone,
       recentBotMessages: loadRecentBotMessages(),
+      burstRate: loadBurstRate(persona),
+      burst: config.burst,
     });
     return complete(user, REVIVE_SYSTEM_PROMPT);
   };

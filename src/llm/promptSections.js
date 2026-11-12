@@ -12,6 +12,8 @@ const EXAMPLES_INTRO = {
 const FREQUENT_INTRO = 'The user sends some of these messages often. Number of times they have sent each (use them only where they fit):';
 const AVOID_INTRO = 'The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:';
 
+const BURST_TEMPLATE = 'This user often sends several short messages in a row instead of one longer message. If that fits here, you may split your response into up to <maxMessages> separate messages by putting <split> on its own line between them. Only split where this user would.';
+
 const THREAD_INTRO = 'You are in a reply thread. Your own earlier messages in it appear as assistant turns; other people\'s messages are prefixed with their username. Write your next message in the thread.';
 const LAST_CONVERSATION_INTRO = 'Here is the end of the last conversation in the channel, oldest first:';
 const STARTERS_INTRO = 'Here are messages this user has sent to start a conversation after the channel had been quiet:';
@@ -46,6 +48,11 @@ export const frequentPhrases = ({ buckets }) => {
 export const avoidRepeats = ({ recentBotMessages }) => {
   if (!recentBotMessages || recentBotMessages.length === 0) return null;
   return `${AVOID_INTRO}\n${JSON.stringify(recentBotMessages)}`;
+};
+
+export const burst = ({ burstRate, burst: settings }) => {
+  if (!settings?.enabled || !(burstRate >= settings.minRate)) return null;
+  return BURST_TEMPLATE.replace('<maxMessages>', String(settings.maxMessages));
 };
 
 export const thread = () => THREAD_INTRO;

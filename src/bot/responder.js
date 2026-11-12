@@ -1,4 +1,10 @@
+import { startTyping } from '../discord/typing.js';
+import { burstDelay } from '../llm/burst.js';
+import { TRIGGERS } from './triggers.js';
+
 export const DELIVERY_STAGE = 'delivery';
+
+const NO_TYPING = Object.freeze({ pulse: () => {}, stop: () => {} });
 
 // Lets handlers tell a send failure (arm the rate limit) from a generation failure.
 const markDelivery = (error) => {
@@ -7,9 +13,11 @@ const markDelivery = (error) => {
 };
 
 export const createResponder = ({
-  composer, delivery, contextBuilder, botMessageStore, now, logger,
+  composer, delivery, contextBuilder, botMessageStore, clock, config, logger,
 }) => {
-  const record = ({ message, response, persona, target, trigger }) => {
+  const now = () => clock.now();
+
+  const record = ({ message, text, persona, target, trigger }) => {
     if (!message?.id) {
       logger.warn(`Sent message has no id; bot message not recorded (${trigger}, ${persona})`);
       return;
@@ -18,21 +26,13 @@ export const createResponder = ({
       botMessageStore.insert({
         id: message.id,
         persona,
-        content: response,
+        content: text,
         timestamp: message.createdTimestamp ?? now(),
         reference: target?.id ?? null,
         trigger,
       });
     } catch (error) {
       logger.error(`Could not record bot message ${message.id}:`, error);
-    }
-  };
-
-  const send = async ({ via, persona, guild, content, gifLinks }) => {
-    try {
-      return await delivery.deliver({ via, persona, guild, content, gifLinks });
-    } catch (error) {
-      throw markDelivery(error);
     }
   };
 
@@ -51,12 +51,69 @@ export const createResponder = ({
     return target === null ? reviveContext(channel) : contextBuilder.forReply({ channel, target });
   };
 
-  const respond = async ({ trigger, persona, target, guild, via, channel, chain }) => {
-    const context = await contextFor({ channel, target, chain });
-    const { response, content, gifLinks } = await composer.compose({ persona, target, context });
-    const message = await send({ via, persona, guild, content, gifLinks });
-    record({ message, response, persona, target, trigger });
-    return { response, message };
+  // The interaction shows its own placeholder, so the command trigger does not type.
+  const beginTyping = ({ trigger, channel }) => {
+    if (!config.typing.enabled || trigger === TRIGGERS.COMMAND) return NO_TYPING;
+    return startTyping(channel, { clock, refreshMs: config.typing.refreshMs, logger });
+  };
+
+  // Later parts go out as plain messages (or follow-ups) so only the first can ping the replied user.
+  const laterVia = ({ trigger, via, channel }) =>
+    (trigger === TRIGGERS.COMMAND ? { type: 'followUp', interaction: via.interaction } : { type: 'channel', channel });
+
+  const send = async ({ via, persona, guild, part }) => {
+    try {
+      return await delivery.deliver({
+        via, persona, guild, content: part.content, gifLinks: part.gifLinks,
+      });
+    } catch (error) {
+      throw markDelivery(error);
+    }
+  };
+
+  const deliverPart = async (request, via, part) => {
+    const { persona, guild, target, trigger } = request;
+    const message = await send({ via, persona, guild, part });
+    record({ message, text: part.text, persona, target, trigger });
+    return message;
+  };
+
+  const deliverLater = async (request, part, typing) => {
+    typing.pulse();
+    await clock.sleep(burstDelay(part.text, config.burst));
+    return deliverPart(request, laterVia(request), part);
+  };
+
+  // A failure after the first part is logged and ends the burst; the reply already went out.
+  const deliverRest = async (request, parts, typing) => {
+    const messages = [];
+    try {
+      for (const part of parts) messages.push(await deliverLater(request, part, typing));
+    } catch (error) {
+      logger.error(`Could not deliver a later part of the burst (${request.trigger}):`, error);
+    }
+    return messages;
+  };
+
+  const deliverAll = async (request, parts, typing) => {
+    const [first, ...rest] = parts;
+    const message = await deliverPart(request, request.via, first);
+    request.onDelivered?.();
+    return [message, ...await deliverRest(request, rest, typing)];
+  };
+
+  const respond = async (request) => {
+    const typing = beginTyping(request);
+    try {
+      const context = await contextFor(request);
+      const { response, parts } = await composer.compose({
+        persona: request.persona, target: request.target, context,
+      });
+      const messages = await deliverAll(request, parts, typing);
+      return { response, messages };
+    } finally {
+      typing.stop();
+    }
   };
 
   return { respond };

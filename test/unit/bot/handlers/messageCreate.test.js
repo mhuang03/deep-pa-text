@@ -53,7 +53,8 @@ const setup = ({
         events.push(['respond', request]);
         if (failAt === 'respond') throw new Error('respond failed');
         if (deliveryFailure) throw Object.assign(new Error('send failed'), { stage: 'delivery' });
-        return { response: 'raw', message: { id: 'sent' } };
+        request.onDelivered?.();
+        return { response: 'raw', messages: [{ id: 'sent' }] };
       },
     },
     logger: { info: (m) => logs.info.push(m), warn: (...a) => logs.warn.push(a), error: (...a) => logs.error.push(a) },
@@ -74,15 +75,19 @@ test('replies in order: human noted before ingest, bot claimed before generation
   const message = discord.makeMessage({ content: 'hello there', timestamp: 4242 });
   const record = toMessageRecord(message);
   await handler(message);
-  assert.deepEqual(events, [
+  assert.deepEqual(events.map((e) => (e[0] === 'respond' ? 'respond' : e)), [
     ['noteHuman', { timestamp: 4242, author: 'alice' }],
     ['ingest', { repliesToBot: false }], 'filter', 'decide', 'noteBot', 'pick',
-    ['respond', {
-      trigger: 'auto', persona: 'bob', target: record, guild: message.guild, channel: message.channel,
-      via: { type: 'reply', message },
-    }],
+    'respond',
     ['noteReply', { resetMisses: true }], 'noteBot',
   ]);
+  const [, request] = events.find((e) => e[0] === 'respond');
+  const { onDelivered, ...rest } = request;
+  assert.equal(typeof onDelivered, 'function');
+  assert.deepEqual(rest, {
+    trigger: 'auto', persona: 'bob', target: record, guild: message.guild, channel: message.channel,
+    via: { type: 'reply', message },
+  });
   assert.equal(logs.info.length, 1);
   assert.match(logs.info[0], /alice: hello there\n {2}\[filter kept: yes\][\s\S]*\[REPLY\] bob: raw$/);
 });
