@@ -89,6 +89,14 @@ export const createVectorStore = ({ client, embeddingFunction, config }) => {
     await upsertReplies(replies, qualifying, parents);
   };
 
+  const getEmbeddings = async (ids) => {
+    if (ids.length === 0) return new Map();
+    const { messages } = await collections();
+    const found = await messages.get({ ids, include: ['embeddings'] });
+    const entries = found.ids.map((id, i) => [id, found.embeddings?.[i]]);
+    return new Map(entries.filter(([, embedding]) => hasEmbedding(embedding)));
+  };
+
   const query = async (name, { embedding, text, where, limit }) => {
     const input = buildQueryInput({ embedding, text });
     const target = (await collections())[name];
@@ -99,5 +107,5 @@ export const createVectorStore = ({ client, embeddingFunction, config }) => {
     return toHits(result);
   };
 
-  return { connect, embed, upsertMessages, query };
+  return { connect, embed, upsertMessages, query, getEmbeddings };
 };

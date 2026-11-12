@@ -15,8 +15,8 @@ const PREVIOUS_FILTERED = `
   LIMIT 1
 `;
 const FILTERED_EXISTS = 'SELECT 1 as id_exists FROM filtered_messages WHERE id = ?';
-const RANDOM_CONTENTS = `
-  SELECT content FROM filtered_messages
+const RANDOM_MESSAGES = `
+  SELECT id, content FROM filtered_messages
   WHERE author = ? AND (? IS NULL OR timestamp < ?)
   ORDER BY RANDOM()
   LIMIT ?
@@ -27,7 +27,12 @@ const LATEST_WITH_REFERENCE = `
   ORDER BY m.timestamp DESC
   LIMIT ?
 `;
-const PARENT_CHUNK_SIZE = 500;
+const CHUNK_SIZE = 500;
+const countsSql = (count) => `
+  SELECT content, COUNT(*) AS times FROM filtered_messages
+  WHERE author = ? AND timestamp < ? AND content IN (${Array(count).fill('?').join(', ')})
+  GROUP BY content
+`;
 const parentsSql = (count) => `
   SELECT m.id AS id, r.content AS content FROM filtered_messages m
   JOIN filtered_messages r ON m.reference = r.id
@@ -44,7 +49,7 @@ export const createMessageStore = ({ db, config }) => {
   const insertFilteredSql = db.prepare(INSERT_FILTERED);
   const previousSql = db.prepare(PREVIOUS_FILTERED);
   const existsSql = db.prepare(FILTERED_EXISTS);
-  const randomSql = db.prepare(RANDOM_CONTENTS);
+  const randomSql = db.prepare(RANDOM_MESSAGES);
   const latestRawSql = db.prepare(latestFrom('messages'));
   const latestFilteredSql = db.prepare(latestFrom('filtered_messages'));
   const latestGifSql = db.prepare(latestFrom('filtered_messages', 'WHERE has_gif = 1'));
@@ -79,13 +84,13 @@ export const createMessageStore = ({ db, config }) => {
     return { ...record, reference, hasGif };
   };
 
-  const randomContents = ({ author, before = null, limit }) =>
-    randomSql.all(author, before, before, limit).map((row) => row.content);
+  const randomMessages = ({ author, before = null, limit }) =>
+    randomSql.all(author, before, before, limit).map((row) => ({ id: row.id, content: row.content }));
 
   const chunksOf = (items) => {
     const chunks = [];
-    for (let i = 0; i < items.length; i += PARENT_CHUNK_SIZE) {
-      chunks.push(items.slice(i, i + PARENT_CHUNK_SIZE));
+    for (let i = 0; i < items.length; i += CHUNK_SIZE) {
+      chunks.push(items.slice(i, i + CHUNK_SIZE));
     }
     return chunks;
   };
@@ -100,11 +105,22 @@ export const createMessageStore = ({ db, config }) => {
     return parents;
   };
 
+  // Exact-content counts; contents never sent before the cutoff are absent from the map.
+  const countContents = ({ author, contents, before }) => {
+    const counts = new Map();
+    chunksOf(Array.from(new Set(contents))).forEach((chunk) => {
+      db.prepare(countsSql(chunk.length)).all(author, before, ...chunk)
+        .forEach((row) => counts.set(row.content, row.times));
+    });
+    return counts;
+  };
+
   return {
     insertRaw,
+    countContents,
     getParents,
     insertFiltered,
-    randomContents,
+    randomMessages,
     latestRaw: (limit) => latestRawSql.all(limit),
     latestFiltered: (limit) => latestFilteredSql.all(limit),
     latestWithReference: (limit) => latestRefSql.all(limit),

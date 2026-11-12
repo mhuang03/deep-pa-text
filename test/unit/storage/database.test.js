@@ -18,6 +18,12 @@ test('creates both tables and the timestamp index', () => {
   assert.ok(names(db, 'index').includes('idx_filtered_messages_timestamp'));
 });
 
+test('creates the author and content index for frequency counts, idempotently', () => {
+  const db = openDatabase(':memory:');
+  runMigrations(db);
+  assert.ok(names(db, 'index').includes('idx_filtered_messages_author_content'));
+});
+
 test('every migration descriptor is additive', () => {
   MIGRATIONS.forEach((m) => {
     if (m.sql) assert.match(m.sql.trim(), /^CREATE (TABLE|INDEX) IF NOT EXISTS/);

@@ -118,21 +118,40 @@ const seedMany = (store, n, author = 'a') => {
   for (let i = 0; i < n; i += 1) store.insertFiltered(msg(`${author}${i}`, author, i * 10));
 };
 
-test('randomContents respects author, before and limit', () => {
+test('randomMessages respects author, before and limit and returns id and content', () => {
   const { store } = setup();
   seedMany(store, 10, 'a');
   seedMany(store, 5, 'b');
-  assert.equal(store.randomContents({ author: 'a', limit: 4 }).length, 4);
-  const all = store.randomContents({ author: 'a', limit: 100 });
-  assert.equal(new Set(all).size, 10);
-  assert.ok(all.every((c) => c.startsWith('content a')));
-  const before = store.randomContents({ author: 'a', before: 30, limit: 100 });
-  assert.deepEqual(new Set(before), new Set(['content a0', 'content a1', 'content a2']));
+  assert.equal(store.randomMessages({ author: 'a', limit: 4 }).length, 4);
+  const all = store.randomMessages({ author: 'a', limit: 100 });
+  assert.equal(new Set(all.map((r) => r.id)).size, 10);
+  assert.ok(all.every((r) => r.content === `content ${r.id}` && r.id.startsWith('a')));
+  const before = store.randomMessages({ author: 'a', before: 30, limit: 100 });
+  assert.deepEqual(new Set(before.map((r) => r.id)), new Set(['a0', 'a1', 'a2']));
 });
 
-test('randomContents returns an empty array for an unknown author', () => {
+test('randomMessages returns an empty array for an unknown author', () => {
   const { store } = setup();
-  assert.deepEqual(store.randomContents({ author: 'nobody', limit: 5 }), []);
+  assert.deepEqual(store.randomMessages({ author: 'nobody', limit: 5 }), []);
+});
+
+test('countContents counts exact contents of the author before the cutoff', () => {
+  const { store } = setup();
+  [['1', 'a', 'lol', 10], ['2', 'a', 'lol', 20], ['3', 'a', 'LOL', 30], ['4', 'a', 'lol', 100],
+    ['5', 'b', 'lol', 10], ['6', 'a', 'other', 10]].forEach(([id, author, content, timestamp]) => {
+    store.insertFiltered(msg(id, author, timestamp, { content }));
+  });
+  const counts = store.countContents({ author: 'a', contents: ['lol', 'LOL', 'missing'], before: 100 });
+  assert.deepEqual(Object.fromEntries(counts), { lol: 2, LOL: 1 });
+});
+
+test('countContents handles no contents and more than one chunk of contents', () => {
+  const { store } = setup();
+  assert.equal(store.countContents({ author: 'a', contents: [], before: 10 }).size, 0);
+  const contents = Array.from({ length: 1100 }, (_, i) => `text ${i}`);
+  [0, 600, 1099].forEach((i) => store.insertFiltered(msg(`c${i}`, 'a', i, { content: contents[i] })));
+  const counts = store.countContents({ author: 'a', contents, before: 5000 });
+  assert.deepEqual([...counts.keys()].sort(), ['text 0', 'text 1099', 'text 600']);
 });
 
 test('latest queries return newest first and honour the limit', () => {

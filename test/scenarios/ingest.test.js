@@ -4,7 +4,8 @@ import { createWorld } from '../support/world.js';
 import { BASE_TIME } from '../support/fixtures.js';
 
 const T0 = BASE_TIME - 48 * 3_600_000;
-const FILLER_COUNT = 20;
+// Fills the over-fetched similar query (20 results x over-fetch factor 3) so the gif row stays out of it.
+const FILLER_COUNT = 60;
 
 const newWorld = async (t) => {
   const world = await createWorld();

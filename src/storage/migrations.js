@@ -48,4 +48,9 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS idx_bot_messages_timestamp ON bot_messages (timestamp)
 `,
   },
+  {
+    sql: `
+  CREATE INDEX IF NOT EXISTS idx_filtered_messages_author_content ON filtered_messages (author, content)
+`,
+  },
 ];

@@ -117,7 +117,7 @@ SQLite (`messages.db`):
 
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
 - `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
-- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null.
+- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
 
 Chroma:
 
@@ -128,14 +128,22 @@ Chroma:
 
 For a reply (`retrieveForReply`), four buckets are fetched, all restricted to the persona's messages older than the target message:
 
+Each fetch asks for `limit x retrieval.overFetchFactor` (3) candidates so that deduplication does not leave a bucket short; the buckets are cut back to these limits after deduplication.
+
 1. 10 nearest from `message_reply_embeddings` (their replies to similar messages), each paired with the message it answered: `messageStore.getParents` looks up the stored content of the reply's `reference`, giving `{ you, them }` (`them` is `null` when the row has no stored parent, including rows that exist only in Chroma)
 2. 20 nearest from `message_embeddings` (their own similar messages)
 3. 10 nearest from `message_embeddings` with `has_gif`
 4. 10 random rows from `filtered_messages`
 
-Buckets are deduplicated by exact content, with earlier buckets taking precedence. The reply bucket is rendered as JSON objects with `them` first (`{"them": ..., "you": ...}`, or `{"you": ...}` without a parent), and `them` is cut to `context.maxEntryChars` characters with `…`.
+Candidates are deduplicated greedily in bucket order (replies, similar, gifs, other), so an earlier bucket keeps a text and suppresses its variants in later buckets. Two texts are merged when their normalised keys are equal (NFKC, lowercase, whitespace collapsed, runs of three or more identical letters collapsed, leading and trailing punctuation stripped; GIF tokens are compared whole; digits are never collapsed), or when both keys are at least `retrieval.nearDuplicateMinChars` (12) characters and the cosine similarity of their embeddings is at least `retrieval.nearDuplicateThreshold` (0.95, a conservative tunable). Embeddings always come from `message_embeddings` (`vectorStore.getEmbeddings`), never from the reply collection, where rows carry their parent's embedding; if they cannot be loaded a warning is logged and only keys are compared. The reply bucket is rendered as JSON objects with `them` first (`{"them": ..., "you": ...}`, or `{"you": ...}` without a parent), and `them` is cut to `context.maxEntryChars` characters with `…`.
 
-`buildReplyPrompt` assembles the user message from ordered sections: the persona's username and real name, the recent channel transcript (omitted when empty), the target message naming its sender (`The user has just received this message from "<sender>": "<message>"`), then the four buckets. Sections are joined by a blank line.
+`buildReplyPrompt` assembles the user message from ordered sections: the persona's username and real name, the recent channel transcript (omitted when empty), the target message naming its sender (`The user has just received this message from "<sender>": "<message>"`), the four buckets, a frequent-phrases section and an avoid-repeats section. Sections are joined by a blank line.
+
+### Frequent phrases and recent bot output
+
+For every kept example the retriever sums `messageStore.countContents` (exact-content counts among the persona's earlier messages) over the spellings merged into it. Items sent at least `retrieval.frequentMinCount` (3) times, most frequent first and at most `retrieval.frequentLimit` (10), form the `frequent` list shown to the model as `{ text, times }`. Only spellings among the retrieved candidates are counted, so the number is a lower bound; the section is omitted when nothing qualifies.
+
+For replies and revives the generator also loads the last `retrieval.recentBotMessages` (10) rows of `bot_messages` (the bot serves a single channel, so no channel filter) and ends the prompt with them, newest first, asking the model not to repeat them. A failed load is logged and the section is left out; it is also left out when the bot has said nothing yet.
 
 ### Conversation context
 
@@ -145,7 +153,7 @@ Before composing a reply, the bot fetches up to `context.transcriptLimit` (20) m
 
 Retrieval for a short target (fewer than `retrieval.shortMessageChars`, 25, characters after cleaning) embeds the last `retrieval.queryContextMessages` (2) transcript lines followed by the target, so a message like "why" still matches something; longer targets are embedded alone. Persona selection still queries with the target only.
 
-For a revive (`retrieveForRevive`), the prompt is just 50 random messages from the persona (`buildRevivePrompt`). No channel context is included (see spec 20).
+For a revive (`retrieveForRevive`), the prompt is 50 random messages from the persona (150 are fetched and deduplicated by normalised key only) followed by the avoid-repeats section (`buildRevivePrompt`). No channel context is included (see spec 20).
 
 ## Filtering
 

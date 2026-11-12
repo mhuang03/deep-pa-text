@@ -8,6 +8,9 @@ const EXAMPLES_INTRO = {
   past: 'Here are some examples of messages that the user has sent in the past:',
 };
 
+const FREQUENT_INTRO = 'The user sends some of these messages often. Number of times they have sent each (use them only where they fit):';
+const AVOID_INTRO = 'The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:';
+
 export const identity = ({ author, name }) =>
   `The user you are emulating has username "${author}", and their real name is "${name}".`;
 
@@ -30,6 +33,16 @@ export const replyExamples = ({ buckets, maxEntryChars }) =>
 export const similarExamples = ({ buckets }) => examples(EXAMPLES_INTRO.similar, buckets.similar);
 export const gifExamples = ({ buckets }) => examples(EXAMPLES_INTRO.gifs, buckets.gifs);
 export const otherExamples = ({ buckets }) => examples(EXAMPLES_INTRO.other, buckets.other);
+export const frequentPhrases = ({ buckets }) => {
+  if (!buckets.frequent || buckets.frequent.length === 0) return null;
+  return `${FREQUENT_INTRO}\n${JSON.stringify(buckets.frequent)}`;
+};
+
+export const avoidRepeats = ({ recentBotMessages }) => {
+  if (!recentBotMessages || recentBotMessages.length === 0) return null;
+  return `${AVOID_INTRO}\n${JSON.stringify(recentBotMessages)}`;
+};
+
 export const pastExamples = ({ examples: list }) => examples(EXAMPLES_INTRO.past, list);
 
 export const assemble = (sections, ctx) =>

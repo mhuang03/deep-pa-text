@@ -71,7 +71,24 @@ const buildRetrieval = () => ({
   likelyRepliers: 20,
   shortMessageChars: 25,
   queryContextMessages: 2,
+  overFetchFactor: 3,
+  nearDuplicateThreshold: 0.95,
+  nearDuplicateMinChars: 12,
+  frequentMinCount: 3,
+  frequentLimit: 10,
+  recentBotMessages: 10,
 });
+
+export const assertRetrieval = (retrieval) => {
+  if (!(Number.isInteger(retrieval.overFetchFactor) && retrieval.overFetchFactor >= 1)) {
+    throw new Error('retrieval.overFetchFactor must be an integer of at least 1');
+  }
+  const threshold = retrieval.nearDuplicateThreshold;
+  if (!(Number.isFinite(threshold) && threshold > 0 && threshold <= 1)) {
+    throw new Error('retrieval.nearDuplicateThreshold must be a number in (0, 1]');
+  }
+  return retrieval;
+};
 
 export const assertPersona = (persona) => {
   const { recencyHalfLifeMs, minRecencyWeight } = persona;
@@ -142,7 +159,7 @@ const buildConfig = (env) => ({
   storage: buildStorage(),
   chroma: buildChroma(env),
   embedding: buildEmbedding(),
-  retrieval: buildRetrieval(),
+  retrieval: assertRetrieval(buildRetrieval()),
   persona: buildPersona(),
   llm: buildLlm(env),
   gifs: buildGifs(env),

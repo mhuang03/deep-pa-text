@@ -30,9 +30,15 @@ const query = (author, content) => msg('q', author, content, QUERY_TIME);
 
 const sorted = (xs) => [...xs].sort();
 
-// 20 Chroma-only rows that all outrank unrelated SQLite rows for the query 'hello world'.
+// Chroma-only rows that all outrank unrelated rows for the query 'hello world'. There are
+// enough of them (limit x over-fetch factor) to fill the over-fetched similar query completely.
+const FILLER_COUNT = 60;
+const assertAreFillers = (similar, fillers) => {
+  assert.equal(similar.length, 20);
+  similar.forEach((text) => assert.ok(fillers.includes(text), text));
+};
 const seedFillers = (world, author = 'alice') => {
-  const contents = Array.from({ length: 20 }, (_, i) => `hello world filler${String(i).padStart(2, '0')}`);
+  const contents = Array.from({ length: FILLER_COUNT }, (_, i) => `hello world filler${String(i).padStart(2, '0')}`);
   embeddings(world).seed(
     contents.map((document, i) => ({ id: `f${i}`, document, metadata: meta(author, T0 + i) })),
   );
@@ -50,7 +56,7 @@ test('semanticSearch resolves to reply, similar, gif and other buckets in that o
 
   const [reply, similar, gif, other] = await world.subject.semanticSearch('alice', query('alice', 'hello world'));
   assert.deepEqual(reply, ['reply bucket text']);
-  assert.deepEqual(sorted(similar), sorted(fillers));
+  assertAreFillers(similar, fillers);
   assert.deepEqual(gif, ['purple cow song']);
   assert.deepEqual(other, ['orange tree story']);
 });
@@ -93,9 +99,9 @@ test('semanticSearch queries the collections with the documented limits and filt
   const [reply] = replyEmbeddings(world).queries;
   assert.equal(embeddings(world).queries.length, 2);
   assert.equal(replyEmbeddings(world).queries.length, 1);
-  assert.equal(reply.nResults, 10);
-  assert.equal(similar.nResults, 20);
-  assert.equal(gif.nResults, 10);
+  assert.equal(reply.nResults, 30);
+  assert.equal(similar.nResults, 60);
+  assert.equal(gif.nResults, 30);
   assert.ok(gif.where.$and.some((clause) => clause.has_gif === true));
   assert.ok(!similar.where.$and.some((clause) => 'has_gif' in clause));
 });
@@ -105,8 +111,7 @@ test('semanticSearch limits the similar bucket to the 20 nearest rows', async (t
   const fillers = seedFillers(world);
   embeddings(world).seed([{ id: 'far', document: 'unrelated words', metadata: meta('alice', T0) }]);
   const [, similar] = await world.subject.semanticSearch('alice', query('alice', 'hello world'));
-  assert.equal(similar.length, 20);
-  assert.deepEqual(sorted(similar), sorted(fillers));
+  assertAreFillers(similar, fillers);
 });
 
 test('semanticSearch limits the other bucket to 10 rows', async (t) => {
@@ -148,7 +153,7 @@ test('semanticSearch gif bucket only contains records with has_gif true', async 
     { id: 's2', document: 'second gif clip', metadata: meta('alice', T0 + 1020, { has_gif: true }) },
   ]);
   const [, similar, gif] = await world.subject.semanticSearch('alice', query('alice', 'hello world'));
-  assert.deepEqual(sorted(similar), sorted(fillers));
+  assertAreFillers(similar, fillers);
   assert.deepEqual(sorted(gif), ['cat dance clip', 'second gif clip']);
 });
 

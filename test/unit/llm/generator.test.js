@@ -8,7 +8,9 @@ import { loadConfig } from '../../../src/config.js';
 const config = loadConfig({});
 const buckets = { replies: [{ you: 'r', them: 'q' }], similar: ['s1', 's2'], gifs: ['g'], other: ['o'] };
 
-const setup = ({ retrieverError = null, chatError = null } = {}) => {
+const setup = ({ retrieverError = null, chatError = null, recent = [], recentError = null } = {}) => {
+  const warnings = [];
+  const recentCalls = [];
   const calls = { chat: [], reply: [], revive: [] };
   const chatClient = {
     complete: async (req) => {
@@ -29,7 +31,16 @@ const setup = ({ retrieverError = null, chatError = null } = {}) => {
     },
   };
   const userDirectory = { nameOf: (u) => ({ alice: 'Alice Example' })[u] };
-  return { calls, generator: createGenerator({ chatClient, retriever, userDirectory, config }) };
+  const botMessageStore = {
+    recent: (args) => {
+      recentCalls.push(args);
+      if (recentError) throw recentError;
+      return recent;
+    },
+  };
+  const logger = { warn: (line) => warnings.push(line) };
+  const generator = createGenerator({ chatClient, retriever, userDirectory, botMessageStore, config, logger });
+  return { calls, warnings, recentCalls, generator };
 };
 const record = { author: 'bob', content: 'hello', timestamp: 5 };
 
@@ -98,6 +109,7 @@ const setupWith = (completion) => {
     chatClient: { complete: async () => completion },
     retriever: { retrieveForReply: async () => buckets, retrieveForRevive: async () => [] },
     userDirectory: { nameOf: () => 'Alice Example' },
+    botMessageStore: { recent: () => [] },
     config,
   });
   return generator;
@@ -113,4 +125,37 @@ test('throws when the sanitised response is empty', async () => {
   const generator = setupWith('  "" ');
   await assert.rejects(generator.generateReply('alice', record), /LLM returned an empty response/);
   await assert.rejects(generator.generateRevive('alice'), /LLM returned an empty response/);
+});
+
+const RECENT = [{ content: 'newest bot line' }, { content: 'older bot line' }];
+
+test('replies and revives pass the recent bot messages, newest first, into the prompt', async () => {
+  const { calls, recentCalls, generator } = setup({ recent: RECENT });
+  await generator.generateReply('alice', record);
+  await generator.generateRevive('alice');
+  assert.deepEqual(recentCalls, [{ limit: config.retrieval.recentBotMessages }, { limit: config.retrieval.recentBotMessages }]);
+  const recentBotMessages = ['newest bot line', 'older bot line'];
+  assert.equal(calls.chat[0].user, buildReplyPrompt({
+    author: 'alice', name: 'Alice Example', message: 'hello', messageAuthor: 'bob', buckets, transcript: [],
+    timeZone: config.context.timeZone, recentBotMessages,
+  }));
+  assert.equal(calls.chat[1].user, buildRevivePrompt({
+    author: 'alice', name: 'Alice Example', examples: ['x', 'y'], recentBotMessages,
+  }));
+  assert.match(calls.chat[1].user, /recently sent these messages[^\n]*\n\["newest bot line","older bot line"\]$/);
+});
+
+test('a failure to load recent bot messages is logged and treated as none', async () => {
+  const { calls, warnings, generator } = setup({ recentError: new Error('db locked') });
+  assert.equal(await generator.generateReply('alice', record), 'raw response');
+  assert.equal(await generator.generateRevive('alice'), 'raw response');
+  assert.equal(warnings.length, 2);
+  assert.match(warnings[0], /db locked/);
+  assert.ok(!calls.chat[0].user.includes('recently sent'));
+});
+
+test('no bot messages yet means no avoid-repeats section', async () => {
+  const { calls, generator } = setup();
+  await generator.generateReply('alice', record);
+  assert.ok(!calls.chat[0].user.includes('recently sent'));
 });

@@ -93,3 +93,15 @@ Here are examples of how the user replied to messages similar to the one they ju
   assert.ok(out.startsWith(expectedHead), out);
   assert.equal(out.split('\n\n').length, 7);
 });
+
+test('frequent phrases follow the other examples and avoid-repeats comes last in both prompts', () => {
+  const buckets = { replies: [], similar: ['s'], gifs: [], other: ['o'], frequent: [{ text: 'lol', times: 3 }] };
+  const reply = buildReplyPrompt({
+    author: 'a', name: 'A', message: 'm', messageAuthor: 'b', buckets, transcript: [], recentBotMessages: ['bot'],
+  });
+  const at = (text) => reply.indexOf(text);
+  assert.ok(at('["o"]') < at('sends some of these messages often'));
+  assert.ok(at('sends some of these messages often') < at('recently sent these messages'));
+  assert.ok(reply.endsWith('["bot"]'));
+  assert.ok(buildRevivePrompt({ author: 'a', name: 'A', examples: ['x'], recentBotMessages: ['bot'] }).endsWith('["bot"]'));
+});

@@ -58,26 +58,32 @@ const buildVectorStore = ({ config, vendor }) => {
   return createVectorStore({ client, embeddingFunction, config });
 };
 
-const buildGenerator = ({ config, vendor, retriever, userDirectory }) => {
+const buildGenerator = ({
+  config, vendor, retriever, userDirectory, botMessageStore, logger,
+}) => {
   const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
   const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
   const chatClient = createChatClient({ client, config });
-  return createGenerator({ chatClient, retriever, userDirectory, config });
+  return createGenerator({
+    chatClient, retriever, userDirectory, botMessageStore, config, logger,
+  });
 };
 
-const buildCore = ({ config, vendor, data, clock }) => {
+const buildCore = ({ config, vendor, data, clock, logger }) => {
   const db = openDatabase(config.storage.databasePath);
   const messageStore = createMessageStore({ db, config });
   const botMessageStore = createBotMessageStore({ db });
   const vectorStore = buildVectorStore({ config, vendor });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
   const ingest = createIngestService({ messageStore, vectorStore, messageFilter });
-  const retriever = createRetriever({ vectorStore, messageStore, config });
+  const retriever = createRetriever({ vectorStore, messageStore, config, logger });
   const userDirectory = buildUserDirectory(data.users);
   const personaSelector = createPersonaSelector({
     vectorStore, users: data.users, random: clock.random, config,
   });
-  const generator = buildGenerator({ config, vendor, retriever, userDirectory });
+  const generator = buildGenerator({
+    config, vendor, retriever, userDirectory, botMessageStore, logger,
+  });
   return {
     db, messageStore, botMessageStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
     personaSelector, generator,
@@ -105,7 +111,7 @@ const buildHandlers = ({ config, data, clock, logger, client, core, responder, a
 export const buildContainer = ({
   config, vendor, data, clock = defaultClock(), logger = createLogger(),
 }) => {
-  const core = buildCore({ config, vendor, data, clock });
+  const core = buildCore({ config, vendor, data, clock, logger });
   const client = createDiscordClient(vendor.Client);
   const gifResolver = buildGifResolver({ config, vendor, clock, logger });
   const authorEmbeds = createAuthorEmbeds({ config, logger });

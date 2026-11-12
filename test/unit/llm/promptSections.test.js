@@ -64,3 +64,21 @@ test('reply examples put them first, omit a null them, and cut long them', () =>
   });
   assert.ok(text.endsWith(':\n[{"them":"abcde…","you":"a"},{"you":"b"}]'), text);
 });
+
+test('frequentPhrases is omitted when empty or missing and otherwise lists the JSON', () => {
+  assert.equal(sections.frequentPhrases({ buckets: { frequent: [] } }), null);
+  assert.equal(sections.frequentPhrases({ buckets: {} }), null);
+  assert.equal(
+    sections.frequentPhrases({ buckets: { frequent: [{ text: 'lol', times: 6 }] } }),
+    'The user sends some of these messages often. Number of times they have sent each (use them only where they fit):\n[{"text":"lol","times":6}]',
+  );
+});
+
+test('avoidRepeats is omitted when empty or missing and otherwise lists the JSON', () => {
+  assert.equal(sections.avoidRepeats({ recentBotMessages: [] }), null);
+  assert.equal(sections.avoidRepeats({}), null);
+  assert.equal(
+    sections.avoidRepeats({ recentBotMessages: ['hi', 'yo "x"'] }),
+    'The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:\n["hi","yo \\"x\\""]',
+  );
+});

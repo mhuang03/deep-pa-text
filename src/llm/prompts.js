@@ -16,9 +16,10 @@ Do not include any URLs in your response, even if the example responses include 
 const REPLY_SECTIONS = [
   sections.identity, sections.transcript, sections.target,
   sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
+  sections.frequentPhrases, sections.avoidRepeats,
 ];
 
-const REVIVE_SECTIONS = [sections.identity, sections.pastExamples];
+const REVIVE_SECTIONS = [sections.identity, sections.pastExamples, sections.avoidRepeats];
 
 export const buildReplyPrompt = (ctx) => sections.assemble(REPLY_SECTIONS, ctx);
 

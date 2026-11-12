@@ -192,3 +192,31 @@ test('query rejects an unknown collection name', async () => {
   const { store } = await seeded();
   await assert.rejects(store.query('nope', { text: 'x', limit: 1 }), /Unknown collection/);
 });
+
+test('getEmbeddings returns messages-collection embeddings keyed by id, omitting unknown ids', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  fake.state.collection('message_embeddings').seed([{ id: '1', document: 'hello there' }]);
+  const found = await store.getEmbeddings(['1', 'nope']);
+  assert.deepEqual([...found.keys()], ['1']);
+  assert.deepEqual(found.get('1'), fakeEmbed('hello there'));
+});
+
+test('getEmbeddings makes no Chroma call for no ids', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  const messages = fake.state.collection('message_embeddings');
+  messages.get = () => { throw new Error('must not be called'); };
+  assert.equal((await store.getEmbeddings([])).size, 0);
+});
+
+test('getEmbeddings asks for the embeddings of all ids in one get', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  const messages = fake.state.collection('message_embeddings');
+  const calls = [];
+  const original = messages.get.bind(messages);
+  messages.get = (args) => { calls.push(args); return original(args); };
+  await store.getEmbeddings(['1', '2']);
+  assert.deepEqual(calls, [{ ids: ['1', '2'], include: ['embeddings'] }]);
+});

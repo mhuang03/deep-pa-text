@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, assertPersona, loadConfig } from '../../src/config.js';
+import { DEFAULTS, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -32,6 +32,8 @@ const EXPECTED_DEFAULTS = {
   retrieval: {
     replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 50, likelyRepliers: 20,
     shortMessageChars: 25, queryContextMessages: 2,
+    overFetchFactor: 3, nearDuplicateThreshold: 0.95, nearDuplicateMinChars: 12, frequentMinCount: 3,
+    frequentLimit: 10, recentBotMessages: 10,
   },
   context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
@@ -124,5 +126,16 @@ test('assertPersona rejects an invalid half-life or recency floor', () => {
   });
   [0, -0.1, 1.01, NaN, undefined].forEach((minRecencyWeight) => {
     assert.throws(() => assertPersona({ ...valid, minRecencyWeight }), /minRecencyWeight/);
+  });
+});
+
+test('assertRetrieval rejects an invalid over-fetch factor or near-duplicate threshold', () => {
+  const valid = { overFetchFactor: 1, nearDuplicateThreshold: 1 };
+  assert.equal(assertRetrieval(valid), valid);
+  [0, -1, 1.5, NaN, undefined].forEach((overFetchFactor) => {
+    assert.throws(() => assertRetrieval({ ...valid, overFetchFactor }), /overFetchFactor/);
+  });
+  [0, -0.1, 1.01, NaN, undefined].forEach((nearDuplicateThreshold) => {
+    assert.throws(() => assertRetrieval({ ...valid, nearDuplicateThreshold }), /nearDuplicateThreshold/);
   });
 });
