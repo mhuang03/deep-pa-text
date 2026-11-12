@@ -91,11 +91,13 @@ export const createWebhookDelivery = ({ webhooks, memberProfiles, fallback, conf
     return message;
   };
 
+  // deferReply sets the ephemeral flag; editReply cannot change it.
   const placeholder = async ({ persona }) => ({
     content: `Replying as ${persona}…`,
-    flags: MessageFlags.Ephemeral,
     allowedMentions: SAFE_MENTIONS,
   });
 
-  return { deliver, placeholder };
+  const deferOptions = () => ({ flags: MessageFlags.Ephemeral });
+
+  return { deliver, placeholder, deferOptions };
 };

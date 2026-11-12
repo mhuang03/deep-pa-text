@@ -20,6 +20,8 @@ test('formats the received line like the legacy report', () => {
 test('formats no-reply reasons', () => {
   assert.equal(formatNotReplyable(), '    [NOREPLY: not replyable]');
   assert.equal(formatNoReply({ reason: 'rate-limited' }), '    [NOREPLY: rate limited]');
+  assert.equal(formatNoReply({ reason: 'in-flight' }), '    [NOREPLY: another reply is in flight]');
+  assert.equal(formatNoReply({ reason: 'cooldown' }), '    [NOREPLY: cooling down after a failed reply]');
   assert.equal(formatNoReply({ reason: 'random', roll: 0.456, chance: 0.1 }), '    [NOREPLY: random 0.46 > 0.1]');
 });
 

@@ -6,11 +6,14 @@ import { loadConfig } from '../../../../src/config.js';
 import { createFakeDiscord } from '../../../support/fakes/discord.js';
 
 const setup = ({
-  filtered = {}, decision = { reply: true, reason: 'accepted' }, failAt = null, deliveryFailure = null,
+  filtered = {}, decision = null, failAt = null, deliveryFailure = null,
   parent = null, chain = null, chainDecision = { reply: true, reason: 'chain-guaranteed' },
-  chainTarget,
+  chainTarget, config = loadConfig({}),
 } = {}) => {
   const events = [];
+  const verdict = decision ?? {
+    reply: true, reason: 'accepted', release: () => events.push('release'),
+  };
   const logs = { info: [], warn: [], error: [] };
   const step = (name, value) => async (...args) => {
     events.push(name);
@@ -18,10 +21,13 @@ const setup = ({
     return typeof value === 'function' ? value(...args) : value;
   };
   const deps = {
-    config: loadConfig({}),
+    config,
     activity: {
       noteHuman: (arg) => events.push(['noteHuman', arg]),
-      noteBot: () => events.push('noteBot'),
+      noteBot: () => {
+        events.push('noteBot');
+        return () => events.push('undo');
+      },
     },
     ingest: {
       recordMessage: async (record, options) => {
@@ -40,12 +46,13 @@ const setup = ({
     chainBuilder: { build: (target, p) => (events.push(['build', target, p]), chain) },
     chainPolicy: {
       decide: (c) => (events.push(['chainDecide', c]), chainDecision),
-      begin: () => events.push('begin'),
+      begin: (arg) => events.push(['begin', arg]),
       end: () => events.push('end'),
     },
     replyPolicy: {
-      decide: () => (events.push('decide'), decision),
+      decide: () => (events.push('decide'), verdict),
       noteReply: (arg) => events.push(['noteReply', arg]),
+      noteFailure: () => events.push('noteFailure'),
     },
     personaSelector: { pickReplier: step('pick', 'bob') },
     responder: {
@@ -79,7 +86,7 @@ test('replies in order: human noted before ingest, bot claimed before generation
     ['noteHuman', { timestamp: 4242, author: 'alice' }],
     ['ingest', { repliesToBot: false, tolerateVectorErrors: true }], 'filter', 'decide', 'noteBot', 'pick',
     'respond',
-    ['noteReply', { resetMisses: true }], 'noteBot',
+    ['noteReply', { resetMisses: true }], 'noteBot', 'release',
   ]);
   const [, request] = events.find((e) => e[0] === 'respond');
   const { onDelivered, ...rest } = request;
@@ -99,11 +106,13 @@ test('noteHuman runs synchronously before the first await', () => {
   return pending;
 });
 
-test('a delivery failure is logged once, arms the rate limit without resetting misses, and keeps the claim', async () => {
+test('a delivery failure is logged once, arms the rate limit without a failure cooldown, undoes activity and releases', async () => {
   const { handler, events, logs, discord } = setup({ deliveryFailure: true });
   await handler(discord.makeMessage());
   assert.deepEqual(events.filter((e) => Array.isArray(e) && e[0] === 'noteReply'), [['noteReply', { resetMisses: false }]]);
   assert.equal(events.filter((e) => e === 'noteBot').length, 1);
+  assert.equal(events.includes('noteFailure'), false);
+  assert.deepEqual(events.slice(-2), ['undo', 'release']);
   assert.equal(logs.error.length, 1);
   assert.match(logs.error[0][1].message, /send failed/);
   assert.equal(logs.info.length, 0);
@@ -133,18 +142,34 @@ test('ingest failure is logged, nothing else runs, and the human stays noted', a
   assert.equal(logs.error.length, 1);
 });
 
-test('generation failure keeps the bot claim, arms no rate limit and logs', async () => {
+test('generation failure undoes the activity claim, starts the failure cooldown, releases and logs', async () => {
   const { handler, events, logs, discord } = setup({ failAt: 'respond' });
   await handler(discord.makeMessage());
-  assert.deepEqual(events.slice(-3).map((e) => (Array.isArray(e) ? e[0] : e)), ['noteBot', 'pick', 'respond']);
+  assert.deepEqual(events.slice(-5).map((e) => (Array.isArray(e) ? e[0] : e)), ['pick', 'respond', 'undo', 'noteFailure', 'release']);
   assert.equal(events.some((e) => Array.isArray(e) && e[0] === 'noteReply'), false);
   assert.equal(logs.error.length, 1);
 });
 
-test('persona selection failure is logged and never throws', async () => {
-  const { handler, logs, discord } = setup({ failAt: 'pick' });
+test('persona selection failure is logged, never throws, and counts as a failure', async () => {
+  const { handler, events, logs, discord } = setup({ failAt: 'pick' });
   await handler(discord.makeMessage());
   assert.equal(logs.error.length, 1);
+  assert.deepEqual(events.slice(-3), ['undo', 'noteFailure', 'release']);
+});
+
+test('logs the in-flight and cooldown no-replies without claiming activity', async () => {
+  for (const reason of ['in-flight', 'cooldown']) {
+    const { handler, events, logs, discord } = setup({ decision: { reply: false, reason } });
+    await handler(discord.makeMessage());
+    assert.match(logs.info[0], /\[NOREPLY: [a-z -]+\]$/);
+    assert.equal(events.includes('noteBot'), false);
+  }
+});
+
+test('a failure before decide releases nothing and cools nothing down', async () => {
+  const { handler, events, discord } = setup({ failAt: 'ingest' });
+  await handler(discord.makeMessage());
+  assert.equal(events.includes('release') || events.includes('noteFailure'), false);
 });
 
 const PARENT = { id: 'p1', persona: 'bob', content: 'earlier', reference: null };
@@ -209,6 +234,30 @@ test('the chain is released and the rate limit armed when delivery fails', async
   await handler(replyTo(discord));
   assert.deepEqual(events.slice(-2), [['noteReply', { resetMisses: false }], 'end']);
   assert.equal(logs.error.length, 1);
+});
+
+test('a chain failure notes no failure cooldown and claims no reply slot', async () => {
+  const { handler, events, discord } = setup({ parent: PARENT, chain: CHAIN, failAt: 'respond' });
+  await handler(replyTo(discord));
+  assert.equal(events.includes('noteFailure') || events.includes('release'), false);
+});
+
+test('begin and decide receive the author id', async () => {
+  const { handler, events, discord } = setup({ parent: PARENT, chain: CHAIN });
+  await handler(replyTo(discord, { authorId: 'user-zed' }));
+  const decide = events.find((e) => e[0] === 'chainDecide');
+  assert.equal(decide[1].userId, 'user-zed');
+  assert.equal(decide[1].botTurns, 2);
+  assert.deepEqual(events.find((e) => e[0] === 'begin'), ['begin', { userId: 'user-zed' }]);
+});
+
+test('with chains disabled the chain is never built nor decided and the normal flow runs', async () => {
+  const config = loadConfig({ CHAIN_REPLIES: 'false' });
+  const { handler, events, discord } = setup({ parent: PARENT, chain: CHAIN, config });
+  await handler(replyTo(discord));
+  assert.deepEqual(events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: true, tolerateVectorErrors: true }]);
+  assert.equal(events.some((e) => e === 'filterForChain' || e[0] === 'build' || e[0] === 'chainDecide'), false);
+  assert.ok(events.includes('decide'));
 });
 
 test('the chain is released and nothing is noted when generation fails', async () => {

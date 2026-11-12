@@ -28,25 +28,44 @@ export const createMessageCreateHandler = (deps) => {
     }
   };
 
+  // A failure before anything was delivered rolls the activity back and cools the policy down.
   const reply = async (message, target) => {
-    activity.noteBot();
-    const persona = await personaSelector.pickReplier(target);
-    // Armed on the first part, so a message arriving mid-burst cannot trigger a second reply.
-    const onDelivered = () => {
-      replyPolicy.noteReply({ resetMisses: true });
-      activity.noteBot();
-    };
-    const { response } = await respond(message, { trigger: TRIGGERS.AUTO, persona, target, onDelivered });
-    return formatReply({ persona, response });
+    const undo = activity.noteBot();
+    let delivered = false;
+    try {
+      const persona = await personaSelector.pickReplier(target);
+      // Armed on the first part, so a message arriving mid-burst cannot trigger a second reply.
+      const onDelivered = () => {
+        delivered = true;
+        replyPolicy.noteReply({ resetMisses: true });
+        activity.noteBot();
+      };
+      const { response } = await respond(message, { trigger: TRIGGERS.AUTO, persona, target, onDelivered });
+      return formatReply({ persona, response });
+    } catch (error) {
+      if (!delivered) undo();
+      if (error?.stage !== DELIVERY_STAGE) replyPolicy.noteFailure();
+      throw error;
+    }
+  };
+
+  // The slot is claimed by decide() and held until the whole attempt, burst included, is over.
+  const autoReply = async (message, target, decision) => {
+    try {
+      return await reply(message, target);
+    } finally {
+      decision.release();
+    }
   };
 
   // Replies in a thread with a bot message continue it as the same persona; they never reach the random policy.
   const chainReply = async (message, chain, target, lines) => {
     const { persona, botTurns } = chain;
-    const decision = chainPolicy.decide(chain);
+    const userId = message.author.id;
+    const decision = chainPolicy.decide({ ...chain, userId });
     const summary = formatChainDecision({ persona, botTurns, decision });
     if (!decision.reply) return logger.info(joinLines([...lines, summary]));
-    chainPolicy.begin();
+    chainPolicy.begin({ userId });
     try {
       const onDelivered = () => replyPolicy.noteReply({ resetMisses: false });
       const { response } = await respond(message, {
@@ -58,7 +77,9 @@ export const createMessageCreateHandler = (deps) => {
     }
   };
 
+  // With chains off, a reply to a bot message is an ordinary message.
   const buildChain = (record, parent) => {
+    if (!config.chain.enabled) return null;
     const target = parent && messageFilter.filterForChain(record);
     const chain = target && chainBuilder.build(target, parent);
     return chain ? { chain, target } : null;
@@ -76,7 +97,7 @@ export const createMessageCreateHandler = (deps) => {
     if (!target) return logger.info(joinLines([...lines, formatNotReplyable()]));
     const decision = replyPolicy.decide();
     if (!decision.reply) return logger.info(joinLines([...lines, formatNoReply(decision)]));
-    lines.push(await reply(message, target));
+    lines.push(await autoReply(message, target, decision));
     return logger.info(joinLines(lines));
   };
 

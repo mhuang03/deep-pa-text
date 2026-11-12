@@ -8,9 +8,17 @@ import {
 export const createGenerator = ({
   chatClient, retriever, userDirectory, botMessageStore, messageStore, burstProfile, config, logger,
 }) => {
+  // Output that sanitises to nothing is worth another completion; a failed chat client is not retried here.
   const complete = async (user, system = SYSTEM_PROMPT, turns = null) => {
     const request = turns ? { system, user, turns } : { system, user };
-    return postProcess(await chatClient.complete(request), { burst: config.burst });
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return postProcess(await chatClient.complete(request), { burst: config.burst });
+      } catch (error) {
+        if (!error.isEmptyOutput || attempt >= config.llm.postProcessRetries) throw error;
+        logger?.warn?.('Model output was empty after cleaning; requesting a new completion');
+      }
+    }
   };
 
   // A failed measurement is tolerated: the prompt just omits the burst section.

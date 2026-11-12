@@ -303,3 +303,60 @@ test('a chain reply gets the burst section too', async () => {
   await generator.generateReply('alice', record, { chain: { turns: [{ speaker: 'bob', content: 'hi', isPersona: false }] } });
   assert.match(calls.chat[0].user, /several short messages/);
 });
+
+const sequenced = (completions, postProcessRetries = 1) => {
+  let index = 0;
+  const calls = [];
+  const generator = createGenerator({
+    chatClient: {
+      complete: async (request) => {
+        calls.push(request);
+        const next = completions[Math.min(index++, completions.length - 1)];
+        if (next instanceof Error) throw next;
+        return next;
+      },
+    },
+    retriever: { retrieveForReply: async () => buckets, retrieveForRevive: async () => [] },
+    userDirectory: { nameOf: () => 'Alice Example' },
+    botMessageStore: { recent: () => [] },
+    messageStore: { randomStarters: () => [] },
+    burstProfile: { rateFor: () => 0 },
+    config: { ...config, llm: { ...config.llm, postProcessRetries } },
+    logger: { warn: () => {} },
+  });
+  return { generator, calls };
+};
+
+test('output that cleans to nothing is retried once and the second answer is used', async () => {
+  const { generator, calls } = sequenced(['""', 'a real answer']);
+  const result = await generator.generateReply('alice', record);
+  assert.equal(result.response, 'a real answer');
+  assert.equal(calls.length, 2);
+});
+
+test('a revive and a chain-less reply both retry empty output', async () => {
+  const { generator, calls } = sequenced(['<split>', 'second try']);
+  assert.equal((await generator.generateRevive('alice')).response, 'second try');
+  assert.equal(calls.length, 2);
+});
+
+test('empty output after the allowed retries throws the empty-response error', async () => {
+  const { generator, calls } = sequenced(['""']);
+  await assert.rejects(generator.generateReply('alice', record), /LLM returned an empty response/);
+  assert.equal(calls.length, 2);
+});
+
+test('postProcessRetries 0 never retries and 2 retries twice', async () => {
+  const none = sequenced(['""'], 0);
+  await assert.rejects(none.generator.generateReply('alice', record), /empty response/);
+  assert.equal(none.calls.length, 1);
+  const twice = sequenced(['""', '""', 'third time'], 2);
+  assert.equal((await twice.generator.generateReply('alice', record)).response, 'third time');
+  assert.equal(twice.calls.length, 3);
+});
+
+test('an exhausted chat client is not retried again, whatever its message says', async () => {
+  const { generator, calls } = sequenced([new Error('LLM returned an empty response')]);
+  await assert.rejects(generator.generateReply('alice', record), /empty response/);
+  assert.equal(calls.length, 1);
+});

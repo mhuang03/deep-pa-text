@@ -224,6 +224,7 @@ export const createFakeDiscord = () => {
     const replyFailer = createFailer();
     const editFailer = createFailer();
     const followUpFailer = createFailer();
+    const deferFailer = createFailer();
     const submit = {
       customId,
       user,
@@ -231,6 +232,9 @@ export const createFakeDiscord = () => {
       replies: [],
       edits: [],
       followUps: [],
+      // The options of each deferReply call, in order.
+      deferrals: [],
+      failDefer: deferFailer.arm,
       failFollowUps: followUpFailer.arm,
       failReply: replyFailer.arm,
       failEdits: editFailer.arm,
@@ -239,6 +243,10 @@ export const createFakeDiscord = () => {
       replyFailer.check();
       submit.replies.push(payload);
       return makeBotMessage(nextId(), payload, channel);
+    };
+    submit.deferReply = async (options) => {
+      deferFailer.check();
+      submit.deferrals.push(options);
     };
     submit.editReply = async (payload) => {
       editFailer.check();
@@ -289,14 +297,15 @@ export const createFakeDiscord = () => {
         pendingWaits.push(wait);
       });
     };
-    // `failReply` / `failEdits` are `{ error, times }` and arm the submission before any handler sees it.
+    // `failReply` / `failEdits` / `failDefer` are `{ error, times }` and arm the submission before any handler sees it.
     interaction.submit = async ({
       author, customId = interaction.modal?.custom_id, user: submitter = interaction.user,
-      failReply = null, failEdits = null,
+      failReply = null, failEdits = null, failDefer = null,
     }) => {
       const submitted = makeModalSubmit({ customId, user: submitter, author });
       if (failReply) submitted.failReply(failReply.error, failReply);
       if (failEdits) submitted.failEdits(failEdits.error, failEdits);
+      if (failDefer) submitted.failDefer(failDefer.error, failDefer);
       [...pendingWaits]
         .filter((wait) => !wait.filter || wait.filter(submitted))
         .forEach((wait) => {

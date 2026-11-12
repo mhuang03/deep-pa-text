@@ -141,7 +141,8 @@ test('the parts of a burst share one member lookup', async (t) => {
 test('two sends as the same user in quick succession share one lookup', async (t) => {
   const world = await newWorld(t);
   const target = { content: 'a replyable message' };
-  const [first, second] = [await world.openReplyCommand({ target }), await world.openReplyCommand({ target })];
+  const first = await world.openReplyCommand({ target, user: 'alice' });
+  const second = await world.openReplyCommand({ target, user: 'dave' });
   await Promise.all([first.submit({ author: 'bob' }), second.submit({ author: 'bob' })]);
   assert.equal(lookups(world).length, 1);
 });
@@ -149,9 +150,9 @@ test('two sends as the same user in quick succession share one lookup', async (t
 test('a send after the minimum interval looks the user up again', async (t) => {
   const world = await newWorld(t);
   const target = { content: 'a replyable message' };
-  await (await world.openReplyCommand({ target })).submit({ author: 'bob' });
+  await (await world.openReplyCommand({ target, user: 'alice' })).submit({ author: 'bob' });
   await world.advance(CHECK_GAP_MS);
-  await (await world.openReplyCommand({ target })).submit({ author: 'bob' });
+  await (await world.openReplyCommand({ target, user: 'dave' })).submit({ author: 'bob' });
   assert.equal(lookups(world).length, 2);
 });
 

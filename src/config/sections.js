@@ -17,6 +17,7 @@ export const buildDiscord = (env) => ({
   webhookName: 'deep-pa-text',
   webhookUsernameMax: 80,
   webhookReplyLink: true,
+  modalPreviewChars: 1000,
 });
 
 export const buildReply = (env) => ({
@@ -25,6 +26,7 @@ export const buildReply = (env) => ({
   escalateAfterMisses: 10,
   escalationStep: 0.05,
   override: parseBoolean(env, 'REPLY_OVERRIDE', false),
+  failureCooldownMs: 60000,
 });
 
 export const buildRevive = (env) => ({
@@ -39,6 +41,7 @@ export const buildRevive = (env) => ({
   starterGapMs: 3600000,
   starterSamples: 20,
   override: parseBoolean(env, 'REVIVE_OVERRIDE', false),
+  failureCooldownMs: 1800000,
 });
 
 export const buildFilter = () => ({

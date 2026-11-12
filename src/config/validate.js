@@ -12,11 +12,21 @@ export const assertLlm = (llm) => checkRules('llm', llm, {
   timeoutMs: above(0),
   maxRetries: integer(0),
   emptyRetries: integer(0),
+  postProcessRetries: integer(0),
 });
 
 export const assertReply = (reply) => checkRules('reply', reply, {
   probability: between(0, 1),
   minIntervalMs: atLeast(0),
+  failureCooldownMs: atLeast(0),
+});
+
+export const assertRevive = (revive) => checkRules('revive', revive, {
+  failureCooldownMs: atLeast(0),
+});
+
+export const assertDiscord = (discord) => checkRules('discord', discord, {
+  modalPreviewChars: integer(0),
 });
 
 export const assertFilter = (filter) => {

@@ -28,3 +28,7 @@ test('with bursts disabled the marker becomes a newline in one part', () => {
     response: 'a\nb', parts: ['a\nb'],
   });
 });
+
+test('the empty-output error is marked so the generator can retry it', () => {
+  assert.throws(() => postProcess('""', { burst }), (error) => error.isEmptyOutput === true);
+});

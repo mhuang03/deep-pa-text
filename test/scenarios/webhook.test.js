@@ -83,8 +83,8 @@ test('a webhook is created when none matches', async (t) => {
 test('two concurrent sends in a fresh channel create one webhook', async (t) => {
   const world = await newWorld(t);
   const target = { content: 'a replyable message' };
-  const first = await world.openReplyCommand({ target });
-  const second = await world.openReplyCommand({ target });
+  const first = await world.openReplyCommand({ target, user: 'alice' });
+  const second = await world.openReplyCommand({ target, user: 'dave' });
   await Promise.all([first.submit({ author: 'bob' }), second.submit({ author: 'bob' })]);
   assert.equal(hooks(world).creates.length, 1);
   assert.equal(hookSends(world).length, 2);
@@ -154,17 +154,19 @@ test('when both names are forbidden the message falls back to the embed form wit
   assert.equal(hooks(world).fetches, 0);
 });
 
-test('the reply command shows an ephemeral placeholder, sends via the webhook and edits the placeholder', async (t) => {
+test('the reply command defers ephemerally, shows a placeholder, sends via the webhook and confirms', async (t) => {
   const world = await newWorld(t);
   const command = await world.openReplyCommand({ target: { content: 'a replyable message' } });
   const submitted = await command.submit({ author: 'bob' });
-  assert.deepEqual(submitted.replies, [{
-    content: 'Replying as bob…', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
-  }]);
+  assert.deepEqual(submitted.deferrals, [{ flags: MessageFlags.Ephemeral }]);
+  assert.deepEqual(submitted.replies, []);
   const [payload] = hookSends(world);
   assert.equal(payload.username, 'bob-display');
   assert.ok(!payload.content.startsWith(REPLY_LINK_PREFIX));
-  assert.deepEqual(submitted.edits, [{ content: 'Sent as bob.', allowedMentions: { parse: [] } }]);
+  assert.deepEqual(submitted.edits, [
+    { content: 'Replying as bob…', allowedMentions: { parse: [] } },
+    { content: 'Sent as bob.', allowedMentions: { parse: [] } },
+  ]);
   assert.equal(botRows(world)[0].trigger, 'command');
 });
 
@@ -175,7 +177,7 @@ test('with the webhook failing the command persona message goes to the channel a
   const submitted = await command.submit({ author: 'bob' });
   assert.equal(world.discord.channel.sent.length, 1);
   assert.equal(world.discord.channel.sent[0].embeds.at(-1).data.author.name, 'bob');
-  assert.deepEqual(submitted.edits.map((e) => e.content), ['Sent as bob.']);
+  assert.deepEqual(submitted.edits.map((e) => e.content), ['Replying as bob…', 'Sent as bob.']);
   assert.equal(botRows(world).length, 1);
 });
 

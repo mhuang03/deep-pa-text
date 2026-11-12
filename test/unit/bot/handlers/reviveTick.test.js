@@ -9,6 +9,7 @@ const HOUR = 3600000;
 
 const setup = ({ env = {}, activity = { lastMessageTime: BASE_TIME - 4 * HOUR, lastWasBot: false }, failCompose = false } = {}) => {
   const events = [];
+  const time = { now: BASE_TIME };
   const logs = { info: [], error: [] };
   const discord = createFakeDiscord();
   const client = {
@@ -18,7 +19,13 @@ const setup = ({ env = {}, activity = { lastMessageTime: BASE_TIME - 4 * HOUR, l
   const deps = {
     client,
     config: loadConfig(env),
-    activity: { get: () => activity, noteBot: () => events.push('noteBot') },
+    activity: {
+      get: () => activity,
+      noteBot: () => {
+        events.push('noteBot');
+        return () => events.push('undo');
+      },
+    },
     personaSelector: { pickRandomUser: () => (events.push('pick'), 'dave') },
     responder: {
       respond: async (request) => {
@@ -30,10 +37,10 @@ const setup = ({ env = {}, activity = { lastMessageTime: BASE_TIME - 4 * HOUR, l
         return { response: 'resp', messages: [message] };
       },
     },
-    clock: { now: () => BASE_TIME },
+    clock: { now: () => time.now },
     logger: { info: (m) => logs.info.push(m), error: (...a) => logs.error.push(a) },
   };
-  return { tick: createReviveTick(deps), events, logs, discord, client };
+  return { tick: createReviveTick(deps), events, logs, discord, client, time };
 };
 
 test('does nothing when revive is not due', async () => {
@@ -74,19 +81,21 @@ test('fetches the guild through client.guilds when the channel has none', async 
   assert.equal(channel.sent.length, 1);
 });
 
-test('generation failure keeps the claim, sends nothing and logs', async () => {
+test('generation failure undoes the claim, sends nothing and logs', async () => {
   const { tick, events, logs, discord } = setup({ failCompose: true });
   await tick();
   assert.equal(events.filter((e) => e === 'noteBot').length, 1);
+  assert.equal(events.at(-1), 'undo');
   assert.deepEqual(discord.state.channel.sent, []);
   assert.equal(logs.error.length, 1);
 });
 
-test('a rejected send is logged, never thrown, and the second claim is skipped', async () => {
+test('a rejected send is logged, never thrown, the second claim is skipped and the first undone', async () => {
   const { tick, events, logs, discord } = setup();
   discord.state.channel.failSends(new Error('send failed'));
   await tick();
   assert.equal(events.filter((e) => e === 'noteBot').length, 1);
+  assert.equal(events.at(-1), 'undo');
   assert.equal(logs.error.length, 1);
   assert.deepEqual(logs.info, []);
 });
@@ -96,4 +105,51 @@ test('a channel fetch failure is logged and never throws', async () => {
   client.channels.fetch = async () => { throw new Error('unknown channel'); };
   await tick();
   assert.equal(logs.error.length, 1);
+});
+
+const attempts = (events) => events.filter((e) => Array.isArray(e) && e[0] === 'respond').length;
+const COOLDOWN = 1800000;
+
+test('a failed attempt blocks the next one for 1799999 ms and allows it at 1800000 ms', async () => {
+  const { tick, events, time } = setup({ failCompose: true });
+  await tick();
+  time.now += COOLDOWN - 1;
+  await tick();
+  assert.equal(attempts(events), 1);
+  time.now += 1;
+  await tick();
+  assert.equal(attempts(events), 2);
+});
+
+test('a failed delivery also starts the cooldown', async () => {
+  const { tick, events, discord, time } = setup();
+  discord.state.channel.failSends(new Error('send failed'));
+  await tick();
+  time.now += 10 * 60000;
+  await tick();
+  assert.equal(attempts(events), 1);
+});
+
+test('a successful revive starts no cooldown', async () => {
+  const { tick, events, time } = setup();
+  await tick();
+  time.now += 1;
+  await tick();
+  assert.equal(attempts(events), 2);
+});
+
+test('the cooldown also holds back an override revive', async () => {
+  const { tick, events, time } = setup({ env: { REVIVE_OVERRIDE: 'true' }, failCompose: true });
+  await tick();
+  time.now += 60000;
+  await tick();
+  assert.equal(attempts(events), 1);
+});
+
+test('each tick instance keeps its own cooldown', async () => {
+  const failing = setup({ failCompose: true });
+  await failing.tick();
+  const fresh = setup();
+  await fresh.tick();
+  assert.equal(attempts(fresh.events), 1);
 });

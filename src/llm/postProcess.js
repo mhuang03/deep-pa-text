@@ -9,6 +9,7 @@ export const postProcess = (raw, { burst }) => {
   const parts = splitBurst(raw, burst)
     .map(sanitizeResponse)
     .filter((part) => part !== '');
-  if (parts.length === 0) throw new Error(EMPTY_RESPONSE_MESSAGE);
+  // Marked so the generator can tell this from an exhausted chat client, which has retried already.
+  if (parts.length === 0) throw Object.assign(new Error(EMPTY_RESPONSE_MESSAGE), { isEmptyOutput: true });
   return { response: parts.join(PART_SEPARATOR), parts };
 };

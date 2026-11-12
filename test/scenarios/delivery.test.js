@@ -8,6 +8,7 @@ import { BASE_TIME, OTHER_CHANNEL_ID } from '../support/fixtures.js';
 const HELLO = 'hello there friends';
 const HOUR = 3_600_000;
 const RATE_LIMIT = 300_000;
+const FAILURE_COOLDOWN = 60_000;
 const MISSES_BEFORE_ESCALATION = 12;
 const SEND_FAILED = new Error('Unknown Message');
 
@@ -83,12 +84,12 @@ test('a successful reply resets the miss counter', async (t) => {
   assert.deepEqual(next.replies, []);
 });
 
-test('an LLM failure is logged and does not arm the rate limit', async (t) => {
+test('an LLM failure is logged and arms only the short failure cooldown', async (t) => {
   const world = await newWorld(t);
   world.llm.respondWith([new Error('llm down'), 'fine now']);
   await world.emitMessage({ content: HELLO });
   assert.equal(handlerErrors(world).length, 1);
-  await world.advance(1);
+  await world.advance(FAILURE_COOLDOWN);
   const next = await world.emitMessage({ content: HELLO });
   assert.equal(next.replies.length, 1);
 });
@@ -98,7 +99,7 @@ test('a rejected channel.send during a revive is logged and nothing throws', asy
   await world.ready();
   await world.emitMessage({ content: HELLO });
   world.discord.channel.failSends(SEND_FAILED);
-  await world.advanceTo(BASE_TIME + 4 * HOUR);
+  await world.advanceTo(BASE_TIME + 3 * HOUR + 30 * 60_000);
   assert.equal(handlerErrors(world).length, 1);
   assert.equal(handlerErrors(world)[0][1], SEND_FAILED);
   assert.deepEqual(world.errors, []);
@@ -117,7 +118,7 @@ test('a command whose editReply fails gets one further edit with the failure not
   const world = await newWorld(t);
   const command = await world.openReplyCommand({ target: { content: HELLO } });
   const submitted = await command.submit({ author: 'bob', failEdits: { error: SEND_FAILED } });
-  assert.equal(submitted.replies.length, 1);
+  assert.equal(submitted.deferrals.length, 1);
   assert.deepEqual(submitted.edits, [{ content: GENERATION_FAILED_MESSAGE, embeds: [], allowedMentions: { parse: [] } }]);
   assert.equal(handlerErrors(world).length, 1);
   assert.deepEqual(world.errors, []);
@@ -128,9 +129,9 @@ test('a command whose generation fails gets the failure notice and arms no rate 
   world.llm.respondWith([new Error('llm down'), 'fine now']);
   const command = await world.openReplyCommand({ target: { content: HELLO } });
   const submitted = await command.submit({ author: 'bob' });
-  assert.equal(submitted.edits.length, 1);
-  assert.equal(submitted.edits[0].content, GENERATION_FAILED_MESSAGE);
-  assert.deepEqual(submitted.edits[0].embeds, []);
+  assert.equal(submitted.edits.length, 2);
+  assert.equal(submitted.edits[1].content, GENERATION_FAILED_MESSAGE);
+  assert.deepEqual(submitted.edits[1].embeds, []);
   const next = await world.emitMessage({ content: HELLO });
   assert.equal(next.replies.length, 1);
 });
@@ -145,11 +146,20 @@ test('when the failure notice also fails the handler only logs', async (t) => {
   assert.deepEqual(world.errors, []);
 });
 
-test('a command whose thinking placeholder fails sends no edit and logs', async (t) => {
+test('a command whose thinking placeholder fails still gets the failure notice and logs', async (t) => {
   const world = await newWorld(t);
   const command = await world.openReplyCommand({ target: { content: HELLO } });
-  const submitted = await command.submit({ author: 'bob', failReply: { error: SEND_FAILED } });
-  assert.deepEqual(submitted.edits, []);
+  const submitted = await command.submit({ author: 'bob', failEdits: { error: SEND_FAILED } });
+  assert.deepEqual(submitted.edits.map((edit) => edit.content), [GENERATION_FAILED_MESSAGE]);
+  assert.equal(handlerErrors(world).length, 1);
+});
+
+test('a command whose acknowledgement fails is logged and sends nothing else', async (t) => {
+  const world = await newWorld(t);
+  const command = await world.openReplyCommand({ target: { content: HELLO } });
+  const submitted = await command.submit({ author: 'bob', failDefer: { error: SEND_FAILED } });
+  assert.deepEqual([submitted.edits, submitted.replies, submitted.deferrals], [[], [], []]);
+  assert.equal(world.llm.calls.length, 0);
   assert.equal(handlerErrors(world).length, 1);
 });
 
@@ -181,8 +191,8 @@ test('LLM output with mentions is sent with parse [] on a revive and on a comman
   assert.deepEqual(world.discord.channel.sent[0].allowedMentions, { parse: [] });
   const command = await world.openReplyCommand({ target: { content: HELLO } });
   const submitted = await command.submit({ author: 'bob' });
+  assert.deepEqual(submitted.edits[1].allowedMentions, { parse: [] });
   assert.deepEqual(submitted.edits[0].allowedMentions, { parse: [] });
-  assert.deepEqual(submitted.replies[0].allowedMentions, { parse: [] });
 });
 
 test('both ephemeral refusals carry safe mentions', async (t) => {

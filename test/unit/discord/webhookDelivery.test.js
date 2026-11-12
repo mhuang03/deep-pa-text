@@ -195,9 +195,14 @@ test('a failing fallback propagates', async () => {
   assert.ok(delivery);
 });
 
-test('placeholder is an ephemeral notice with safe mentions', async () => {
+test('placeholder is a notice with safe mentions and no flags, since the deferral is ephemeral', async () => {
   const { delivery } = setup();
   assert.deepEqual(await delivery.placeholder({ persona: 'bob', guild: {} }), {
-    content: 'Replying as bob…', flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
+    content: 'Replying as bob…', allowedMentions: { parse: [] },
   });
+});
+
+test('deferOptions makes the acknowledgement ephemeral', () => {
+  const { delivery } = setup();
+  assert.deepEqual(delivery.deferOptions(), { flags: MessageFlags.Ephemeral });
 });

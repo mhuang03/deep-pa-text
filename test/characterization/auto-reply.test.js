@@ -5,6 +5,7 @@ import { BASE_TIME } from '../support/fixtures.js';
 
 const HOUR = 3_600_000;
 const RATE_LIMIT = 300_000;
+const FAILURE_COOLDOWN = 60_000;
 const BLURPLE = 0x5865F2;
 
 const newWorld = async (t, options) => {
@@ -228,10 +229,14 @@ test('an LLM failure sends no reply, records no error and consumes the roll', as
   assert.equal(world.randomCalls, 3);
 });
 
-test('an LLM failure does not arm the rate limit', async (t) => {
+test('an LLM failure arms a short failure cooldown, not the rate limit', async (t) => {
   const world = await newWorld(t, { random: 0 });
   world.llm.respondWith([new Error('llm down'), 'fine now']);
   await world.emitMessage({ content: HELLO });
+  const during = await world.emitMessage({ content: HELLO });
+  assert.equal(during.replies.length, 0);
+  assert.equal(world.llm.calls.length, 1);
+  await world.advance(FAILURE_COOLDOWN);
   const next = await world.emitMessage({ content: HELLO });
   assert.equal(next.replies.length, 1);
   assert.equal(next.replies[0].content, 'fine now');
@@ -242,20 +247,22 @@ test('an LLM failure leaves the miss counter unchanged', async (t) => {
   await sendMany(world, 11);
   world.llm.respondWith([new Error('llm down'), 'fine now']);
   const failed = await world.emitMessage({ content: HELLO });
+  await world.advance(FAILURE_COOLDOWN);
   const next = await world.emitMessage({ content: HELLO });
   assert.equal(failed.replies.length, 0);
   assert.equal(world.llm.calls.length, 2);
   assert.equal(next.replies.length, 1);
 });
 
-test('an LLM failure leaves the bot as last author so no revive happens until a human message', async (t) => {
+test('an LLM failure hands the activity back to the human so a revive fires 3 hours later', async (t) => {
   const world = await newWorld(t, { random: 0 });
   await world.ready();
-  world.llm.respondWith(new Error('llm down'));
+  world.llm.respondWith([new Error('llm down'), 'revive text']);
   await world.emitMessage({ content: HELLO });
-  await world.advance(48 * HOUR);
   assert.deepEqual(world.discord.channel.sent, []);
-  assert.equal(world.llm.calls.length, 1);
+  await world.advance(3 * HOUR + 10 * 60_000);
+  assert.equal(world.llm.calls.length, 2);
+  assert.equal(world.discord.channel.sent.length, 1);
   assert.deepEqual(world.errors, []);
 });
 
@@ -270,6 +277,7 @@ test('an ingest failure keeps the messages row, attempts no reply, and later mes
   assert.deepEqual(world.sqlite.all('SELECT id FROM messages'), [{ id: 'm1' }]);
 
   collection.setFailing(null);
+  await world.advance(FAILURE_COOLDOWN);
   const next = await world.emitMessage({ id: 'm2', content: HELLO });
   assert.equal(next.replies.length, 1);
   assert.equal(countRows(world, 'messages'), 2);

@@ -7,6 +7,7 @@ import { FAKE_DIMENSIONS } from '../support/fakes/chroma.js';
 
 const DAY = 86_400_000;
 const CHROMA_TIMEOUT_MS = 30_000;
+const FAILURE_COOLDOWN_MS = 60_000;
 const REPAIR_INTERVAL_MS = 600_000;
 const HELLO = 'hello there friends';
 const MESSAGES = 'message_embeddings';
@@ -163,6 +164,7 @@ test('retrieval timing out mid-reply fails closed: nothing is sent, the error is
   assert.deepEqual(world.discord.channel.sent, []);
   assert.ok(errors(world).some((args) => args.some((a) => /timed out/.test(a.message))));
   world.chroma.hang(false);
+  await world.advance(FAILURE_COOLDOWN_MS);
   const later = await world.emitMessage({ id: 'm2', author: 'carol', content: 'a later message here' });
   assert.equal(later.replies.length, 1);
 });

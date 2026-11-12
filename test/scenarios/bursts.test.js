@@ -192,7 +192,7 @@ test('the reply command sends later parts as follow-ups and never shows typing',
   world.llm.respondWith('one<split>two');
   const command = await world.openReplyCommand({ target: { content: 'a replyable message' }, user: 'alice' });
   const submitted = await command.submit({ author: 'bob' });
-  assert.equal(submitted.edits[0].content, 'one');
+  assert.equal(submitted.edits.at(-1).content, 'one');
   assert.equal(submitted.followUps.length, 1);
   assert.equal(submitted.followUps[0].content, 'two');
   assert.deepEqual(submitted.followUps[0].allowedMentions, { parse: [] });

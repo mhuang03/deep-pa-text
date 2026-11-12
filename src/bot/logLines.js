@@ -8,6 +8,8 @@ export const formatReceived = ({ record, kept, logging }) =>
 
 export const formatNoReply = (decision) => {
   if (decision.reason === 'rate-limited') return '    [NOREPLY: rate limited]';
+  if (decision.reason === 'in-flight') return '    [NOREPLY: another reply is in flight]';
+  if (decision.reason === 'cooldown') return '    [NOREPLY: cooling down after a failed reply]';
   return `    [NOREPLY: random ${decision.roll.toFixed(2)} > ${decision.chance}]`;
 };
 

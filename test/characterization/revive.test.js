@@ -237,18 +237,16 @@ test('hour 23 is night: last message at 19:50 Central does not revive at 23:00 b
   assert.equal(sent(world).length, 1);
 });
 
-test('an LLM failure during a revive sends nothing, throws nothing and is not retried until a new human message', async (t) => {
+test('an LLM failure during a revive sends nothing, throws nothing and retries only after the failure cooldown', async (t) => {
   const world = await armedWorld(t);
-  world.llm.respondWith(new Error('llm down'));
+  world.llm.respondWith([new Error('llm down'), 'back again']);
   await triggerRevive(world);
   assert.deepEqual(sent(world), []);
   assert.equal(world.llm.calls.length, 1);
-  await world.advance(48 * HOUR);
+  await world.advance(20 * MINUTE);
   assert.equal(world.llm.calls.length, 1);
-  assert.deepEqual(sent(world), []);
-  assert.deepEqual(world.errors, []);
-  await world.emitMessage({ content: HELLO });
-  await triggerRevive(world);
+  await world.advance(10 * MINUTE);
   assert.equal(world.llm.calls.length, 2);
-  assert.deepEqual(sent(world), []);
+  assert.equal(sent(world).length, 1);
+  assert.deepEqual(world.errors, []);
 });

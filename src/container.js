@@ -29,6 +29,7 @@ import { createMemberProfiles } from './profiles/memberProfiles.js';
 import { createActivityTracker } from './bot/activityTracker.js';
 import { createReplyPolicy } from './bot/replyPolicy.js';
 import { createChainPolicy } from './bot/chainPolicy.js';
+import { createCommandLimiter } from './bot/commandLimiter.js';
 import { createChainBuilder } from './context/chainBuilder.js';
 import { createComposer } from './bot/composer.js';
 import { createBotMessageResolver } from './bot/botMessageResolver.js';
@@ -146,7 +147,8 @@ const buildHandlers = ({
   config, data, clock, logger, client, core, responder, delivery, memberProfiles,
   botMessageResolver, chainBuilder, activity, replyPolicy,
 }) => {
-  const chainPolicy = createChainPolicy({ config, random: clock.random });
+  const chainPolicy = createChainPolicy({ config, random: clock.random, now: clock.now });
+  const commandLimiter = createCommandLimiter({ config, now: clock.now });
   const { ingest, messageFilter, personaSelector, botMessageStore, messageStore } = core;
   const deleteHandler = createMessageDeleteHandler({ config, ingest, clock, logger });
   return {
@@ -161,7 +163,7 @@ const buildHandlers = ({
     }),
     replyCommand: createReplyCommandHandler({
       client, config, users: data.users, messageFilter, personaSelector, responder,
-      delivery, replyPolicy, botMessageResolver, logger,
+      delivery, replyPolicy, botMessageResolver, commandLimiter, logger,
     }),
     profileRefresh: createProfileRefresh({ client, config, memberProfiles, logger }),
     reviveTick: createReviveTick({

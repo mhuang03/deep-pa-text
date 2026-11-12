@@ -79,8 +79,8 @@ test('reply command parks on the modal without blocking the world', async (t) =>
   await world.advance(MINUTE);
 
   const submitted = await interaction.submit({ author: 'bob' });
-  assert.equal(submitted.replies.length, 1);
-  assert.equal(submitted.edits.length, 1);
+  assert.equal(submitted.deferrals.length, 1);
+  assert.equal(submitted.edits.length, 2);
 
   const other = await world.openReplyCommand({ target: { content: 'hello there friends' } });
   await other.timeout();
@@ -255,7 +255,7 @@ test('fake modal waits: submit is offered to every wait, timeout rejects with a 
   assert.deepEqual(stray.replies, []);
   await b.timeout();
   await assert.rejects(b.timeout(), /no modal wait is pending/);
-  assert.equal((await a.submit({ author: 'bob' })).replies.length, 1);
+  assert.equal((await a.submit({ author: 'bob' })).deferrals.length, 1);
 });
 
 test('world.advance fires mocked setTimeout timers', async (t) => {
@@ -341,13 +341,39 @@ test('submit arms failReply and failEdits before the handler sees the submission
   const world = await newWorld(t);
   const boom = new Error('boom');
   const command = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  // The handler acknowledges with deferReply, so an armed reply failure is never reached.
   const submitted = await command.submit({ author: 'bob', failReply: { error: boom } });
   assert.deepEqual(submitted.replies, []);
-  assert.deepEqual(submitted.edits, []);
-  const second = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  assert.equal(submitted.edits.length, 2);
+  const second = await world.openReplyCommand({ target: { content: 'hello there friends' }, user: 'dave' });
   const edited = await second.submit({ author: 'bob', failEdits: { error: boom, times: 2 } });
-  assert.equal(edited.replies.length, 1);
+  assert.equal(edited.deferrals.length, 1);
   assert.deepEqual(edited.edits, []);
+});
+
+test('modal-submit deferReply records its options in order and failDefer honours times', async (t) => {
+  const world = await newWorld(t);
+  const boom = new Error('boom');
+  const command = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  const submitted = await command.submit({ author: 'bob' });
+  const before = submitted.deferrals.length;
+  await submitted.deferReply({ flags: 64 });
+  await submitted.deferReply({});
+  assert.deepEqual(submitted.deferrals.slice(before), [{ flags: 64 }, {}]);
+  submitted.failDefer(boom, { times: 2 });
+  await assert.rejects(submitted.deferReply({}), boom);
+  await assert.rejects(submitted.deferReply({}), boom);
+  await submitted.deferReply({ flags: 1 });
+  assert.deepEqual(submitted.deferrals.at(-1), { flags: 1 });
+});
+
+test('submit arms failDefer before the handler sees the submission', async (t) => {
+  const world = await newWorld(t);
+  const boom = new Error('boom');
+  const command = await world.openReplyCommand({ target: { content: 'hello there friends' } });
+  const submitted = await command.submit({ author: 'bob', failDefer: { error: boom } });
+  assert.deepEqual(submitted.deferrals, []);
+  assert.deepEqual(submitted.edits, []);
 });
 
 test('createWorld env option overrides the environment the bot boots with', async (t) => {

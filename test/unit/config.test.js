@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig,
-  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp, assertChroma, assertVector } from '../../src/config.js';
+  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp, assertChroma, assertVector,
+  assertRevive, assertDiscord, assertCommand } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -19,14 +20,17 @@ const EXPECTED_DEFAULTS = {
     webhookName: 'deep-pa-text',
     webhookUsernameMax: 80,
     webhookReplyLink: true,
+    modalPreviewChars: 1000,
   },
   reply: {
     probability: 0.1, minIntervalMs: 300000, escalateAfterMisses: 10, escalationStep: 0.05, override: false,
+    failureCooldownMs: 60000,
   },
   revive: {
     checkIntervalMs: 600000, overrideCheckIntervalMs: 60000, dayIdleMs: 10800000, nightIdleMs: 43200000,
     dayStartHour: 10, dayEndHour: 22, timeZone: 'America/Chicago',
     transcriptLimit: 10, starterGapMs: 3600000, starterSamples: 20, override: false,
+    failureCooldownMs: 1800000,
   },
   filter: { minLength: 5, maxLength: 200, commandPrefixes: ['!', '$', '#', '%', '&', '-', '+', 'p!'] },
   storage: {
@@ -45,7 +49,10 @@ const EXPECTED_DEFAULTS = {
     frequentLimit: 10, recentBotMessages: 10,
   },
   context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
-  chain: { enabled: true, fullDepth: 3, decay: 0.5, maxBotTurns: 8, maxContextTurns: 12, maxWalkSteps: 50 },
+  chain: { enabled: true, fullDepth: 3, decay: 0.5, maxBotTurns: 8, maxContextTurns: 12, maxWalkSteps: 50,
+    userCooldownMs: 10000, maxPerWindow: 6, windowMs: 600000,
+  },
+  command: { userCooldownMs: 30000, maxConcurrent: 2 },
   typing: { enabled: true, refreshMs: 8000 },
   burst: {
     enabled: true, maxMessages: 3, windowMs: 30000, minRate: 0.2, minSamples: 20, cacheMs: 3600000,
@@ -59,7 +66,7 @@ const EXPECTED_DEFAULTS = {
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
-    timeoutMs: 120000, maxRetries: 1, emptyRetries: 1,
+    timeoutMs: 120000, maxRetries: 1, emptyRetries: 1, postProcessRetries: 1,
   },
   gifs: {
     klipyApiKey: undefined, giphyApiKey: undefined, humorApiKey: undefined, maxQueryLength: 50,
@@ -345,4 +352,40 @@ test('assertVector requires a positive repair interval and window', () => {
     failsFor(assertVector, ok, key, [0, -1, Number.NaN, undefined]);
     passesFor(assertVector, ok, key, [1, 604800000]);
   });
+});
+
+test('assertReply and assertRevive require a non-negative failure cooldown', () => {
+  const reply = loadConfig({}).reply;
+  failsFor(assertReply, reply, 'failureCooldownMs', [-1, NaN, Infinity, undefined]);
+  passesFor(assertReply, reply, 'failureCooldownMs', [0, 60000]);
+  const revive = loadConfig({}).revive;
+  failsFor(assertRevive, revive, 'failureCooldownMs', [-1, NaN, Infinity, undefined]);
+  passesFor(assertRevive, revive, 'failureCooldownMs', [0, 1800000]);
+});
+
+test('assertChain validates the chain limits', () => {
+  const chain = loadConfig({}).chain;
+  failsFor(assertChain, chain, 'userCooldownMs', [-1, NaN, Infinity]);
+  failsFor(assertChain, chain, 'maxPerWindow', [0, 1.5, NaN, -1]);
+  failsFor(assertChain, chain, 'windowMs', [0, -1, NaN, Infinity]);
+  passesFor(assertChain, chain, 'userCooldownMs', [0, 10000]);
+  passesFor(assertChain, chain, 'maxPerWindow', [1, 6]);
+  passesFor(assertChain, chain, 'windowMs', [1, 600000]);
+});
+
+test('assertCommand validates the cooldown and the concurrency', () => {
+  const command = loadConfig({}).command;
+  assert.equal(assertCommand(command), command);
+  failsFor(assertCommand, command, 'userCooldownMs', [-1, NaN, Infinity]);
+  failsFor(assertCommand, command, 'maxConcurrent', [0, 1.5, NaN, -1]);
+  passesFor(assertCommand, command, 'userCooldownMs', [0, 30000]);
+  passesFor(assertCommand, command, 'maxConcurrent', [1, 2]);
+});
+
+test('assertDiscord requires a non-negative integer preview length and assertLlm the post-process retries', () => {
+  const discord = loadConfig({}).discord;
+  failsFor(assertDiscord, discord, 'modalPreviewChars', [-1, 1.5, NaN, Infinity]);
+  passesFor(assertDiscord, discord, 'modalPreviewChars', [0, 1000]);
+  failsFor(assertLlm, loadConfig({}).llm, 'postProcessRetries', [-1, 1.5, NaN]);
+  passesFor(assertLlm, loadConfig({}).llm, 'postProcessRetries', [0, 2]);
 });

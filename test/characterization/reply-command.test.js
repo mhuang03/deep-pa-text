@@ -117,11 +117,12 @@ test('waits up to 120000 ms for the modal submission', async (t) => {
   assert.equal(interaction.modalOptions.time, 120_000);
 });
 
-test('submitting a named author sends a thinking embed first', async (t) => {
+test('submitting a named author acknowledges at once, then shows a thinking embed', async (t) => {
   const world = await newWorld(t);
   const { submitted } = await openAndSubmit(world, 'bob');
-  assert.equal(submitted.replies.length, 1);
-  const embeds = submitted.replies[0].embeds;
+  assert.deepEqual(submitted.deferrals, [{}]);
+  assert.equal(submitted.replies.length, 0);
+  const embeds = submitted.edits[0].embeds;
   assert.equal(embeds.length, 1);
   assert.equal(embeds[0].data.author.name, 'bob');
   assert.equal(embeds[0].data.author.icon_url, 'https://cdn.example/avatars/bob.png');
@@ -133,8 +134,8 @@ test('submitting a named author edits the reply with the response and an author 
   const world = await newWorld(t);
   world.llm.respondWith('sounds good to me');
   const { submitted } = await openAndSubmit(world, 'bob');
-  assert.equal(submitted.edits.length, 1);
-  const edit = submitted.edits[0];
+  assert.equal(submitted.edits.length, 2);
+  const edit = submitted.edits[1];
   assert.equal(edit.content, 'sounds good to me');
   assert.equal(edit.embeds.length, 1);
   assert.equal(edit.embeds[0].data.author.name, 'bob');
@@ -148,7 +149,7 @@ test('puts GIF embeds before the author embed in the edited reply', async (t) =>
   world.llm.respondWith('nice <gif! cat>');
   world.gifs.klipy.setResult('https://gif.example/cat.gif');
   const { submitted } = await openAndSubmit(world, 'bob');
-  const edit = submitted.edits[0];
+  const edit = submitted.edits[1];
   assert.equal(edit.embeds.length, 2);
   assert.equal(edit.embeds[0].data.image.url, 'https://gif.example/cat.gif');
   assert.equal(edit.embeds[1].data.author.name, 'bob');
@@ -178,8 +179,8 @@ test('random author picks the likely replier selected by the roll', async (t) =>
   await seedRepliers(world);
   world.setRandom([0]);
   const { submitted } = await openAndSubmit(world, 'random');
-  assert.equal(submitted.replies[0].embeds[0].data.author.name, 'carol');
   assert.equal(submitted.edits[0].embeds[0].data.author.name, 'carol');
+  assert.equal(submitted.edits[1].embeds[0].data.author.name, 'carol');
   assert.equal(world.randomCalls, 1);
 });
 
@@ -188,22 +189,22 @@ test('random author indexes into the likely repliers by the roll', async (t) => 
   await seedRepliers(world);
   world.setRandom([0.99]);
   const { submitted } = await openAndSubmit(world, 'random');
-  assert.equal(submitted.edits[0].embeds[0].data.author.name, 'dave');
+  assert.equal(submitted.edits[1].embeds[0].data.author.name, 'dave');
 });
 
 test('random author falls back to a user from the list when there are no likely repliers', async (t) => {
   const world = await newWorld(t);
   world.setRandom([0, 0.99]);
   const { submitted } = await openAndSubmit(world, 'random');
-  assert.equal(submitted.replies[0].embeds[0].data.author.name, 'dave');
   assert.equal(submitted.edits[0].embeds[0].data.author.name, 'dave');
+  assert.equal(submitted.edits[1].embeds[0].data.author.name, 'dave');
   assert.equal(world.randomCalls, 2);
 });
 
 test('works for a target authored by a bot', async (t) => {
   const world = await newWorld(t);
   const { submitted } = await openAndSubmit(world, 'bob', { content: CONTENT, author: 'helper-bot', bot: true });
-  assert.equal(submitted.edits.length, 1);
+  assert.equal(submitted.edits.length, 2);
   assert.equal(world.errors.length, 0);
 });
 
@@ -211,24 +212,24 @@ test('works for a target authored by a non-approved user', async (t) => {
   const world = await newWorld(t);
   const { interaction, submitted } = await openAndSubmit(world, 'bob', { content: CONTENT, author: 'mallory' });
   assert.equal(interaction.modal.components[0].content, `**Original message from mallory:**\n${CONTENT}`);
-  assert.equal(submitted.edits.length, 1);
+  assert.equal(submitted.edits.length, 2);
 });
 
-test('fetches the guild by id when the target message has no guild and completes the flow', async (t) => {
+test('fetches the guild by id after acknowledging when the target message has no guild, and completes the flow', async (t) => {
   const world = await newWorld(t);
   const { submitted } = await openAndSubmit(world, 'bob', { content: CONTENT, guild: null });
   assert.deepEqual(world.discord.guildFetches, [GUILD_ID]);
-  assert.equal(submitted.edits.length, 1);
-  assert.equal(submitted.edits[0].embeds[0].data.author.icon_url, 'https://cdn.example/avatars/bob.png');
+  assert.equal(submitted.edits.length, 2);
+  assert.equal(submitted.edits[1].embeds[0].data.author.icon_url, 'https://cdn.example/avatars/bob.png');
 });
 
-test('looks up the guild before checking the channel', async (t) => {
+test('makes no network call before the modal: the channel check needs no guild lookup', async (t) => {
   const world = await newWorld(t);
   const interaction = await world.openReplyCommand({
     target: { content: CONTENT, guild: null, channel: world.discord.otherChannel },
   });
   assert.equal(world.discord.otherChannel.id, OTHER_CHANNEL_ID);
-  assert.deepEqual(world.discord.guildFetches, [GUILD_ID]);
+  assert.deepEqual(world.discord.guildFetches, []);
   assert.equal(interaction.replies[0].content, 'This command can only be used in the #pa-text channel.');
 });
 
@@ -236,10 +237,10 @@ test('LLM failure after submit replaces the thinking reply with a failure notice
   const world = await newWorld(t);
   world.llm.respondWith(new Error('llm down'));
   const { submitted } = await openAndSubmit(world, 'bob');
-  assert.equal(submitted.replies.length, 1);
-  assert.equal(submitted.edits.length, 1);
-  assert.equal(submitted.edits[0].content, GENERATION_FAILED_MESSAGE);
-  assert.deepEqual(submitted.edits[0].embeds, []);
+  assert.equal(submitted.deferrals.length, 1);
+  assert.equal(submitted.edits.length, 2);
+  assert.equal(submitted.edits[1].content, GENERATION_FAILED_MESSAGE);
+  assert.deepEqual(submitted.edits[1].embeds, []);
   assert.equal(world.errors.length, 0);
 });
 
@@ -305,6 +306,6 @@ test('works immediately after an auto reply, ignoring the rate limit and the pro
   assert.equal(auto.replies.length, 1);
   world.setRandom(0.99);
   const { submitted } = await openAndSubmit(world, 'bob');
-  assert.equal(submitted.replies.length, 1);
-  assert.equal(submitted.edits.length, 1);
+  assert.equal(submitted.deferrals.length, 1);
+  assert.equal(submitted.edits.length, 2);
 });

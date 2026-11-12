@@ -95,3 +95,22 @@ test('placeholder returns the thinking embed payload with safe mentions', async 
   assert.deepEqual(payload, { embeds: [AUTHOR], allowedMentions: { parse: [] } });
   assert.deepEqual(makeCalls, [['bob', { id: 'g' }, { thinking: true }]]);
 });
+
+test('a reply never fails when its target was deleted: failIfNotExists is false', async () => {
+  const { delivery, sent, send } = setup();
+  await delivery.deliver(request({ type: 'reply', message: { reply: send } }));
+  assert.equal(sent[0].failIfNotExists, false);
+});
+
+test('only replies carry failIfNotExists', async () => {
+  const { delivery, sent, send } = setup();
+  await delivery.deliver(request({ type: 'channel', channel: { send } }));
+  await delivery.deliver(request({ type: 'interaction', interaction: { editReply: send } }));
+  await delivery.deliver(request({ type: 'followUp', interaction: { followUp: send } }));
+  sent.forEach((payload) => assert.equal('failIfNotExists' in payload, false));
+});
+
+test('deferOptions is public: no ephemeral flag', () => {
+  const { delivery } = setup();
+  assert.deepEqual(delivery.deferOptions(), {});
+});

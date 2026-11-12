@@ -9,6 +9,7 @@ export const buildLlm = (env) => ({
   timeoutMs: 120000,
   maxRetries: 1,
   emptyRetries: 1,
+  postProcessRetries: 1,
 });
 
 export const buildGifs = (env) => ({
@@ -41,6 +42,14 @@ export const buildChain = (env) => ({
   maxBotTurns: 8,
   maxContextTurns: 12,
   maxWalkSteps: 50,
+  userCooldownMs: 10000,
+  maxPerWindow: 6,
+  windowMs: 600000,
+});
+
+export const buildCommand = () => ({
+  userCooldownMs: 30000,
+  maxConcurrent: 2,
 });
 
 export const buildTyping = () => ({

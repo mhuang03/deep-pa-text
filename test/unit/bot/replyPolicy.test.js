@@ -20,7 +20,9 @@ const missTimes = (state, policy, count) => {
 
 test('accepts a roll equal to the chance and rejects a greater one', () => {
   const { policy } = setup({ rolls: [0.1, 0.11] });
-  assert.deepEqual(policy.decide(), { reply: true, reason: 'accepted', roll: 0.1, chance: 0.1 });
+  const accepted = policy.decide();
+  assert.deepEqual([accepted.reply, accepted.reason, accepted.roll, accepted.chance], [true, 'accepted', 0.1, 0.1]);
+  accepted.release();
   assert.deepEqual(policy.decide(), { reply: false, reason: 'random', roll: 0.11, chance: 0.1 });
 });
 
@@ -47,7 +49,8 @@ test('rate-limited decisions consume no roll and count no miss', () => {
 test('override replies without rolling and ignores the rate limit', () => {
   const { state, policy } = setup({ env: { REPLY_OVERRIDE: 'true' } });
   policy.noteReply({ resetMisses: true });
-  assert.deepEqual(policy.decide(), { reply: true, reason: 'override' });
+  const decision = policy.decide();
+  assert.deepEqual([decision.reply, decision.reason, typeof decision.release], [true, 'override', 'function']);
   assert.equal(state.rollCount, 0);
 });
 
@@ -116,7 +119,9 @@ test('restore arms the rate limit from a past reply time', () => {
 test('restore ignores null, never moves the reply time backwards and clamps to now', () => {
   const { state, policy } = setup({ rolls: [0, 0] });
   policy.restore({ replyTime: null });
-  assert.equal(policy.decide().reply, true);
+  const first = policy.decide();
+  assert.equal(first.reply, true);
+  first.release();
   policy.noteReply({ resetMisses: false });
   policy.restore({ replyTime: state.time - 1000000 });
   state.time += 299999;
@@ -124,4 +129,99 @@ test('restore ignores null, never moves the reply time backwards and clamps to n
   policy.restore({ replyTime: state.time + 10 * 3600000 });
   state.time += 300001;
   assert.equal(policy.decide().reply, true, 'a future reply time is clamped to now');
+});
+
+test('an accepted roll claims the slot until release, and the claim consumes no further roll', () => {
+  const { state, policy } = setup({ rolls: [0] });
+  const claim = policy.decide();
+  assert.equal(claim.reply, true);
+  assert.equal(state.rollCount, 1);
+  state.rolls = [0];
+  assert.deepEqual(policy.decide(), { reply: false, reason: 'in-flight' });
+  assert.equal(state.rollCount, 1);
+  claim.release();
+  state.rolls = [0];
+  assert.equal(policy.decide().reply, true);
+});
+
+test('an in-flight decision counts no miss', () => {
+  const { state, policy } = setup({ rolls: [0] });
+  const claim = policy.decide();
+  for (let i = 0; i < 30; i += 1) policy.decide();
+  claim.release();
+  state.rolls = [0.1];
+  assert.equal(policy.decide().chance, 0.1);
+});
+
+test('a stale release never frees a later claim', () => {
+  const { state, policy } = setup({ rolls: [0] });
+  const first = policy.decide();
+  first.release();
+  state.rolls = [0];
+  const second = policy.decide();
+  assert.equal(second.reply, true);
+  first.release();
+  assert.equal(policy.decide().reason, 'in-flight');
+  second.release();
+  state.rolls = [0];
+  assert.equal(policy.decide().reply, true);
+});
+
+test('override claims a slot without checking in-flight, and release is idempotent', () => {
+  const { policy } = setup({ env: { REPLY_OVERRIDE: 'true' } });
+  const a = policy.decide();
+  const b = policy.decide();
+  assert.equal(a.reply && b.reply, true);
+  a.release();
+  a.release();
+  b.release();
+  assert.equal(policy.decide().reply, true);
+});
+
+test('checks run in order: rate limit, then in-flight, then cooldown, then the roll', () => {
+  const { state, policy } = setup({ rolls: [0] });
+  const claim = policy.decide();
+  policy.noteFailure();
+  assert.equal(policy.decide().reason, 'in-flight');
+  policy.noteReply({ resetMisses: false });
+  assert.equal(policy.decide().reason, 'rate-limited');
+  claim.release();
+  state.time += 300000;
+  state.rolls = [0.99];
+  assert.equal(policy.decide().reason, 'random');
+});
+
+test('the cooldown is reported once nothing is in flight', () => {
+  const { policy } = setup({ rolls: [0] });
+  const claim = policy.decide();
+  policy.noteFailure();
+  claim.release();
+  assert.equal(policy.decide().reason, 'cooldown');
+});
+
+test('noteFailure blocks for 59999 ms and opens at 60000 ms without a roll or a miss', () => {
+  const { state, policy } = setup();
+  policy.noteFailure();
+  state.time += 59999;
+  for (let i = 0; i < 5; i += 1) assert.deepEqual(policy.decide(), { reply: false, reason: 'cooldown' });
+  assert.equal(state.rollCount, 0);
+  state.time += 1;
+  state.rolls = [0.1];
+  const decision = policy.decide();
+  assert.deepEqual([decision.reply, decision.chance], [true, 0.1]);
+});
+
+test('noteFailure does not arm the rate limit and leaves the misses alone', () => {
+  const { state, policy } = setup();
+  missTimes(state, policy, 12);
+  policy.noteFailure();
+  state.time += 60000;
+  state.rolls = [0.12];
+  assert.equal(policy.decide().chance, 0.1 + 2 * 0.05);
+});
+
+test('override ignores the failure cooldown', () => {
+  const { policy } = setup({ env: { REPLY_OVERRIDE: 'true' } });
+  policy.noteFailure();
+  assert.equal(policy.decide().reply, true);
 });

@@ -9,8 +9,14 @@ const HOUR = 3_600_000;
 const MINUTE = 60_000;
 const HELLO = 'hello there friends';
 
-const newWorld = async (t, options) => {
-  const world = await createWorld(options);
+// These scenarios exercise the depth rules, so the per-user and window limits are lifted here;
+// reply-control.test.js covers the limits.
+const UNTHROTTLED = { userCooldownMs: 0, maxPerWindow: 1000 };
+
+const newWorld = async (t, options = {}) => {
+  const world = await createWorld({
+    ...options, config: { ...options.config, chain: { ...UNTHROTTLED, ...options.config?.chain } },
+  });
   t.after(() => world.close());
   return world;
 };
@@ -269,6 +275,14 @@ test('CHAIN_REPLIES=false disables chain replies but the corpus rule still appli
   assert.equal(world.llm.calls.length, calls);
   const stored = world.sqlite.get('SELECT reference FROM filtered_messages WHERE id = ?', reply.id);
   assert.equal(stored.reference, null);
+  // Past the rate limit, the normal flow (roll, persona selection) answers it as an auto reply.
+  await world.advance(5 * MINUTE);
+  world.setRandom(0);
+  const rolled = await replyToBot(world, 'why do you say so again');
+  assert.equal(rolled.replies.length, 1);
+  assert.equal(lastBot(world).trigger, 'auto');
+  const rolledRow = world.sqlite.get('SELECT reference FROM filtered_messages WHERE id = ?', rolled.id);
+  assert.equal(rolledRow.reference, null);
 });
 
 test('a human reply to a bot message is stored without a reference or reply embedding', async (t) => {
