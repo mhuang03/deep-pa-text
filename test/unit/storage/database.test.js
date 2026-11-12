@@ -73,3 +73,12 @@ test('readOnly rejects writes and does not run migrations', () => {
   ro.close();
   fs.rmSync(dir, { recursive: true });
 });
+
+test('adds the bot_messages table and index, idempotently, to a legacy database', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(MIGRATIONS[0].sql);
+  runMigrations(db);
+  runMigrations(db);
+  assert.deepEqual(columns(db, 'bot_messages'), ['id', 'persona', 'content', 'timestamp', 'reference', 'trigger']);
+  assert.ok(names(db, 'index').includes('idx_bot_messages_timestamp'));
+});

@@ -1,4 +1,5 @@
 import { shouldRevive } from '../revivePolicy.js';
+import { TRIGGERS } from '../triggers.js';
 import { formatRevive } from '../logLines.js';
 
 export const createReviveTick = (deps) => {
@@ -12,7 +13,7 @@ export const createReviveTick = (deps) => {
     const guild = await findGuild(channel);
     const persona = personaSelector.pickRandomUser();
     const { response } = await responder.respond({
-      trigger: 'revive', persona, target: null, guild, via: { type: 'channel', channel },
+      trigger: TRIGGERS.REVIVE, persona, target: null, guild, via: { type: 'channel', channel },
     });
     activity.noteBot();
     logger.info(formatRevive({ persona, response }));

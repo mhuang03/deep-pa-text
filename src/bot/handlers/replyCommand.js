@@ -1,4 +1,5 @@
 import { MessageFlags } from 'discord.js';
+import { TRIGGERS } from '../triggers.js';
 import { withSafeMentions, SAFE_MENTIONS } from '../../discord/payload.js';
 import { toMessageRecord } from '../../discord/messageRecord.js';
 import { REPLY_COMMAND_NAME } from '../../discord/commands.js';
@@ -50,7 +51,7 @@ export const createReplyCommandHandler = (deps) => {
 
   const deliverReply = async ({ modalInteraction, persona, target, guild }) => {
     const { response } = await responder.respond({
-      trigger: 'command',
+      trigger: TRIGGERS.COMMAND,
       persona,
       target,
       guild,

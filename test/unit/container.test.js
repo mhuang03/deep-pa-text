@@ -12,6 +12,7 @@ import { ENV, PING_CACHE, USERS } from '../support/fixtures.js';
 const SERVICES = [
   'bot', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
+  'botMessageStore', 'botMessageResolver',
 ];
 
 const setup = (overrides = {}) => {
@@ -67,7 +68,7 @@ test('constructs nothing that connects until the bot starts', async () => {
 test('opens the configured database and creates the schema', () => {
   const { container } = setup();
   const tables = container.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-  assert.deepEqual(tables.map((row) => row.name).sort(), ['filtered_messages', 'messages']);
+  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'messages']);
   container.db.close();
 });
 

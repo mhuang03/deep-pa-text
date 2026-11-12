@@ -4,6 +4,7 @@ import { buildUserDirectory } from './userData/loadData.js';
 import { createMessageFilter } from './corpus/messageFilter.js';
 import { openDatabase } from './storage/database.js';
 import { createMessageStore } from './storage/messageStore.js';
+import { createBotMessageStore } from './storage/botMessageStore.js';
 import { createVectorStore } from './storage/vectorStore.js';
 import { createIngestService } from './ingest/ingestService.js';
 import { createRetriever } from './retrieval/retriever.js';
@@ -18,6 +19,7 @@ import { createEmbedDelivery } from './discord/delivery.js';
 import { createActivityTracker } from './bot/activityTracker.js';
 import { createReplyPolicy } from './bot/replyPolicy.js';
 import { createComposer } from './bot/composer.js';
+import { createBotMessageResolver } from './bot/botMessageResolver.js';
 import { createResponder } from './bot/responder.js';
 import { createMessageCreateHandler } from './bot/handlers/messageCreate.js';
 import { createReplyCommandHandler } from './bot/handlers/replyCommand.js';
@@ -64,6 +66,7 @@ const buildGenerator = ({ config, vendor, retriever, userDirectory }) => {
 const buildCore = ({ config, vendor, data, clock }) => {
   const db = openDatabase(config.storage.databasePath);
   const messageStore = createMessageStore({ db, config });
+  const botMessageStore = createBotMessageStore({ db });
   const vectorStore = buildVectorStore({ config, vendor });
   const messageFilter = createMessageFilter({ users: data.users, pingCache: data.pingCache, config });
   const ingest = createIngestService({ messageStore, vectorStore, messageFilter });
@@ -74,7 +77,7 @@ const buildCore = ({ config, vendor, data, clock }) => {
   });
   const generator = buildGenerator({ config, vendor, retriever, userDirectory });
   return {
-    db, messageStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
+    db, messageStore, botMessageStore, vectorStore, messageFilter, ingest, retriever, userDirectory,
     personaSelector, generator,
   };
 };
@@ -106,8 +109,14 @@ export const buildContainer = ({
   const authorEmbeds = createAuthorEmbeds({ config, logger });
   const composer = createComposer({ generator: core.generator, gifResolver, config });
   const delivery = createEmbedDelivery({ authorEmbeds, config });
-  const responder = createResponder({ composer, delivery, logger });
+  const { botMessageStore, userDirectory } = core;
+  const botMessageResolver = createBotMessageResolver({
+    botMessageStore, userDirectory, getBotUserId: () => client.user?.id,
+  });
+  const responder = createResponder({
+    composer, delivery, botMessageStore, now: clock.now, logger,
+  });
   const handlers = buildHandlers({ config, data, clock, logger, client, core, responder, authorEmbeds });
   const bot = createBot({ client, config, handlers, clock, logger });
-  return { bot, client, logger, gifResolver, composer, delivery, responder, ...core };
+  return { bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, ...core };
 };

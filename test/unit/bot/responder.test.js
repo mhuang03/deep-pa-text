@@ -4,8 +4,19 @@ import { createResponder, DELIVERY_STAGE } from '../../../src/bot/responder.js';
 
 const REQUEST = { trigger: 'auto', persona: 'bob', target: { id: '1' }, guild: { id: 'g' }, via: { type: 'channel' } };
 
-const setup = ({ failCompose = null, failDeliver = null } = {}) => {
+const NOW = 777;
+
+const setup = ({ failCompose = null, failDeliver = null, sent = { id: 'sent', createdTimestamp: 55 }, failInsert = null } = {}) => {
   const events = [];
+  const rows = [];
+  const logs = [];
+  const botMessageStore = {
+    insert: (row) => {
+      if (failInsert) throw failInsert;
+      rows.push(row);
+    },
+  };
+  const logger = { warn: (...a) => logs.push(['warn', ...a]), error: (...a) => logs.push(['error', ...a]) };
   const composer = {
     compose: async (arg) => {
       events.push(['compose', arg]);
@@ -17,16 +28,16 @@ const setup = ({ failCompose = null, failDeliver = null } = {}) => {
     deliver: async (arg) => {
       events.push(['deliver', arg]);
       if (failDeliver) throw failDeliver;
-      return { id: 'sent' };
+      return sent;
     },
   };
-  return { responder: createResponder({ composer, delivery, logger: {} }), events };
+  return { responder: createResponder({ composer, delivery, botMessageStore, now: () => NOW, logger }), events, rows, logs };
 };
 
 test('composes then delivers and returns the response and the sent message', async () => {
   const { responder, events } = setup();
   const result = await responder.respond(REQUEST);
-  assert.deepEqual(result, { response: 'raw', message: { id: 'sent' } });
+  assert.deepEqual(result, { response: 'raw', message: { id: 'sent', createdTimestamp: 55 } });
   assert.deepEqual(events, [
     ['compose', { persona: 'bob', target: { id: '1' } }],
     ['deliver', {
@@ -61,4 +72,48 @@ test('a non-Error delivery rejection is wrapped as an Error with the stage', asy
   await assert.rejects(responder.respond(REQUEST), (error) => (
     error instanceof Error && error.stage === 'delivery' && error.cause === 'nope'
   ));
+});
+
+test('records the sent message after delivery with persona, raw response, timestamp, reference and trigger', async () => {
+  const { responder, rows } = setup();
+  await responder.respond(REQUEST);
+  assert.deepEqual(rows, [{
+    id: 'sent', persona: 'bob', content: 'raw', timestamp: 55, reference: '1', trigger: 'auto',
+  }]);
+});
+
+test('a revive is recorded with a null reference', async () => {
+  const { responder, rows } = setup();
+  await responder.respond({ ...REQUEST, trigger: 'revive', target: null });
+  assert.equal(rows[0].reference, null);
+  assert.equal(rows[0].trigger, 'revive');
+});
+
+test('falls back to now() when the sent message has no timestamp', async () => {
+  const { responder, rows } = setup({ sent: { id: 'sent' } });
+  await responder.respond(REQUEST);
+  assert.equal(rows[0].timestamp, NOW);
+});
+
+test('a failed delivery records nothing', async () => {
+  const { responder, rows } = setup({ failDeliver: new Error('x') });
+  await assert.rejects(responder.respond(REQUEST));
+  assert.deepEqual(rows, []);
+});
+
+test('a sent message without an id records nothing and logs a warning', async () => {
+  const { responder, rows, logs } = setup({ sent: {} });
+  const result = await responder.respond(REQUEST);
+  assert.equal(result.response, 'raw');
+  assert.deepEqual(rows, []);
+  assert.equal(logs[0][0], 'warn');
+});
+
+test('a failing store is logged as an error and the response still counts as sent', async () => {
+  const boom = new Error('disk full');
+  const { responder, logs } = setup({ failInsert: boom });
+  const result = await responder.respond(REQUEST);
+  assert.deepEqual(result.message, { id: 'sent', createdTimestamp: 55 });
+  assert.equal(logs[0][0], 'error');
+  assert.equal(logs[0][2], boom);
 });

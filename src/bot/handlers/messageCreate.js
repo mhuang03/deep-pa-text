@@ -1,4 +1,5 @@
 import { toMessageRecord } from '../../discord/messageRecord.js';
+import { TRIGGERS } from '../triggers.js';
 import { DELIVERY_STAGE } from '../responder.js';
 import {
   formatReceived, formatNoReply, formatNotReplyable, formatReply, joinLines,
@@ -16,7 +17,7 @@ export const createMessageCreateHandler = (deps) => {
   const respond = async (message, target, persona) => {
     try {
       return await responder.respond({
-        trigger: 'auto', persona, target, guild: message.guild, via: { type: 'reply', message },
+        trigger: TRIGGERS.AUTO, persona, target, guild: message.guild, via: { type: 'reply', message },
       });
     } catch (error) {
       if (error?.stage === DELIVERY_STAGE) replyPolicy.noteReply({ resetMisses: false });

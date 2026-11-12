@@ -82,7 +82,7 @@ All paths (`.env`, `data/`, `messages.db`) are relative to the working directory
    npm start
    ```
 
-Other npm scripts: `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, opened read-only, no Chroma needed) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
+Other npm scripts: `npm test` (unit and scenario tests; no network, real clock or real data), `npm run inspect` (prints the latest rows of `messages.db`, including the latest bot messages, opened read-only, no Chroma needed) and `npm run gif-smoke` (resolves a sample text through the real GIF APIs).
 
 ### Configuration overrides
 
@@ -116,6 +116,7 @@ All three only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-auth
 SQLite (`messages.db`):
 
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
+- `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
 - `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null.
 
 Chroma:
@@ -162,5 +163,4 @@ If an auto reply cannot be sent (for example the message was deleted), the failu
 
 These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
 
-- The bot's own messages are not stored, so there is no record of which persona wrote a given bot message.
 - There is no history backfill.
