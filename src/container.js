@@ -20,6 +20,8 @@ import { createAuthorEmbeds } from './discord/authorEmbed.js';
 import { createEmbedDelivery } from './discord/delivery.js';
 import { createActivityTracker } from './bot/activityTracker.js';
 import { createReplyPolicy } from './bot/replyPolicy.js';
+import { createChainPolicy } from './bot/chainPolicy.js';
+import { createChainBuilder } from './context/chainBuilder.js';
 import { createComposer } from './bot/composer.js';
 import { createBotMessageResolver } from './bot/botMessageResolver.js';
 import { createResponder } from './bot/responder.js';
@@ -90,17 +92,21 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
   };
 };
 
-const buildHandlers = ({ config, data, clock, logger, client, core, responder, authorEmbeds }) => {
+const buildHandlers = ({
+  config, data, clock, logger, client, core, responder, authorEmbeds, botMessageResolver, chainBuilder,
+}) => {
   const activity = createActivityTracker({ now: clock.now });
   const replyPolicy = createReplyPolicy({ config, now: clock.now, random: clock.random });
-  const { ingest, messageFilter, personaSelector } = core;
+  const chainPolicy = createChainPolicy({ config, random: clock.random });
+  const { ingest, messageFilter, personaSelector, botMessageStore, messageStore } = core;
   return {
     messageCreate: createMessageCreateHandler({
       config, activity, ingest, messageFilter, replyPolicy, personaSelector, responder, logger,
+      botMessageStore, messageStore, botMessageResolver, chainBuilder, chainPolicy,
     }),
     replyCommand: createReplyCommandHandler({
       client, config, users: data.users, messageFilter, personaSelector, responder,
-      authorEmbeds, replyPolicy, activity, logger,
+      authorEmbeds, replyPolicy, botMessageResolver, logger,
     }),
     reviveTick: createReviveTick({
       client, config, activity, personaSelector, responder, clock: { now: clock.now }, logger,
@@ -128,7 +134,12 @@ export const buildContainer = ({
   const responder = createResponder({
     composer, delivery, contextBuilder, botMessageStore, now: clock.now, logger,
   });
-  const handlers = buildHandlers({ config, data, clock, logger, client, core, responder, authorEmbeds });
+  const chainBuilder = createChainBuilder({
+    botMessageStore, messageStore: core.messageStore, messageFilter: core.messageFilter, userDirectory, config,
+  });
+  const handlers = buildHandlers({
+    config, data, clock, logger, client, core, responder, authorEmbeds, botMessageResolver, chainBuilder,
+  });
   const bot = createBot({ client, config, handlers, clock, logger });
-  return { bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder, ...core };
+  return { bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder, chainBuilder, ...core };
 };

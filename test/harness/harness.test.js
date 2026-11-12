@@ -345,3 +345,27 @@ test('channel.messages.setFailing makes fetch reject until cleared', async (t) =
   world.discord.channel.messages.setFailing(null);
   assert.equal((await world.discord.channel.messages.fetch({ limit: 1 })).size, 0);
 });
+
+test('fake messages fetch their referenced history message and count the calls', async (t) => {
+  const world = await newWorld(t);
+  const parent = world.addHistory({ author: 'dave', content: 'parent text' });
+  const child = world.discord.makeMessage({ content: 'child', reference: parent.id });
+  assert.equal(child.referenceFetches, 0);
+  assert.equal(await child.fetchReference(), parent);
+  assert.equal(child.referenceFetches, 1);
+  const orphan = world.discord.makeMessage({ content: 'orphan', reference: 'missing' });
+  await assert.rejects(orphan.fetchReference(), /not found/);
+  assert.equal(orphan.referenceFetches, 1);
+});
+
+test('the fake LLM awaits a responder that returns a promise', async (t) => {
+  const world = await newWorld(t);
+  let release;
+  world.llm.respondWith(() => new Promise((resolve) => {
+    release = resolve;
+  }));
+  const client = new world.fakes.llm.OpenAI({});
+  const pending = client.chat.completions.create({ messages: [] });
+  release('held answer');
+  assert.equal((await pending).choices[0].message.content, 'held answer');
+});

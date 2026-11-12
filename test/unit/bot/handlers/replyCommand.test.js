@@ -7,7 +7,7 @@ import { createFakeDiscord } from '../../../support/fakes/discord.js';
 import { GENERATION_FAILED_MESSAGE } from '../../../../src/discord/replyModal.js';
 import { USERS } from '../../../support/fixtures.js';
 
-const setup = ({ target = null, failCompose = false } = {}) => {
+const setup = ({ target = null, failCompose = false, resolveBot = () => null } = {}) => {
     const events = [];
   const logs = { info: [], error: [] };
   const discord = createFakeDiscord();
@@ -28,7 +28,7 @@ const setup = ({ target = null, failCompose = false } = {}) => {
     },
     authorEmbeds: { make: async (author, guild, opts) => ({ author, thinking: opts.thinking }) },
     replyPolicy: { noteReply: (arg) => events.push(['noteReply', arg]) },
-    activity: { noteBot: () => events.push('noteBot') },
+    botMessageResolver: { resolve: (m) => resolveBot(m) },
     logger: { info: (m) => logs.info.push(m), error: (...a) => logs.error.push(a) },
   };
   const command = discord.makeReplyCommand({ target: message, user: 'dave' });
@@ -85,7 +85,7 @@ test('submitting a chosen author thinks, edits the reply, then updates state', a
   const submitted = await command.submit({ author: 'bob' });
   assert.deepEqual(submitted.replies, [{ embeds: [{ author: 'bob', thinking: true }], allowedMentions: { parse: [] } }]);
   assert.deepEqual(submitted.edits, [{ content: 'c', embeds: ['final'] }]);
-  assert.deepEqual(events, [['respond', 'command', 'bob', 'a replyable message'], ['noteReply', { resetMisses: false }], 'noteBot']);
+  assert.deepEqual(events, [['respond', 'command', 'bob', 'a replyable message'], ['noteReply', { resetMisses: false }]]);
   assert.equal(logs.info.length, 2);
   assert.match(logs.info[0], /^\[REQUEST REPLY from dave\] \[.*\] bob: a replyable message$/);
   assert.equal(logs.info[1], '    [REPLY] bob: resp');
@@ -175,4 +175,26 @@ test('failures before the modal are logged, not thrown', async () => {
   command.showModal = async () => { throw new Error('modal refused'); };
   await (await run(handler, command)).done;
   assert.equal(logs.error.length, 1);
+});
+
+test('a bot message target is attributed to its persona, which is the modal default', async () => {
+  const discord0 = createFakeDiscord();
+  const botMessage = discord0.makeMessage({ author: 'deep-pa-text', bot: true, content: '' });
+  const { handler, command, events } = setup({
+    target: botMessage, resolveBot: () => ({ persona: 'carol', content: 'persona words' }),
+  });
+  await run(handler, command);
+  const options = command.modal.components[1].component.options;
+  assert.deepEqual(options.filter((o) => o.default).map((o) => o.value), ['carol']);
+  assert.match(command.modal.components[0].content, /^\*\*Original message from carol:\*\*\npersona words$/);
+  await command.submit({ author: 'bob' });
+  assert.deepEqual(events[0], ['respond', 'command', 'bob', 'persona words']);
+});
+
+test('a human target has no default option', async () => {
+  const { handler, command } = setup();
+  await run(handler, command);
+  const options = command.modal.components[1].component.options;
+  assert.equal(options.some((o) => o.default), false);
+  await command.timeout();
 });

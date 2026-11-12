@@ -12,7 +12,7 @@ import { ENV, PING_CACHE, USERS } from '../support/fixtures.js';
 const SERVICES = [
   'bot', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
-  'botMessageStore', 'botMessageResolver', 'contextBuilder',
+  'botMessageStore', 'botMessageResolver', 'contextBuilder', 'chainBuilder',
 ];
 
 const setup = (overrides = {}) => {

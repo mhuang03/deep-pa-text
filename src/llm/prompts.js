@@ -33,6 +33,12 @@ const REPLY_SECTIONS = [
   sections.frequentPhrases, sections.avoidRepeats,
 ];
 
+const CHAIN_SECTIONS = [
+  sections.identity,
+  sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
+  sections.frequentPhrases, sections.avoidRepeats, sections.thread,
+];
+
 const REVIVE_SECTIONS = [
   sections.identity, sections.situation, sections.lastConversation, sections.starters,
   sections.pastExamples, sections.avoidRepeats,
@@ -41,3 +47,5 @@ const REVIVE_SECTIONS = [
 export const buildReplyPrompt = (ctx) => sections.assemble(REPLY_SECTIONS, ctx);
 
 export const buildRevivePrompt = (ctx) => sections.assemble(REVIVE_SECTIONS, ctx);
+
+export const buildChainPrompt = (ctx) => sections.assemble(CHAIN_SECTIONS, ctx);

@@ -41,7 +41,8 @@ export const createFakeOpenAI = () => {
     async #complete(request) {
       state.calls.push(request);
       state.callClients.push(this.options);
-      const content = resolveResponse(pickResponder(responder, consumed++), request);
+      // A responder function may return a promise, so a test can hold a completion open.
+      const content = await resolveResponse(pickResponder(responder, consumed++), request);
       return toCompletion(content);
     }
 

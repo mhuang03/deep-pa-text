@@ -2,7 +2,7 @@ import { sanitizeResponse } from './sanitize.js';
 import { buildQueryText } from '../retrieval/queryText.js';
 import { normalizeForDedup } from '../retrieval/normalize.js';
 import {
-  SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt,
+  SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt, buildChainPrompt,
 } from './prompts.js';
 
 const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
@@ -10,8 +10,9 @@ const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
 export const createGenerator = ({
   chatClient, retriever, userDirectory, botMessageStore, messageStore, config, logger,
 }) => {
-  const complete = async (user, system = SYSTEM_PROMPT) => {
-    const response = sanitizeResponse(await chatClient.complete({ system, user }));
+  const complete = async (user, system = SYSTEM_PROMPT, turns = null) => {
+    const request = turns ? { system, user, turns } : { system, user };
+    const response = sanitizeResponse(await chatClient.complete(request));
     if (response === '') throw new Error(EMPTY_RESPONSE_MESSAGE);
     return response;
   };
@@ -27,7 +28,22 @@ export const createGenerator = ({
     }
   };
 
+  // The thread is the conversation: earlier turns go to the model as chat turns, not as prompt text.
+  const generateChainReply = async (persona, record, chain) => {
+    const queryText = buildQueryText(record, chain.turns.slice(0, -1), config.retrieval);
+    const buckets = await retriever.retrieveForReply(persona, record, { queryText });
+    const user = buildChainPrompt({
+      author: persona,
+      name: userDirectory.nameOf(persona),
+      buckets,
+      recentBotMessages: loadRecentBotMessages(),
+      maxEntryChars: config.context.maxEntryChars,
+    });
+    return complete(user, SYSTEM_PROMPT, chain.turns);
+  };
+
   const generateReply = async (persona, record, context = {}) => {
+    if (context.chain) return generateChainReply(persona, record, context.chain);
     const transcript = context.transcript ?? [];
     const queryText = buildQueryText(record, transcript, config.retrieval);
     const buckets = await retriever.retrieveForReply(persona, record, { queryText });

@@ -46,11 +46,13 @@ export const createResponder = ({
     }
   };
 
-  const contextFor = ({ channel, target }) =>
-    (target === null ? reviveContext(channel) : contextBuilder.forReply({ channel, target }));
+  const contextFor = ({ channel, target, chain }) => {
+    if (chain) return { chain };
+    return target === null ? reviveContext(channel) : contextBuilder.forReply({ channel, target });
+  };
 
-  const respond = async ({ trigger, persona, target, guild, via, channel }) => {
-    const context = await contextFor({ channel, target });
+  const respond = async ({ trigger, persona, target, guild, via, channel, chain }) => {
+    const context = await contextFor({ channel, target, chain });
     const { response, content, gifLinks } = await composer.compose({ persona, target, context });
     const message = await send({ via, persona, guild, content, gifLinks });
     record({ message, response, persona, target, trigger });

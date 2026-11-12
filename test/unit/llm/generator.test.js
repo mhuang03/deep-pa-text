@@ -207,3 +207,48 @@ test('a starters failure is logged and the revive is built without starters', as
   assert.ok(!calls.chat[0].user.includes('start a conversation'));
   assert.ok(calls.chat[0].user.includes('["x","y"]'));
 });
+
+const chain = {
+  persona: 'alice', botTurns: 2,
+  turns: [
+    { speaker: 'alice', content: 'first', isPersona: true },
+    { speaker: 'bob', content: 'older line', isPersona: false },
+    { speaker: 'bob', content: 'why', isPersona: false },
+  ],
+};
+
+test('a chain reply sends the preamble with the thread as chat turns and no transcript or target', async () => {
+  const { calls, generator } = setup({ recent: [{ content: 'recent bot' }] });
+  assert.equal(await generator.generateReply('alice', { ...record, content: 'why' }, { chain }), 'raw response');
+  assert.equal(calls.chat.length, 1);
+  assert.equal(calls.chat[0].system, SYSTEM_PROMPT);
+  assert.deepEqual(calls.chat[0].turns, chain.turns);
+  const { user } = calls.chat[0];
+  assert.match(user, /^The user you are emulating has username "alice"/);
+  assert.match(user, /\["recent bot"\]/);
+  assert.ok(user.endsWith('Write your next message in the thread.'));
+  assert.match(user, /You are in a reply thread\. Your own earlier messages in it appear as assistant turns; other people's messages are prefixed with their username\./);
+  assert.doesNotMatch(user, /recent conversation in the channel|has just received this message/);
+  const order = ['examples of how the user replied', 'similar in semantic', 'included a GIF', 'other messages', 'recent in the channel', 'reply thread']
+    .map((s) => user.indexOf(s)).filter((i) => i >= 0);
+  assert.deepEqual([...order].sort((a, b) => a - b), order);
+});
+
+test('a chain reply embeds the previous turns plus the message once', async () => {
+  const { calls, generator } = setup();
+  await generator.generateReply('alice', { ...record, content: 'why' }, { chain });
+  assert.deepEqual(calls.reply[0][2], { queryText: 'first\nolder line\nwhy' });
+});
+
+test('a long chain message is queried as itself', async () => {
+  const { calls, generator } = setup();
+  const long = 'a message that is long enough to stand alone';
+  await generator.generateReply('alice', { ...record, content: long }, { chain });
+  assert.deepEqual(calls.reply[0][2], { queryText: long });
+});
+
+test('a context without a chain keeps the plain request shape', async () => {
+  const { calls, generator } = setup();
+  await generator.generateReply('alice', record, { transcript: [] });
+  assert.deepEqual(Object.keys(calls.chat[0]), ['system', 'user']);
+});

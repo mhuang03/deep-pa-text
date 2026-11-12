@@ -21,3 +21,6 @@ export const formatCommandRequest = ({ requester, record, logging }) =>
   `[REQUEST REPLY from ${requester}] [${stamp(record.timestamp, logging)}] ${record.author}: ${record.content}`;
 
 export const joinLines = (lines) => lines.join('\n');
+
+export const formatChainDecision = ({ persona, botTurns, decision }) =>
+  `    [CHAIN: ${persona}, ${botTurns} bot turns, ${decision.reason}${decision.reply ? '' : ', no reply'}]`;

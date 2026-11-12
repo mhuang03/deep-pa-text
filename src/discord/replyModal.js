@@ -16,11 +16,13 @@ export const MODAL_TIMEOUT_LOG = 'reply modal dismissed or timed out';
 export const GENERATION_FAILED_MESSAGE = 'Could not generate a reply.';
 export const WRONG_CHANNEL_MESSAGE = 'This command can only be used in the #pa-text channel.';
 
-const buildUserOption = (user) =>
-  new StringSelectMenuOptionBuilder()
+const buildUserOption = (user, defaultAuthor) => {
+  const option = new StringSelectMenuOptionBuilder()
     .setLabel(user.username)
     .setDescription(`Reply as ${user.name}`)
     .setValue(user.username);
+  return user.username === defaultAuthor ? option.setDefault(true) : option;
+};
 
 const buildRandomOption = () =>
   new StringSelectMenuOptionBuilder()
@@ -28,11 +30,11 @@ const buildRandomOption = () =>
     .setDescription(RANDOM_DESCRIPTION)
     .setValue(RANDOM_AUTHOR);
 
-const buildAuthorLabel = (users) => {
+const buildAuthorLabel = (users, defaultAuthor) => {
   const select = new StringSelectMenuBuilder()
     .setCustomId(AUTHOR_SELECT_ID)
     .setPlaceholder(AUTHOR_PLACEHOLDER)
-    .addOptions([...users.map(buildUserOption), buildRandomOption()]);
+    .addOptions([...users.map((user) => buildUserOption(user, defaultAuthor)), buildRandomOption()]);
   return new LabelBuilder().setLabel(AUTHOR_LABEL).setStringSelectMenuComponent(select);
 };
 
@@ -41,14 +43,14 @@ export const buildModalId = (interactionId) => `${REPLY_MODAL_PREFIX}:${interact
 // discord.js rejects a modal wait with this code when time runs out.
 export const isModalTimeout = (error) => error?.code === 'InteractionCollectorError';
 
-export const buildReplyModal = ({ record, users, modalId }) => {
+export const buildReplyModal = ({ record, users, modalId, defaultAuthor = null }) => {
   const display = new TextDisplayBuilder()
     .setContent(`**Original message from ${record.author}:**\n${record.content}`);
   return new ModalBuilder()
     .setCustomId(modalId)
     .setTitle(MODAL_TITLE)
     .addTextDisplayComponents(display)
-    .addLabelComponents(buildAuthorLabel(users));
+    .addLabelComponents(buildAuthorLabel(users, defaultAuthor));
 };
 
 export const readSelectedAuthor = (modalInteraction) =>

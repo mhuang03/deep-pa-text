@@ -77,3 +77,15 @@ test('an SDK error is not retried', async () => {
   await assert.rejects(chat.complete({ system: 's', user: 'u' }), /llm down/);
   assert.equal(fake.state.calls.length, 1);
 });
+
+test('sends turns as chat messages after the preamble', async () => {
+  const { fake, chat } = setup();
+  await chat.complete({
+    system: 'sys', user: 'usr',
+    turns: [{ speaker: 'bob', content: 'hi', isPersona: true }, { speaker: 'alice', content: 'why', isPersona: false }],
+  });
+  assert.deepEqual(fake.state.calls[0].messages, [
+    { role: 'system', content: 'sys' }, { role: 'user', content: 'usr' },
+    { role: 'assistant', content: 'hi' }, { role: 'user', content: 'alice: why' },
+  ]);
+});

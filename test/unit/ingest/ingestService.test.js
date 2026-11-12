@@ -9,8 +9,8 @@ const setup = ({ kept = true, vectorError = null, duplicate = false } = {}) => {
   const filtered = { ...record, content: 'clean' };
   const messageStore = {
     insertRaw: (r) => calls.push(['insertRaw', r]),
-    insertFiltered: (r) => {
-      calls.push(['insertFiltered', r]);
+    insertFiltered: (r, options) => {
+      calls.push(['insertFiltered', r, options]);
       return duplicate ? null : { ...r, reference: 'resolved', hasGif: true };
     },
   };
@@ -68,4 +68,17 @@ test('a vector store failure rejects after the rows were written', async () => {
   const { ingest, calls } = setup({ vectorError: new Error('chroma down') });
   await assert.rejects(ingest.recordMessage(record), /chroma down/);
   assert.deepEqual(calls.map((c) => c[0]), ['insertRaw', 'filter', 'insertFiltered', 'upsert']);
+});
+
+test('repliesToBot stops the store from inferring a reference', async () => {
+  const { ingest, calls } = setup();
+  await ingest.recordMessage(record, { repliesToBot: true });
+  const insert = calls.find(([name]) => name === 'insertFiltered');
+  assert.deepEqual(insert[2], { inferReference: false });
+});
+
+test('references are inferred by default', async () => {
+  const { ingest, calls } = setup();
+  await ingest.recordMessage(record);
+  assert.deepEqual(calls.find(([name]) => name === 'insertFiltered')[2], { inferReference: true });
 });

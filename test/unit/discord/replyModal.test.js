@@ -79,3 +79,14 @@ test('isModalTimeout is true only for collector errors', () => {
   assert.equal(isModalTimeout(null), false);
   assert.equal(isModalTimeout(undefined), false);
 });
+
+test('defaultAuthor marks only that persona option as the default', () => {
+  const json = buildReplyModal({ record, users: USERS, modalId: 'm', defaultAuthor: 'bob' }).toJSON();
+  const options = json.components[1].component.options;
+  assert.deepEqual(options.filter((o) => o.default).map((o) => o.value), ['bob']);
+});
+
+test('an unknown defaultAuthor marks nothing', () => {
+  const json = buildReplyModal({ record, users: USERS, modalId: 'm', defaultAuthor: 'zed' }).toJSON();
+  assert.equal(json.components[1].component.options.some((o) => o.default), false);
+});

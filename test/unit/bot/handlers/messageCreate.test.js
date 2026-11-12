@@ -7,9 +7,11 @@ import { createFakeDiscord } from '../../../support/fakes/discord.js';
 
 const setup = ({
   filtered = {}, decision = { reply: true, reason: 'accepted' }, failAt = null, deliveryFailure = null,
+  parent = null, chain = null, chainDecision = { reply: true, reason: 'chain-guaranteed' },
+  chainTarget,
 } = {}) => {
   const events = [];
-  const logs = { info: [], error: [] };
+  const logs = { info: [], warn: [], error: [] };
   const step = (name, value) => async (...args) => {
     events.push(name);
     if (failAt === name) throw new Error(`${name} failed`);
@@ -21,8 +23,26 @@ const setup = ({
       noteHuman: (arg) => events.push(['noteHuman', arg]),
       noteBot: () => events.push('noteBot'),
     },
-    ingest: { recordMessage: step('ingest', { filtered: 'filtered' in filtered ? filtered.filtered : {} }) },
-    messageFilter: { filterAnyAuthor: (record) => (events.push('filter'), filtered.target === null ? null : record) },
+    ingest: {
+      recordMessage: async (record, options) => {
+        events.push(['ingest', options]);
+        if (failAt === 'ingest') throw new Error('ingest failed');
+        return { filtered: 'filtered' in filtered ? filtered.filtered : {} };
+      },
+    },
+    messageFilter: {
+      filterAnyAuthor: (record) => (events.push('filter'), filtered.target === null ? null : record),
+      filterForChain: (record) => (events.push('filterForChain'), chainTarget === undefined ? record : chainTarget),
+    },
+    botMessageStore: { getById: () => parent },
+    messageStore: { getRaw: () => null },
+    botMessageResolver: { resolve: () => null },
+    chainBuilder: { build: (target, p) => (events.push(['build', target, p]), chain) },
+    chainPolicy: {
+      decide: (c) => (events.push(['chainDecide', c]), chainDecision),
+      begin: () => events.push('begin'),
+      end: () => events.push('end'),
+    },
     replyPolicy: {
       decide: () => (events.push('decide'), decision),
       noteReply: (arg) => events.push(['noteReply', arg]),
@@ -36,7 +56,7 @@ const setup = ({
         return { response: 'raw', message: { id: 'sent' } };
       },
     },
-    logger: { info: (m) => logs.info.push(m), error: (...a) => logs.error.push(a) },
+    logger: { info: (m) => logs.info.push(m), warn: (...a) => logs.warn.push(a), error: (...a) => logs.error.push(a) },
   };
   const discord = createFakeDiscord();
   return { handler: createMessageCreateHandler(deps), deps, events, logs, discord };
@@ -56,7 +76,7 @@ test('replies in order: human noted before ingest, bot claimed before generation
   await handler(message);
   assert.deepEqual(events, [
     ['noteHuman', { timestamp: 4242, author: 'alice' }],
-    'ingest', 'filter', 'decide', 'noteBot', 'pick',
+    ['ingest', { repliesToBot: false }], 'filter', 'decide', 'noteBot', 'pick',
     ['respond', {
       trigger: 'auto', persona: 'bob', target: record, guild: message.guild, channel: message.channel,
       via: { type: 'reply', message },
@@ -70,7 +90,7 @@ test('replies in order: human noted before ingest, bot claimed before generation
 test('noteHuman runs synchronously before the first await', () => {
   const { handler, events, discord } = setup();
   const pending = handler(discord.makeMessage({ timestamp: 7 }));
-  assert.deepEqual(events, [['noteHuman', { timestamp: 7, author: 'alice' }], 'ingest']);
+  assert.deepEqual(events, [['noteHuman', { timestamp: 7, author: 'alice' }], ['ingest', { repliesToBot: false }]]);
   return pending;
 });
 
@@ -87,7 +107,7 @@ test('a delivery failure is logged once, arms the rate limit without resetting m
 test('logs not replyable and neither decides nor claims activity', async () => {
   const { handler, events, logs, discord } = setup({ filtered: { target: null, filtered: null } });
   await handler(discord.makeMessage({ content: 'hi' }));
-  assert.deepEqual(events.slice(1), ['ingest', 'filter']);
+  assert.deepEqual(events.slice(1), [['ingest', { repliesToBot: false }], 'filter']);
   assert.match(logs.info[0], /filter kept: no[\s\S]*\[NOREPLY: not replyable\]$/);
 });
 
@@ -119,5 +139,77 @@ test('generation failure keeps the bot claim, arms no rate limit and logs', asyn
 test('persona selection failure is logged and never throws', async () => {
   const { handler, logs, discord } = setup({ failAt: 'pick' });
   await handler(discord.makeMessage());
+  assert.equal(logs.error.length, 1);
+});
+
+const PARENT = { id: 'p1', persona: 'bob', content: 'earlier', reference: null };
+const CHAIN = { persona: 'bob', turns: [], botTurns: 2 };
+const replyTo = (discord, extra = {}) => discord.makeMessage({ content: 'why', reference: 'p1', ...extra });
+const names = (events) => events.map((e) => (Array.isArray(e) ? e[0] : e));
+
+test('a reply to a bot message is ingested as such, chained, and answered by the same persona', async () => {
+  const { handler, events, logs, discord } = setup({ parent: PARENT, chain: CHAIN });
+  const message = replyTo(discord);
+  await handler(message);
+  assert.deepEqual(names(events), [
+    'noteHuman', 'ingest', 'filterForChain', 'build', 'chainDecide', 'begin', 'respond', 'noteReply', 'end',
+  ]);
+  assert.deepEqual(events[1], ['ingest', { repliesToBot: true }]);
+  const [, request] = events.find((e) => e[0] === 'respond');
+  assert.equal(request.trigger, 'chain');
+  assert.equal(request.persona, 'bob');
+  assert.equal(request.chain, CHAIN);
+  assert.deepEqual(request.via, { type: 'reply', message });
+  assert.deepEqual(events.find((e) => e[0] === 'noteReply'), ['noteReply', { resetMisses: false }]);
+  assert.match(logs.info[0], /\[CHAIN: bob, 2 bot turns, chain-guaranteed\]\n {4}\[REPLY\] bob: raw$/);
+});
+
+test('a chain reply never touches the activity tracker or the random policy', async () => {
+  const { handler, events, discord } = setup({ parent: PARENT, chain: CHAIN });
+  await handler(replyTo(discord));
+  assert.equal(events.includes('noteBot'), false);
+  assert.equal(events.includes('decide'), false);
+  assert.equal(events.includes('pick'), false);
+});
+
+test('a declined chain decision is logged and does not fall through to the random policy', async () => {
+  const { handler, events, logs, discord } = setup({
+    parent: PARENT, chain: CHAIN, chainDecision: { reply: false, reason: 'chain-limit' },
+  });
+  await handler(replyTo(discord));
+  assert.deepEqual(names(events), ['noteHuman', 'ingest', 'filterForChain', 'build', 'chainDecide']);
+  assert.match(logs.info[0], /\[CHAIN: bob, 2 bot turns, chain-limit, no reply\]$/);
+});
+
+test('without a chain the message continues through the normal flow', async () => {
+  const unknownPersona = setup({ parent: PARENT, chain: null });
+  await unknownPersona.handler(replyTo(unknownPersona.discord));
+  assert.ok(unknownPersona.events.includes('decide'));
+  assert.deepEqual(unknownPersona.events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: true }]);
+  const emptyTarget = setup({ parent: PARENT, chain: CHAIN, chainTarget: null });
+  await emptyTarget.handler(replyTo(emptyTarget.discord));
+  assert.equal(emptyTarget.events.some((e) => e[0] === 'build'), false);
+  assert.ok(emptyTarget.events.includes('decide'));
+});
+
+test('a message that does not reply to a bot message never builds a chain', async () => {
+  const { handler, events, discord } = setup({ parent: null });
+  await handler(replyTo(discord));
+  assert.equal(events.includes('filterForChain'), false);
+  assert.deepEqual(events.find((e) => e[0] === 'ingest'), ['ingest', { repliesToBot: false }]);
+});
+
+test('the chain is released and the rate limit armed when delivery fails', async () => {
+  const { handler, events, logs, discord } = setup({ parent: PARENT, chain: CHAIN, deliveryFailure: true });
+  await handler(replyTo(discord));
+  assert.deepEqual(events.slice(-2), [['noteReply', { resetMisses: false }], 'end']);
+  assert.equal(logs.error.length, 1);
+});
+
+test('the chain is released and nothing is noted when generation fails', async () => {
+  const { handler, events, logs, discord } = setup({ parent: PARENT, chain: CHAIN, failAt: 'respond' });
+  await handler(replyTo(discord));
+  assert.equal(events.at(-1), 'end');
+  assert.equal(events.some((e) => e[0] === 'noteReply'), false);
   assert.equal(logs.error.length, 1);
 });

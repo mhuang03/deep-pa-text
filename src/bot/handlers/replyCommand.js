@@ -12,7 +12,7 @@ import { formatCommandRequest, formatReply } from '../logLines.js';
 export const createReplyCommandHandler = (deps) => {
   const {
     client, config, users, messageFilter, personaSelector, responder,
-    authorEmbeds, replyPolicy, activity, logger,
+    authorEmbeds, replyPolicy, botMessageResolver, logger,
   } = deps;
 
   const isReplyCommand = (interaction) =>
@@ -77,28 +77,39 @@ export const createReplyCommandHandler = (deps) => {
     }));
     logger.info(formatReply({ persona, response }));
     replyPolicy.noteReply({ resetMisses: false });
-    activity.noteBot();
+  };
+
+  // A bot message is attributed to its persona, so the reply continues as that persona by default.
+  const describeTarget = (message) => {
+    const record = toMessageRecord(message);
+    const bot = botMessageResolver.resolve(message);
+    if (!bot) return { record, defaultAuthor: null };
+    return { record: { ...record, author: bot.persona, content: bot.content }, defaultAuthor: bot.persona };
   };
 
   const prepare = async (interaction) => {
     const message = interaction.targetMessage;
-    const target = messageFilter.filterAnyAuthor(toMessageRecord(message));
+    const { record, defaultAuthor } = describeTarget(message);
+    const target = messageFilter.filterAnyAuthor(record);
     if (!target) return void (await refuse(interaction, NOT_REPLYABLE_MESSAGE));
     const guild = message.guild ?? await client.guilds.fetch(message.guildId);
     if (message.channel.id !== config.discord.channelId) {
       return void (await refuse(interaction, WRONG_CHANNEL_MESSAGE));
     }
-    return { target, guild, channel: message.channel };
+    return { target, guild, channel: message.channel, defaultAuthor };
   };
 
   const run = async (interaction) => {
     const prepared = await prepare(interaction);
     if (!prepared) return;
     const modalId = buildModalId(interaction.id);
-    await interaction.showModal(buildReplyModal({ record: prepared.target, users, modalId }));
+    await interaction.showModal(buildReplyModal({
+      record: prepared.target, users, modalId, defaultAuthor: prepared.defaultAuthor,
+    }));
     const modalInteraction = await awaitSubmit(interaction, modalId);
     if (!modalInteraction) return;
-    await answer({ interaction, modalInteraction, ...prepared });
+    const { defaultAuthor, ...rest } = prepared;
+    await answer({ interaction, modalInteraction, ...rest });
   };
 
   return async (interaction) => {

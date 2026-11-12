@@ -244,3 +244,28 @@ test('randomStarters honours the limit', () => {
   assert.equal(starters(store, { limit: 2 }).length, 2);
   assert.deepEqual(starters(store, { author: 'nobody' }), []);
 });
+
+test('getRaw returns the raw row or null', () => {
+  const { store } = setup();
+  store.insertRaw(msg('1', 'a', 10, { content: '<@1> raw', reference: 'r' }));
+  assert.deepEqual(store.getRaw('1'), {
+    id: '1', author: 'a', content: '<@1> raw', timestamp: 10, reference: 'r',
+  });
+  assert.equal(store.getRaw('nope'), null);
+});
+
+test('insertFiltered with inferReference false stores a null reference instead of inferring one', () => {
+  const { db, store } = setup();
+  store.insertFiltered(msg('1', 'a', 10));
+  store.insertFiltered(msg('2', 'b', 20), { inferReference: false });
+  store.insertFiltered(msg('3', 'a', 30));
+  assert.equal(refOf(db, '2'), null);
+  assert.equal(refOf(db, '3'), '2');
+});
+
+test('inferReference false still keeps an explicit reference to a stored message', () => {
+  const { db, store } = setup();
+  store.insertFiltered(msg('1', 'a', 10));
+  store.insertFiltered(msg('2', 'b', 20, { reference: '1' }), { inferReference: false });
+  assert.equal(refOf(db, '2'), '1');
+});

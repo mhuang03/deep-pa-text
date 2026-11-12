@@ -148,3 +148,18 @@ test('a failing store is logged as an error and the response still counts as sen
   assert.equal(logs[0][0], 'error');
   assert.equal(logs[0][2], boom);
 });
+
+test('a chain request skips the history fetch and composes with the chain as context', async () => {
+  const { responder, events } = setup();
+  const chain = { persona: 'bob', turns: [], botTurns: 1 };
+  await responder.respond({ ...REQUEST, trigger: 'chain', chain });
+  assert.deepEqual(events.map(([name]) => name), ['compose', 'deliver']);
+  assert.deepEqual(events[0], ['compose', { persona: 'bob', target: { id: '1' }, context: { chain } }]);
+});
+
+test('a chain reply is recorded with the incoming message as its reference and the chain trigger', async () => {
+  const { responder, rows } = setup();
+  await responder.respond({ ...REQUEST, trigger: 'chain', chain: { turns: [] } });
+  assert.equal(rows[0].trigger, 'chain');
+  assert.equal(rows[0].reference, '1');
+});

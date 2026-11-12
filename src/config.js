@@ -143,6 +143,25 @@ const buildContext = () => ({
   timeZone: 'America/Chicago',
 });
 
+export const assertChain = (chain) => {
+  if (!(Number.isFinite(chain.decay) && chain.decay > 0 && chain.decay < 1)) {
+    throw new Error('chain.decay must be a number in (0, 1)');
+  }
+  if (!(Number.isInteger(chain.maxContextTurns) && chain.maxContextTurns >= 2)) {
+    throw new Error('chain.maxContextTurns must be an integer of at least 2');
+  }
+  return chain;
+};
+
+const buildChain = (env) => assertChain({
+  enabled: env.CHAIN_REPLIES !== 'false',
+  fullDepth: 3,
+  decay: 0.5,
+  maxBotTurns: 8,
+  maxContextTurns: 12,
+  maxWalkSteps: 50,
+});
+
 const buildLogging = () => ({
   locale: 'en-US',
   timeZone: 'America/Chicago',
@@ -167,6 +186,7 @@ const buildConfig = (env) => ({
   llm: buildLlm(env),
   gifs: buildGifs(env),
   context: buildContext(),
+  chain: buildChain(env),
   logging: buildLogging(),
 });
 

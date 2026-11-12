@@ -20,10 +20,10 @@ Code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, specs in
 | `src/main.js` | Entry point (`npm start`): loads `.env`, config and data files, builds the container, connects Chroma, starts the bot. |
 | `src/container.js` | Wires every service together. `src/vendor.js` collects the real third-party constructors. |
 | `src/config.js` | Every tunable, ID, model name and limit, with environment overrides. |
-| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply and revive policies, activity tracker, composer (generate, resolve GIFs, truncate), responder (compose then deliver), `bot.js`. |
+| `src/bot/` | Triggers and orchestration: `handlers/` (message, `reply` command, revive tick), reply, chain and revive policies, the bot-parent finder, activity tracker, composer (generate, resolve GIFs, truncate), responder (compose then deliver), `bot.js`. |
 | `src/corpus/` | Content transformers and keep/drop predicates applied before a message enters the corpus. |
 | `src/storage/` | SQLite schema, migrations and queries; the Chroma vector store. |
-| `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies. |
+| `src/ingest/`, `src/retrieval/`, `src/llm/`, `src/gifs/`, `src/context/` | Recording a message, retrieval and persona choice, prompts (assembled from sections) and the chat client, GIF resolution, the conversation transcript for replies and the reply-thread chain builder. |
 | `src/discord/` | Discord client construction, payloads and safe mentions, embeds, delivery (the one place replies, channel posts and interaction edits are sent), the reply modal and the command definition. |
 | `src/userData/`, `src/logger.js` | Reading `data/*.json`; logging and timestamp formatting. |
 | `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js` (see the npm scripts below). |
@@ -95,19 +95,21 @@ Everything else is defined in `src/config.js`. These optional environment variab
 | `CHROMA_PORT` | `7429` | Chroma server port (must be a number) |
 | `REPLY_OVERRIDE` | off | `true` replies to every message, ignoring randomness and the rate limit (testing) |
 | `REVIVE_OVERRIDE` | off | `true` checks every minute and revives regardless of idle time (testing) |
+| `CHAIN_REPLIES` | on | `false` turns off chain replies (replies to a bot message). Such replies then get no answer at all, not even a random one |
 | `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
 
 The corpus is only filled by live messages (`ingest.recordMessage`). There is no history backfill script in this repo; the vector store accepts batches, but nothing calls it in bulk.
 
 ## Triggers
 
-All three only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-authored messages are ignored.
+All four only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-authored messages are ignored.
 
 | Trigger | When | Persona | Posts as |
 | --- | --- | --- | --- |
 | Auto reply | A human message that passes the content filters, at least 5 min after the last bot reply, with probability 0.1. After 10 consecutive random misses the chance rises 0.05 per miss until a reply happens. | Weighted pick from the authors of the 20 nearest entries in `message_reply_embeddings` (people who replied to similar messages, excluding the message's author). Each hit weighs `1 / (1 + distance)` times a recency factor that halves every `persona.recencyHalfLifeMs` (180 days) and never drops below `persona.minRecencyWeight` (0.25); an author's weight is the sum over their hits. With no usable hits it falls back to a random user other than the message's author. | Discord reply to the message |
-| Revive | Checked every 10 min. Fires only when the last activity in the channel was a human message (not a bot reply or revive, and not a fresh start) and it is more than 3 h old during 10:00–22:59 Central, or more than 12 h old otherwise. The bot therefore never revives twice in a row. | Random user | Plain channel message |
-| `reply` context menu | A user right-clicks a message, then **Apps → reply**, and picks a persona (or `random`, which uses the auto-reply selection) in a modal. Skips the probability and rate limit. | Chosen in the modal | Interaction reply (not a Discord reply to the target) |
+| Revive | Checked every 10 min. Fires only when the last activity in the channel was a human message (not a naturally spawned bot message, meaning an auto reply or a revive, and not a fresh start; chain replies and `reply` command replies do not count as the bot speaking, so idle time keeps running from the last human message) and it is more than 3 h old during 10:00–22:59 Central, or more than 12 h old otherwise. The bot therefore never revives twice in a row. | Random user | Plain channel message |
+| Chain reply | A human replies to a bot message and the bot message's persona is still in `users.json`. The first 3 bot messages in a thread are always answered (the global rate limit and probability do not apply); later ones with chance 0.5, 0.25, 0.125 and 0.0625; a thread never holds more than 8 bot messages. One chain reply is generated at a time. A reply to a bot message never falls through to the random auto reply. Controlled by `CHAIN_REPLIES`, `chain.fullDepth`, `chain.decay`, `chain.maxBotTurns`, `chain.maxContextTurns` (12) and `chain.maxWalkSteps` (50). | Same persona as the bot message replied to | Discord reply to the message |
+| `reply` context menu | A user right-clicks a message, then **Apps → reply**, and picks a persona (or `random`, which uses the auto-reply selection) in a modal. Skips the probability and rate limit. | Chosen in the modal | Interaction reply (not a Discord reply to the target). When the target is a bot message it is shown as its persona and that persona is the modal's default choice. |
 
 `REPLY_OVERRIDE` and `REVIVE_OVERRIDE` remove the randomness and timers for testing.
 
@@ -117,7 +119,7 @@ SQLite (`messages.db`):
 
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
 - `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive` or `chain`). Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
-- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
+- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
 
 Chroma:
 
@@ -155,9 +157,13 @@ Retrieval for a short target (fewer than `retrieval.shortMessageChars`, 25, char
 
 For a revive the prompt, under a revive variant of the system prompt (`REVIVE_SYSTEM_PROMPT`, derived from `SYSTEM_PROMPT` by two replacements: "the channel has gone quiet, write the next message to get conversation going" instead of "respond to this message", and GIF search terms based on what is being said), has these sections in order: identity; a situation line (`It is Thursday 3:10 PM.` in `context.timeZone`, plus `The channel has been quiet for about 3 hours.` when known); the end of the last conversation (the last `revive.transcriptLimit` (10) channel messages, with no age cut-off); up to `revive.starterSamples` (20) conversation starters; up to `retrieval.reviveSamples` (30) random example messages (over-fetched 3x and deduplicated by normalised key, minus anything already shown as a starter); and the avoid-repeats section. A starter is a message by the persona that came more than `revive.starterGapMs` (1 h) after the previous message in the channel from anyone, including messages the corpus filter dropped, or the first message ever. Sections with nothing to say are omitted. A failed history fetch or starter query is logged as a warning and the revive is sent without that section.
 
+### Chain replies
+
+When a message replies to a bot message, the bot walks up the reply references (at most `chain.maxWalkSteps` steps, through `bot_messages` and the raw `messages` table; a bot message from before `bot_messages` existed is fetched once through Discord and attributed by its embed) and sends the thread to the model as chat turns: the persona's own messages as `assistant` turns, everyone else's as `user` turns prefixed with their username, consecutive same-role turns merged. The last `chain.maxContextTurns` (12) turns are kept, but the bot-message cap counts the whole walk. No channel history is fetched for these replies. The system prompt is unchanged; the user preamble holds identity, reply examples, similar, GIF and other examples, frequent phrases, avoid-repeats and a thread note.
+
 ## Filtering
 
-`messageFilter.filter(record)` returns a new record with transformed content, or `null`; the input is not modified. `filterAnyAuthor` is the same without the `approvedAuthors` predicate (excluded by name).
+`messageFilter.filter(record)` returns a new record with transformed content, or `null`; the input is not modified. `filterAnyAuthor` is the same without the `approvedAuthors` predicate (excluded by name), and `filterForChain` additionally skips `minLength`, so short replies such as `why` can continue a chain.
 
 Transformers, in order: resolve mentions through the ping cache (mention-only messages become empty), turn Tenor links into `<gif! search terms>`, strip URLs (markdown links keep their text), reduce custom emoji to `:name:`, drop Discord timestamps, soundboard tags and invite links, trim.
 

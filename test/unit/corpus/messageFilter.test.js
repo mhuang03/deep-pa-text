@@ -83,3 +83,18 @@ test('filterAnyAuthor excludes approvedAuthors by name, not position', () => {
   assert.notEqual(subject.filterAnyAuthor(record('hello there', 'nobody')), null);
   assert.equal(subject.filterAnyAuthor(record('!hello there', 'nobody')), null);
 });
+
+test('filterForChain keeps short messages that filterAnyAuthor rejects', () => {
+  const subject = createSubject();
+  assert.equal(subject.filterAnyAuthor(record('why')), null);
+  assert.equal(subject.filterForChain(record('why')).content, 'why');
+  assert.equal(subject.filterForChain(record('why', 'stranger')).content, 'why');
+});
+
+test('filterForChain still applies every other predicate', () => {
+  const subject = createSubject();
+  assert.equal(subject.filterForChain(record('')), null);
+  assert.equal(subject.filterForChain(record('!why')), null);
+  assert.equal(subject.filterForChain(record('x'.repeat(201))), null);
+  assert.equal(subject.filterForChain(record('Wordle 100 3/6')), null);
+});

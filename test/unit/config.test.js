@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
+import { DEFAULTS, assertChain, assertPersona, assertRetrieval, loadConfig } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -37,6 +37,7 @@ const EXPECTED_DEFAULTS = {
     frequentLimit: 10, recentBotMessages: 10,
   },
   context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
+  chain: { enabled: true, fullDepth: 3, decay: 0.5, maxBotTurns: 8, maxContextTurns: 12, maxWalkSteps: 50 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
@@ -139,4 +140,19 @@ test('assertRetrieval rejects an invalid over-fetch factor or near-duplicate thr
   [0, -0.1, 1.01, NaN, undefined].forEach((nearDuplicateThreshold) => {
     assert.throws(() => assertRetrieval({ ...valid, nearDuplicateThreshold }), /nearDuplicateThreshold/);
   });
+});
+
+test('CHAIN_REPLIES=false disables chain replies and anything else keeps them on', () => {
+  assert.equal(loadConfig({ CHAIN_REPLIES: 'false' }).chain.enabled, false);
+  assert.equal(loadConfig({ CHAIN_REPLIES: 'true' }).chain.enabled, true);
+  assert.equal(loadConfig({}).chain.enabled, true);
+});
+
+test('assertChain validates decay and the context size', () => {
+  const ok = { ...DEFAULTS.chain };
+  assert.equal(assertChain(ok), ok);
+  [0, 1, -0.5, 1.5, NaN].forEach((decay) => assert.throws(() => assertChain({ ...ok, decay }), /chain\.decay/));
+  [1, 1.5, 0, NaN].forEach((maxContextTurns) =>
+    assert.throws(() => assertChain({ ...ok, maxContextTurns }), /chain\.maxContextTurns/));
+  assert.doesNotThrow(() => assertChain({ ...ok, maxContextTurns: 2 }));
 });

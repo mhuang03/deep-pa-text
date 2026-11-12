@@ -169,6 +169,14 @@ export const createFakeDiscord = () => {
       guild: guildField,
       guildId: target.guildId,
       replies: [],
+      referenceFetches: 0,
+    };
+    // Resolves to the history message with the referenced id, like discord.js; rejects when it is gone.
+    message.fetchReference = async () => {
+      message.referenceFetches += 1;
+      const found = target.history.find((m) => m.id === reference);
+      if (!found) throw new Error(`fake discord: referenced message ${reference} not found`);
+      return found;
     };
     const failer = createFailer();
     message.failReplies = failer.arm;

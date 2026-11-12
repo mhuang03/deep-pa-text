@@ -290,13 +290,13 @@ test('a command reply starts the auto-reply rate limit', async (t) => {
   assert.equal(world.llm.calls.length, llmCalls);
 });
 
-test('a command reply counts as bot activity so no revive follows', async (t) => {
+test('a command reply does not count as bot activity so a revive still follows (spec 21)', async (t) => {
   const world = await newWorld(t);
   await world.ready();
   await world.emitMessage({ content: CONTENT });
   await openAndSubmit(world, 'bob');
   await world.advance(48 * HOUR);
-  assert.equal(world.discord.channel.sent.length, 0);
+  assert.equal(world.discord.channel.sent.length, 1);
 });
 
 test('works immediately after an auto reply, ignoring the rate limit and the probability roll', async (t) => {

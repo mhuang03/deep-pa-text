@@ -14,6 +14,7 @@ const PREVIOUS_FILTERED = `
   ORDER BY timestamp DESC
   LIMIT 1
 `;
+const RAW_BY_ID = 'SELECT id, author, content, timestamp, reference FROM messages WHERE id = ?';
 const FILTERED_EXISTS = 'SELECT 1 as id_exists FROM filtered_messages WHERE id = ?';
 const RANDOM_MESSAGES = `
   SELECT id, content FROM filtered_messages
@@ -59,6 +60,7 @@ export const createMessageStore = ({ db, config }) => {
   const insertRawSql = db.prepare(INSERT_RAW);
   const insertFilteredSql = db.prepare(INSERT_FILTERED);
   const previousSql = db.prepare(PREVIOUS_FILTERED);
+  const rawByIdSql = db.prepare(RAW_BY_ID);
   const existsSql = db.prepare(FILTERED_EXISTS);
   const randomSql = db.prepare(RANDOM_MESSAGES);
   const startersSql = db.prepare(RANDOM_STARTERS);
@@ -76,8 +78,8 @@ export const createMessageStore = ({ db, config }) => {
     return record.timestamp - previous.timestamp < windowMs ? previous.id : null;
   };
 
-  const resolveReference = (record) =>
-    resolveExplicit(record.reference) ?? inferReference(record);
+  const resolveReference = (record, shouldInfer) =>
+    resolveExplicit(record.reference) ?? (shouldInfer ? inferReference(record) : null);
 
   const insertRaw = (record) => {
     insertRawSql.run(
@@ -85,9 +87,10 @@ export const createMessageStore = ({ db, config }) => {
     );
   };
 
-  const insertFiltered = (record) => {
+  // Replies to bot messages pass inferReference: false so they are not linked to an unrelated human message.
+  const insertFiltered = (record, { inferReference: shouldInfer = true } = {}) => {
     const hasGif = record.content.includes(GIF_TOKEN);
-    const reference = resolveReference(record);
+    const reference = resolveReference(record, shouldInfer);
     const { changes } = insertFilteredSql.run(
       record.id, record.author, record.content, record.timestamp, reference, hasGif ? 1 : 0,
     );
@@ -130,8 +133,14 @@ export const createMessageStore = ({ db, config }) => {
     return counts;
   };
 
+  const getRaw = (id) => {
+    const row = rawByIdSql.get(id);
+    return row ? { ...row } : null;
+  };
+
   return {
     insertRaw,
+    getRaw,
     countContents,
     getParents,
     insertFiltered,

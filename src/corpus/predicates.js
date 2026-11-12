@@ -1,11 +1,12 @@
 export const APPROVED_AUTHORS = 'approvedAuthors';
+export const MIN_LENGTH = 'minLength';
 
 export const createPredicates = ({ usernames, config }) => {
   const { minLength, maxLength, commandPrefixes } = config.filter;
   return [
     { name: APPROVED_AUTHORS, test: (m) => usernames.has(m.author) },
     { name: 'hasContent', test: (m) => Boolean(m.content) },
-    { name: 'minLength', test: (m) => m.content.length >= minLength },
+    { name: MIN_LENGTH, test: (m) => m.content.length >= minLength },
     { name: 'maxLength', test: (m) => m.content.length <= maxLength },
     { name: 'noCommands', test: (m) => commandPrefixes.every((p) => !m.content.startsWith(p)) },
     {
