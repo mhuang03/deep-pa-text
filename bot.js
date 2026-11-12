@@ -52,12 +52,13 @@ client.once(Events.ClientReady, async () => {
       const elapsedTime = Date.now() - lastMessageTime;
       // is daytime in central time
       const centralTimeHourNow = new Date().toLocaleString("en-US", { timeZone: "America/Chicago", hour: "numeric", hour12: false });
-      const isDaytime = parseInt(centralTimeHourNow) >= 7 && parseInt(centralTimeHourNow) <= 23;
+      const isDaytime = parseInt(centralTimeHourNow) >= 10 && parseInt(centralTimeHourNow) <= 22;
       if (
         REVIVE_OVERRIDE
-        || lastMessageAuthor !== "deep-pa-text" && elapsedTime > 3600000 // 1 hour
-        || isDaytime && elapsedTime > 3*3600000 // 3 hours
-        || !isDaytime && elapsedTime > 12*3600000 // 12 hours
+        || lastMessageAuthor !== "deep-pa-text" && (
+          isDaytime && elapsedTime > 3*3600000 // 3 hours
+          || !isDaytime && elapsedTime > 12*3600000 // 12 hours
+        )
       ) {
 
         // update last message time so that the bot doesn't try to send a message while it's already processing a message
