@@ -27,20 +27,26 @@ CREATE INDEX IF NOT EXISTS idx_bot_messages_timestamp ON bot_messages (timestamp
 `createBotMessageStore({ db })` → 
 - `insert({ id, persona, content, timestamp, reference, trigger })` (`ON CONFLICT(id) DO NOTHING`);
 - `getById(id) → BotMessage | null`;
-- `recent({ limit }) → BotMessage[]`, newest first.
+- `recent({ limit }) → BotMessage[]`, newest first (`ORDER BY timestamp DESC, id DESC`); `limit` is required.
 
 **BotMessage:** `{ id, persona, content, timestamp, reference, trigger }`.
 
+`src/bot/triggers.js` exports `TRIGGERS = { AUTO: 'auto', COMMAND: 'command', REVIVE: 'revive', CHAIN: 'chain' }`; handlers and the responder use these constants (`CHAIN` is first used by spec 21).
+
 ### Recording (in `src/bot/responder.js`)
 
-After `delivery.deliver` resolves with the sent Discord message, the responder calls `botMessageStore.insert` with `id: message.id`, `persona`, `content: response` (the generated text before GIF processing), `timestamp: message.createdTimestamp ?? now()`, `reference: target?.id ?? null`, `trigger`. A failure to record is logged and does not fail the response. `respond` still resolves `{ response, message }`.
+`createResponder({ composer, delivery, botMessageStore, now, logger })`. After `delivery.deliver` resolves with the sent Discord message, the responder calls `botMessageStore.insert` with `id: message.id`, `persona` (always a resolved username, never the `random` choice), `content: response` (the generated text before GIF processing; spec 22 later records one row per burst part), `timestamp: message.createdTimestamp ?? now()`, `reference: target?.id ?? null`, `trigger`. If the sent message has no `id`, or the insert throws, a warning or error is logged and the response still counts as sent. `respond` still resolves `{ response, message }`.
+
+If the process dies between delivery and insert the row is lost; the embed fallback below is the recovery path. Accepted.
+
+The container builds `botMessageStore`, `botMessageResolver` and the responder with these dependencies and returns all three.
 
 ### Resolving the persona of a Discord message (`src/bot/botMessageResolver.js`)
 
 `createBotMessageResolver({ botMessageStore, userDirectory, getBotUserId })` → `resolve(discordMessage) → { persona, content } | null`:
 
 1. If the store has `discordMessage.id` → `{ persona, content }` from the store.
-2. Else if `discordMessage.author.id === getBotUserId()`: read the persona from the embeds with `readPersonaFromEmbeds` and return `{ persona, content: discordMessage.content }` (messages sent before this feature existed).
+2. Else if `discordMessage.author.id === getBotUserId()`: read the persona from the embeds with `readPersonaFromEmbeds` and return `{ persona, content: discordMessage.content }` (messages sent before this feature existed). This content is the delivered text, in which resolved GIF tokens were already removed; callers tolerate both forms.
 3. Else `null`.
 
 `src/discord/botPersona.js`: `readPersonaFromEmbeds(discordMessage, userDirectory) → username | null`: the `author.name` of the last embed that has one, if it is a known username. Reads both received embeds (`embed.author?.name`) and builders (`embed.data?.author?.name`).
@@ -49,7 +55,7 @@ The container passes `getBotUserId: () => client.user?.id`.
 
 ### Inspect script
 
-`npm run inspect` gains a fifth section: latest 10 bot messages (timestamp, persona, trigger, content, reference).
+`npm run inspect` gains a fifth section: the latest bot messages (same count as the other sections, from one named constant), one line each with formatted timestamp, persona, trigger, content and reference. The script opens the database read-only and therefore runs no migrations: when the `bot_messages` table does not exist yet (checked through `sqlite_master`) the section prints `(no bot_messages table yet)` instead of failing.
 
 ## Edge cases
 
@@ -59,6 +65,8 @@ The container passes `getBotUserId: () => client.user?.id`.
 - `insert` throws → logged at error level, response still counts as sent (reply time and activity updated).
 - Persona in the store that is no longer in `users.json` → `resolve` still returns it (callers decide).
 - Embed fallback with no embeds, or an embed author that is not a known user → `null`.
+- Sent message without an `id` → nothing recorded, warning logged, no throw.
+- Two rows with the same timestamp → `recent` orders them by id, deterministically.
 
 ## Tests
 
@@ -72,4 +80,4 @@ README storage section: describe `bot_messages`; remove the "bot's own messages 
 
 ## Acceptance
 
-`npm test` passes; no characterization test changes.
+`npm test` passes; no characterization test changes (the fakes from spec 12 give every sent message a unique id and a timestamp).
