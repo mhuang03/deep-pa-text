@@ -376,3 +376,21 @@ test('pageFiltered leaves out soft-deleted rows', () => {
   store.softDelete('b', 50);
   assert.deepEqual(store.pageFiltered({ limit: 10 }).map((r) => r.id), ['a', 'd', 'c']);
 });
+
+test('newestRaw returns the newest raw row, ties broken by id, optionally including deleted rows', () => {
+  const { store } = setup();
+  assert.equal(store.newestRaw(), null);
+  store.insertRaw(msg('1', 'a', 10));
+  store.insertRaw(msg('3', 'a', 20));
+  store.insertRaw(msg('2', 'a', 20));
+  assert.deepEqual({ ...store.newestRaw() }, { id: '3', timestamp: 20 });
+  store.softDelete('3', 99);
+  assert.deepEqual({ ...store.newestRaw() }, { id: '2', timestamp: 20 });
+  assert.deepEqual({ ...store.newestRaw({ includeDeleted: true }) }, { id: '3', timestamp: 20 });
+});
+
+test('the migration adds an index on messages (timestamp, id)', () => {
+  const { db } = setup();
+  const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all().map((r) => r.name);
+  assert.ok(names.includes('idx_messages_timestamp_id'));
+});

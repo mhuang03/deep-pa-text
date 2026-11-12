@@ -15,6 +15,12 @@ const SIBLINGS = `
   ORDER BY timestamp, id
 `;
 
+const newestSql = (count) => `
+  SELECT * FROM bot_messages
+  WHERE deleted_at IS NULL AND trigger IN (${Array(count).fill('?').join(', ')})
+  ORDER BY timestamp DESC, id DESC LIMIT 1
+`;
+
 // Invisible rows carry deleted: true; visible rows keep their original shape.
 const toBotMessage = (row) => {
   if (!row) return null;
@@ -49,7 +55,15 @@ export const createBotMessageStore = ({ db, config }) => {
       botMessage.persona, botMessage.trigger, botMessage.reference ?? null, botMessage.timestamp, windowMs,
     ).map(toBotMessage);
 
+  // The newest visible row of any of the given triggers, or null.
+  const newest = ({ triggers }) => {
+    if (!Array.isArray(triggers) || triggers.length === 0) {
+      throw new Error('newest: triggers must be a non-empty array');
+    }
+    return toBotMessage(db.prepare(newestSql(triggers.length)).get(...triggers));
+  };
+
   const softDelete = (id, at) => Number(markDeletedSql.run(at, id).changes) > 0;
 
-  return { insert, getById, recent, siblings, softDelete };
+  return { insert, getById, recent, newest, siblings, softDelete };
 };

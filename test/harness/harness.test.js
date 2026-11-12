@@ -40,7 +40,7 @@ test('createWorld rejects while a world is open and after a boot failure leaves 
   await world.close();
 
   const boom = new Error('heartbeat down');
-  await assert.rejects(createWorld({ failHeartbeat: boom }), boom);
+  await assert.rejects(createWorld({ failHeartbeat: boom }), /Cannot reach Chroma on port 7429\. Start it with: npx chroma run --port 7429/);
   assert.equal(Math.random, realRandom);
   assert.equal(globalThis.fetch, realFetch);
 
@@ -592,4 +592,37 @@ test('the fake chroma can fail a collection by name before it exists and share c
   chroma.state.failCollection('later', null);
   await collection.upsert({ ids: ['1'], documents: ['text'] });
   assert.equal(collection.rows.size, 1);
+});
+
+test('the fake channel fetch supports after and limit, returning the oldest newer messages newest first', async () => {
+  const discord = createFakeDiscord();
+  ['a', 'b', 'c', 'd'].forEach((id) => discord.state.addHistory({ id, content: id }));
+  const page = await discord.state.channel.messages.fetch({ after: 'a', limit: 2 });
+  assert.deepEqual([...page.keys()], ['c', 'b']);
+  assert.deepEqual(discord.state.channel.messages.calls.at(-1), { limit: 2, before: undefined, after: 'a' });
+});
+
+test('the world emits gateway events and records exit codes and the database close without exiting', async (t) => {
+  const exits = [];
+  const world = await newWorld(t, { exit: (code) => exits.push(code) });
+  const seen = [];
+  world.discord.client.on('shardResume', (shard) => seen.push(shard));
+  await world.emitGateway('shardResume', 2);
+  assert.deepEqual(seen, [2]);
+  await world.emitShardDisconnect(4014);
+  await world.container.lifecycle.shutdown({ code: 1 });
+  assert.deepEqual(world.exits, [1]);
+  assert.deepEqual(exits, [1]);
+  assert.equal(world.databaseClosed, 1);
+  assert.equal(world.discord.destroyed, 1);
+  assert.equal(world.sqlite.all('SELECT id FROM messages').length, 0, 'the handle stays readable after shutdown');
+});
+
+test('preload runs against the container before ready, and config overrides replace section keys', async (t) => {
+  const world = await newWorld(t, {
+    config: { catchUp: { maxMessages: 7 } },
+    preload: (container) => container.metaStore.setIfAbsent('seeded', 'yes'),
+  });
+  assert.equal(world.container.metaStore.get('seeded'), 'yes');
+  assert.equal(world.discord.loginTokens.length, 1);
 });

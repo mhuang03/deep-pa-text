@@ -40,10 +40,16 @@ const createMessages = (history) => {
     },
     // One-shot by default: the next `times` fetches reject, then fetching works again.
     failNext: failer.arm,
-    async fetch({ limit, before, cache } = {}) {
-      messages.calls.push({ limit, before, ...(cache === undefined ? {} : { cache }) });
+    async fetch({ limit, before, after, cache } = {}) {
+      messages.calls.push({
+        limit, before, ...(after === undefined ? {} : { after }), ...(cache === undefined ? {} : { cache }),
+      });
       failer.check();
       if (failure) throw failure;
+      if (after !== undefined) {
+        const start = history.findIndex((message) => message.id === after) + 1;
+        return new Map(history.slice(start, start + limit).reverse().map((message) => [message.id, message]));
+      }
       const index = history.findIndex((message) => message.id === before);
       const preceding = index === -1 ? history : history.slice(0, index);
       return new Map(preceding.slice(-limit).reverse().map((message) => [message.id, message]));
@@ -337,6 +343,8 @@ export const createFakeDiscord = () => {
     return { oldMessage: { id: message.id, channelId: message.channelId, partial: true }, newMessage: stub };
   };
   state.makeInteraction = makeInteraction;
+  // Emits a gateway event the way discord.js does; the arguments are those of the real event.
+  state.emitGateway = (event, ...args) => state.client.emit(event, ...args);
   state.closePending = () => {
     [...pendingWaits].forEach((pending) => {
       pending.release();

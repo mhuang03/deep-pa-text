@@ -33,6 +33,8 @@ export const createMessageStore = ({ db, config }) => {
   const latestFilteredSql = db.prepare(sql.latestFrom('filtered_messages', VISIBLE));
   const latestGifSql = db.prepare(sql.latestFrom('filtered_messages', `has_gif = 1 AND ${VISIBLE}`));
   const latestRefSql = db.prepare(sql.LATEST_WITH_REFERENCE);
+  const newestRawSql = db.prepare(sql.NEWEST_RAW);
+  const newestRawVisibleSql = db.prepare(sql.NEWEST_RAW_VISIBLE);
 
   const resolveExplicit = (reference) =>
     reference && anchoredSql.get(reference) ? reference : null;
@@ -164,8 +166,14 @@ export const createMessageStore = ({ db, config }) => {
     return { ...rest, content: revision?.content ?? rest.content, deleted: deletedAt !== null };
   };
 
+  const newestRaw = ({ includeDeleted = false } = {}) => {
+    const row = (includeDeleted ? newestRawSql : newestRawVisibleSql).get();
+    return row ? { id: row.id, timestamp: row.timestamp } : null;
+  };
+
   return {
     insertRaw,
+    newestRaw,
     hasRaw,
     transaction,
     pageFiltered,

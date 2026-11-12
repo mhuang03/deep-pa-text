@@ -104,3 +104,24 @@ test('instances do not share state', () => {
   missTimes(a.state, a.policy, 3);
   assert.equal(b.policy.decide().reply, true);
 });
+
+test('restore arms the rate limit from a past reply time', () => {
+  const { state, policy } = setup({ rolls: [0] });
+  policy.restore({ replyTime: state.time - 120000 });
+  assert.deepEqual(policy.decide(), { reply: false, reason: 'rate-limited' });
+  state.time += 180001;
+  assert.equal(policy.decide().reply, true);
+});
+
+test('restore ignores null, never moves the reply time backwards and clamps to now', () => {
+  const { state, policy } = setup({ rolls: [0, 0] });
+  policy.restore({ replyTime: null });
+  assert.equal(policy.decide().reply, true);
+  policy.noteReply({ resetMisses: false });
+  policy.restore({ replyTime: state.time - 1000000 });
+  state.time += 299999;
+  assert.equal(policy.decide().reason, 'rate-limited');
+  policy.restore({ replyTime: state.time + 10 * 3600000 });
+  state.time += 300001;
+  assert.equal(policy.decide().reply, true, 'a future reply time is clamped to now');
+});

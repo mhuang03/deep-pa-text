@@ -80,3 +80,13 @@ export const buildLogging = () => ({
   locale: 'en-US',
   timeZone: 'America/Chicago',
 });
+
+export const buildLifecycle = () => ({
+  graceMs: 10000,
+  pollMs: 100,
+});
+
+export const buildCatchUp = (env) => ({
+  enabled: parseBoolean(env, 'CATCH_UP', true),
+  maxMessages: 2000,
+});

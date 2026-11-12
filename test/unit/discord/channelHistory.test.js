@@ -67,3 +67,24 @@ test('passes the cache option to the channel only when given', async () => {
   await history.fetchBefore(channel, { before: 'x', limit: 5 });
   assert.deepEqual(calls, [{ limit: 5, before: 'x', cache: false }, { limit: 5, before: 'x' }]);
 });
+
+test('fetchAfter sorts the page ascending by numeric id and passes after, limit and cache', async () => {
+  const calls = [];
+  const page = new Map([['900', { id: '900' }], ['1000000000000000002', { id: '1000000000000000002' }], ['1000000000000000001', { id: '1000000000000000001' }]]);
+  const { history, channel } = setup(async (args) => {
+    calls.push(args);
+    return page;
+  });
+  const result = await history.fetchAfter(channel, { after: '5', limit: 500, cache: false });
+  assert.deepEqual(result.map((m) => m.id), ['900', '1000000000000000001', '1000000000000000002']);
+  assert.deepEqual(calls, [{ limit: MAX_FETCH_LIMIT, after: '5', cache: false }]);
+});
+
+test('fetchAfter throws by default and returns nothing with a warning when asked not to throw', async () => {
+  const { history, channel, warnings } = setup(async () => {
+    throw new Error('down');
+  });
+  await assert.rejects(history.fetchAfter(channel, { after: '1', limit: 5 }), /down/);
+  assert.deepEqual(await history.fetchAfter(channel, { after: '1', limit: 5, throwOnError: false }), []);
+  assert.equal(warnings.length, 1);
+});

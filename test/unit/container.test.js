@@ -15,7 +15,7 @@ import { createFakeGifs } from '../support/fakes/gifs.js';
 import { ENV, PING_CACHE, USERS } from '../support/fixtures.js';
 
 const SERVICES = [
-  'bot', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
+  'bot', 'lifecycle', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
   'botMessageStore', 'botMessageResolver', 'contextBuilder', 'chainBuilder', 'burstProfile',
   'profileStore', 'metaStore', 'memberProfiles', 'webhooks',

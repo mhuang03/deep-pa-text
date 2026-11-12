@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig,
-  assertGifs, assertLlm, assertReply, assertFilter, assertStorage } from '../../src/config.js';
+  assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -50,6 +50,8 @@ const EXPECTED_DEFAULTS = {
   },
   profiles: { refreshIntervalMs: 3600000, minCheckIntervalMs: 10000, lookupTimeoutMs: 5000, searchLimit: 100 },
   backfill: { pageSize: 100, batchSize: 100, pageRetries: 3, retryDelayMs: 2000, pageTimeoutMs: 30000 },
+  lifecycle: { graceMs: 10000, pollMs: 100 },
+  catchUp: { enabled: true, maxMessages: 2000 },
   persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
@@ -306,4 +308,21 @@ test('every validator error is a config error', () => {
   assert.throws(() => assertGifs({ ...DEFAULTS.gifs, candidates: 0 }), (e) => isConfigError(e) && e instanceof Error);
   assert.equal(isConfigError(new Error('x')), false);
   assert.equal(isConfigError(undefined), false);
+});
+
+test('assertLifecycle and assertCatchUp validate their ranges', () => {
+  assert.deepEqual(assertLifecycle({ graceMs: 0, pollMs: 1 }), { graceMs: 0, pollMs: 1 });
+  [{ graceMs: -1 }, { pollMs: 0 }, { pollMs: Number.NaN }].forEach((override) => {
+    assert.throws(() => assertLifecycle({ graceMs: 1, pollMs: 1, ...override }), /lifecycle\./);
+  });
+  assert.equal(assertCatchUp({ enabled: true, maxMessages: 1 }).maxMessages, 1);
+  [0, 1.5, -3].forEach((maxMessages) => {
+    assert.throws(() => assertCatchUp({ enabled: true, maxMessages }), /catchUp\.maxMessages/);
+  });
+});
+
+test('CATCH_UP is a strict boolean that defaults to on', () => {
+  assert.equal(loadConfig({}).catchUp.enabled, true);
+  assert.equal(loadConfig({ CATCH_UP: 'false' }).catchUp.enabled, false);
+  assert.throws(() => loadConfig({ CATCH_UP: 'maybe' }), /CATCH_UP must be/);
 });

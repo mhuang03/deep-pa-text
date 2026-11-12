@@ -90,3 +90,16 @@ test('recent and siblings exclude deleted bot messages', () => {
   assert.deepEqual(store.recent({ limit: 10 }).map((m) => m.id), ['c', 'a']);
   assert.deepEqual(store.siblings(store.getById('a')).map((m) => m.id), ['a', 'c']);
 });
+
+test('newest returns the newest visible row among the given triggers, or null', () => {
+  const store = setup();
+  store.insert(row('1', 10, { trigger: 'auto' }));
+  store.insert(row('2', 30, { trigger: 'chain' }));
+  store.insert(row('3', 20, { trigger: 'revive' }));
+  store.insert(row('4', 40, { trigger: 'auto' }));
+  store.softDelete('4', 99);
+  assert.equal(store.newest({ triggers: ['auto', 'revive'] }).id, '3');
+  assert.equal(store.newest({ triggers: ['chain'] }).id, '2');
+  assert.equal(store.newest({ triggers: ['command'] }), null);
+  assert.throws(() => store.newest({ triggers: [] }), /non-empty/);
+});

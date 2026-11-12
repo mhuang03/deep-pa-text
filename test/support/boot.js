@@ -1,6 +1,7 @@
 // The only construction-aware file: it builds the app through buildContainer with the
 // world's fakes as the vendor, then maps the spec 00 subject surface onto the services.
 import { loadConfig } from '../../src/config.js';
+import { createStartup } from '../../src/bot/startup.js';
 import { buildContainer, defaultClock } from '../../src/container.js';
 import { BUCKET_ORDER } from '../../src/retrieval/retriever.js';
 import { buildReplyPrompt, buildRevivePrompt, SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT } from '../../src/llm/prompts.js';
@@ -34,8 +35,13 @@ const buildVendor = (fakes) => ({
   fetch: (...args) => globalThis.fetch(...args),
 });
 
-const buildConfig = (env) => {
-  const config = loadConfig(env);
+// `overrides` replaces keys inside whole config sections, for tunables that have no environment variable.
+const mergeSections = (config, overrides) => Object.fromEntries(
+  Object.entries(config).map(([name, section]) => [name, { ...section, ...overrides[name] }]),
+);
+
+const buildConfig = (env, overrides = {}) => {
+  const config = mergeSections(loadConfig(env), overrides);
   return { ...config, storage: { ...config.storage, databasePath: IN_MEMORY } };
 };
 
@@ -95,17 +101,28 @@ const buildClock = (world) => ({
 export const bootBot = async (world) => {
   const fakes = createFakes(world.options);
   world.fakes = fakes;
-  const config = buildConfig(world.env);
+  const config = buildConfig(world.env, world.options.config);
+  world.exits = [];
+  world.databaseClosed = 0;
   const container = buildContainer({
     config,
     vendor: buildVendor(fakes),
     clock: buildClock(world),
     data: { users: world.options.users, pingCache: world.options.pingCache },
+    exit: (code) => {
+      world.exits.push(code);
+      world.options.exit?.(code);
+    },
+    // The handle stays open after shutdown so tests can read the database; dispose closes it.
+    closeDatabase: () => {
+      world.databaseClosed += 1;
+    },
   });
   const dispose = () => container.db.close();
   try {
-    await container.vectorStore.connect();
-    await container.bot.start();
+    await world.options.preload?.(container);
+    const { metaStore, vectorStore, bot } = container;
+    await createStartup({ metaStore, vectorStore, bot, config }).run();
   } catch (error) {
     dispose();
     throw error;

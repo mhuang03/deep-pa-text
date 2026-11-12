@@ -92,4 +92,9 @@ export const MIGRATIONS = [
   )
 `,
   },
+  {
+    sql: `
+  CREATE INDEX IF NOT EXISTS idx_messages_timestamp_id ON messages (timestamp, id)
+`,
+  },
 ];

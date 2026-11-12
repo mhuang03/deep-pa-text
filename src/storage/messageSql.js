@@ -104,3 +104,8 @@ export const hiddenSql = (count) => `
 `;
 export const latestFrom = (table, where) =>
   `SELECT * FROM ${table} WHERE ${where} ORDER BY timestamp DESC LIMIT ?`;
+// Catch-up resumes from the newest raw row, deleted or not; state restore wants only visible rows.
+export const NEWEST_RAW = 'SELECT id, timestamp FROM messages ORDER BY timestamp DESC, id DESC LIMIT 1';
+export const NEWEST_RAW_VISIBLE = `
+  SELECT id, timestamp FROM messages WHERE deleted_at IS NULL ORDER BY timestamp DESC, id DESC LIMIT 1
+`;

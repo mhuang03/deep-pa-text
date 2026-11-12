@@ -114,6 +114,8 @@ const buildWorld = (options, random) => {
       await driver.emit(Events.MessageUpdate, oldMessage, newMessage);
       return newMessage;
     },
+    emitGateway: (event, ...payloads) => driver.emit(event, ...payloads),
+    emitShardDisconnect: (code, shardId = 0) => driver.emit(Events.ShardDisconnect, { code }, shardId),
     emitInteraction: (interaction) => driver.emit(Events.InteractionCreate, interaction),
     openReplyCommand: async ({ target, user }) => {
       const targetMessage = isFakeMessage(target) ? target : discordState().makeMessage(target);

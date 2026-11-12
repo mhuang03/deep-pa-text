@@ -10,7 +10,7 @@ export { createConfigError, isConfigError } from './config/errors.js';
 export {
   assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertRetrieval, assertPersona,
 } from './config/validate.js';
-export { assertChain, assertBurst, assertProfiles, assertBackfill } from './config/validateFeatures.js';
+export { assertChain, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp } from './config/validateFeatures.js';
 
 const deepFreeze = (value) => {
   if (value === null || typeof value !== 'object') return value;
@@ -36,6 +36,8 @@ const buildConfig = (env) => ({
   burst: checkFeature.assertBurst(feature.buildBurst(env)),
   profiles: checkFeature.assertProfiles(feature.buildProfiles()),
   backfill: checkFeature.assertBackfill(feature.buildBackfill()),
+  lifecycle: checkFeature.assertLifecycle(feature.buildLifecycle()),
+  catchUp: checkFeature.assertCatchUp(feature.buildCatchUp(env)),
   logging: feature.buildLogging(),
 });
 

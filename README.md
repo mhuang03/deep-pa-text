@@ -105,7 +105,10 @@ Everything else is defined in `src/config.js`. These optional environment variab
 | `CHAIN_REPLIES` | on | `false` turns off chain replies (replies to a bot message). Such replies then get no answer at all, not even a random one |
 | `BURSTS` | on | `false` turns off multi-message bursts: the model is not told it may split, and any `<split>` marker in its output becomes a newline in a single message |
 | `PING_REPLIED_USER` | on | `false` stops auto replies from pinging the author of the message they reply to |
+| `CATCH_UP` | on | `false` skips importing messages posted while the bot was down. See [Operations](#operations) |
 | `PERSONA_DISPLAY` | `embed` | `embed` or `webhook`; any other value stops startup with an error naming it. See [Persona display](#persona-display) |
+
+Lifecycle tunables in `src/config.js`: `lifecycle.graceMs` (10000, 0 or more: how long shutdown waits for in-flight handlers), `lifecycle.pollMs` (100, above 0) and `catchUp.maxMessages` (2000, integer of 1 or more). Values outside these ranges stop startup.
 
 Backfill tunables in `src/config.js`: `backfill.pageSize` (100, 1 to 100), `backfill.batchSize` (100, 1 or more), `backfill.pageRetries` (3, 0 or more), `backfill.retryDelayMs` (2000) and `backfill.pageTimeoutMs` (30000, above 0). Values outside these ranges stop startup.
 
@@ -186,7 +189,7 @@ SQLite (`messages.db`):
 - `messages`: every human message in the channel, raw (`id`, `author` username, `content`, `timestamp` ms, `reference`).
 - `bot_messages`: every message the bot sent and Discord accepted (`id` Discord message id, `persona` username it imitated, `content` generated text in corpus form with GIF tokens kept, `timestamp` ms, `reference` id of the message it answered or null for a revive, `trigger` `auto`, `command`, `revive`, `chain` or `imported`). One row per delivered part of a burst, all sharing persona, trigger and reference. Written right after delivery; a failed send records nothing, and a failed insert is logged without affecting the reply. Bot messages sent before this table existed are attributed through their embed author instead.
 - `user_profiles`: append-only observations of members' Discord profiles (`username`, `user_id`, `display_name`, `avatar_url`, `observed_at` ms; primary key `(username, observed_at)`). The newest row per user is their stored profile; every distinct display name ever seen stays available.
-- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below.
+- `filtered_messages`: messages that passed `filter()`, with transformed content and `has_gif`. `reference` is the Discord reply target if that target is also in this table; otherwise the previous filtered message when it is from a different author and less than 1 h older; otherwise null. A human reply to a bot message is stored with a null `reference` (no inference) and gets no reply embedding. An index on `(author, content)` (`idx_filtered_messages_author_content`) serves the frequency counts below. The raw table has an index on `(timestamp, id)` (`idx_messages_timestamp_id`) that serves the newest-message lookups used at restart.
 
 - `message_revisions`: append-only edit history (`message_id` logical id, `content`, `edited_at` ms; primary key `(message_id, edited_at)`).
 - `meta`: installation facts, written once and never overwritten (`key`, `value`). `chroma_generation` names the generation of Chroma collections this database belongs to (absent in an installation that was never re-imported, which uses `message_embeddings` and `message_reply_embeddings`; otherwise `<name>_<generation>`). `reimport_started_at` and `reimport_completed_at` (ms) mark a [re-import](#re-importing-from-discord).
@@ -270,6 +273,20 @@ The chat client is built with `llm.timeoutMs` (120 s) and `llm.maxRetries` (1), 
 Every outbound message is awaited, so reply state (rate limit, miss counter, activity) only changes after a send succeeded. The bot never pings anyone: every payload, including the thinking placeholder, the failure notice and the ephemeral refusals, carries `allowedMentions: { parse: [] }`, and the Discord client is constructed with the same default, so `@everyone`, `@here` or `<@id>` in model output stays plain text. Replies keep the reply ping unless `PING_REPLIED_USER=false`.
 
 If an auto reply cannot be sent (for example the message was deleted), the failure is logged and the rate limit is armed, so a persistent send failure costs at most one LLM call per window. If a `reply` command fails after its "thinking..." placeholder, the placeholder is edited to `Could not generate a reply.`
+
+## Operations
+
+**Signals and shutdown.** `SIGINT` and `SIGTERM` start a graceful shutdown: the revive and profile timers stop, new events are ignored, and the bot waits up to `lifecycle.graceMs` (10 s) for handlers already running (a reply being generated is finished, sent and recorded). Then the Discord client is destroyed, the database is closed and the process exits 0. If handlers are still running when the grace period ends, a warning names how many were abandoned. A second signal during shutdown exits immediately with code 1. An unhandled rejection or uncaught exception is logged and shuts down at once (no grace period) with code 1.
+
+**Exit codes.** 0 after a signal; 1 after a fatal gateway close, a crash, or a failed start (an unfinished re-import, Chroma not reachable, invalid configuration).
+
+**Gateway failures.** Client errors and warnings and shard errors are logged; reconnects and resumes are logged at info level. discord.js reports a disconnect only when the gateway closed for good (for example close code 4004, a bad `DISCORD_BOT_TOKEN`, or 4014, the Message Content intent not enabled in the developer portal). The bot logs the code with a hint and exits 1 instead of idling as a silent zombie, so run it under a supervisor (systemd `Restart=on-failure`, pm2, a container restart policy) that restarts it. A supervisor will also restart a bot that exits because Chroma is down, so start Chroma first or accept the retries.
+
+**Starting.** Startup refuses a database whose [re-import](#re-importing-from-discord) is unfinished (`npm run reimport -- --resume --yes`) and prints a one-line message with the port and the start command when Chroma cannot be reached.
+
+**What a restart restores.** From the database: the reply rate limit (from the newest auto, chain or command reply, so a restart does not allow an extra reply) and who spoke last and when (from the newest human message, or a newer auto reply or revive), so a channel that was already quiet is revived at the first check. The miss counter starts again at 0. With an empty database the bot counts as the last speaker, as on a first run.
+
+**Catch-up.** At ready the bot fetches the messages posted after the newest stored one (up to `catchUp.maxMessages`, 2000), imports them like a backfill (corpus, embeddings, own bot messages) and generates no replies for them. If more than the cap were missed, the oldest are imported, a warning says to run `npm run backfill`, and activity restarts as on a fresh start. A failed fetch is a warning. `CATCH_UP=false` turns it off. A bot message that was delivered but not recorded before a crash is imported as `imported` and so does not restore the rate limit.
 
 ## Known issues
 

@@ -26,5 +26,12 @@ export const createReplyPolicy = ({ config, now, random }) => {
     if (resetMisses) misses = 0;
   };
 
-  return { decide, noteReply };
+  // Monotonic and never in the future, so a restore cannot lengthen or invent a rate-limit window.
+  const restore = ({ replyTime: restored }) => {
+    if (restored === null || restored === undefined) return;
+    const clamped = Math.min(restored, now());
+    if (replyTime === null || clamped > replyTime) replyTime = clamped;
+  };
+
+  return { decide, noteReply, restore };
 };

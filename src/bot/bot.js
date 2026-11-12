@@ -1,30 +1,19 @@
 import { Events } from 'discord.js';
+import { registerGatewayEvents } from './gatewayEvents.js';
+import { createReady } from './ready.js';
 
-export const createBot = ({ client, config, handlers, clock, logger }) => {
-  const revivePeriod = () =>
-    config.revive.override ? config.revive.overrideCheckIntervalMs : config.revive.checkIntervalMs;
-
-  // The first refresh is not awaited: it must not delay ready. The handler catches its own errors.
-  const startProfileRefresh = () => {
-    const period = config.profiles.refreshIntervalMs;
-    if (period === 0) return;
-    handlers.profileRefresh();
-    clock.setInterval(handlers.profileRefresh, period);
-  };
-
-  const onReady = () => {
-    logger.info(`Logged in as ${client.user.tag}`);
-    clock.setInterval(handlers.reviveTick, revivePeriod());
-    startProfileRefresh();
-  };
+export const createBot = ({ client, config, handlers, lifecycle, startupTasks, logger }) => {
+  const { track } = lifecycle;
+  const { onReady } = createReady({ client, config, handlers, lifecycle, startupTasks, logger });
 
   const start = async () => {
+    registerGatewayEvents({ client, lifecycle, logger });
     client.once(Events.ClientReady, onReady);
-    client.on(Events.MessageCreate, handlers.messageCreate);
-    client.on(Events.InteractionCreate, handlers.replyCommand);
-    client.on(Events.MessageDelete, handlers.messageDelete);
-    client.on(Events.MessageBulkDelete, handlers.messageBulkDelete);
-    client.on(Events.MessageUpdate, handlers.messageUpdate);
+    client.on(Events.MessageCreate, track(handlers.messageCreate, 'messageCreate'));
+    client.on(Events.InteractionCreate, track(handlers.replyCommand, 'replyCommand'));
+    client.on(Events.MessageDelete, track(handlers.messageDelete, 'messageDelete'));
+    client.on(Events.MessageBulkDelete, track(handlers.messageBulkDelete, 'messageBulkDelete'));
+    client.on(Events.MessageUpdate, track(handlers.messageUpdate, 'messageUpdate'));
     await client.login(config.discord.token);
   };
 

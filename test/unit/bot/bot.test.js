@@ -4,11 +4,27 @@ import { Events } from 'discord.js';
 import { createBot } from '../../../src/bot/bot.js';
 import { loadConfig } from '../../../src/config.js';
 
+const ready = (log) => log.find(([kind, event]) => kind === 'once' && event === Events.ClientReady)[2];
+
 const setup = (env = {}) => {
   const log = [];
   const intervals = [];
+  const lifecycle = {
+    track: (fn) => fn,
+    every: (fn, ms) => intervals.push([fn, ms]),
+    shutdown: async () => {},
+  };
+  const tasks = [];
+  const startupTasks = {
+    restoreState: (arg) => tasks.push(['restore', arg]),
+    catchUp: async () => {
+      tasks.push(['catchUp']);
+      return { capped: false };
+    },
+  };
   const client = {
     user: { tag: 'bot#1' },
+    channels: { fetch: async () => 'channel' },
     once: (event, fn) => log.push(['once', event, fn]),
     on: (event, fn) => log.push(['on', event, fn]),
     login: async (token) => log.push(['login', token]),
@@ -23,16 +39,23 @@ const setup = (env = {}) => {
     client,
     config: loadConfig({ DISCORD_BOT_TOKEN: 'tok', ...env }),
     handlers,
-    clock: { setInterval: (fn, ms) => intervals.push([fn, ms]) },
-    logger: { info: (m) => infos.push(m) },
+    lifecycle,
+    startupTasks,
+    logger: { info: (m) => infos.push(m), error: () => {}, warn: () => {} },
   });
-  return { bot, log, handlers, intervals, infos, refreshes };
+  return { bot, log, handlers, intervals, infos, refreshes, lifecycle, startupTasks, tasks };
 };
 
 test('start registers once and on listeners, then logs in', async () => {
   const { bot, log, handlers } = setup();
   await bot.start();
   assert.deepEqual(log.map(([kind, event]) => [kind, event]), [
+    ['on', Events.Error],
+    ['on', Events.Warn],
+    ['on', Events.ShardError],
+    ['on', Events.ShardReconnecting],
+    ['on', Events.ShardResume],
+    ['on', Events.ShardDisconnect],
     ['once', Events.ClientReady],
     ['on', Events.MessageCreate],
     ['on', Events.InteractionCreate],
@@ -41,15 +64,15 @@ test('start registers once and on listeners, then logs in', async () => {
     ['on', Events.MessageUpdate],
     ['login', 'tok'],
   ]);
-  assert.equal(log[1][2], handlers.messageCreate);
-  assert.equal(log[2][2], handlers.replyCommand);
+  assert.equal(log[7][2], handlers.messageCreate);
+  assert.equal(log[8][2], handlers.replyCommand);
 });
 
 test('ready logs the tag and starts the revive interval at the normal period', async () => {
   const { bot, log, handlers, intervals, infos } = setup();
   await bot.start();
   assert.equal(intervals.length, 0);
-  log[0][2]();
+  await ready(log)();
   assert.deepEqual(infos, ['Logged in as bot#1']);
   assert.deepEqual(intervals, [[handlers.reviveTick, 600000], [handlers.profileRefresh, 3600000]]);
 });
@@ -57,7 +80,7 @@ test('ready logs the tag and starts the revive interval at the normal period', a
 test('ready uses the override period when revive override is on', async () => {
   const { bot, log, intervals } = setup({ REVIVE_OVERRIDE: 'true' });
   await bot.start();
-  log[0][2]();
+  await ready(log)();
   assert.equal(intervals[0][1], 60000);
 });
 
@@ -65,7 +88,7 @@ test('ready starts a profile refresh without awaiting it, then repeats it on the
   const { bot, log, handlers, intervals, refreshes } = setup();
   handlers.profileRefresh = () => new Promise(() => {});
   await bot.start();
-  assert.doesNotThrow(() => log[0][2]());
+  await ready(log)();
   assert.equal(intervals.at(-1)[0], handlers.profileRefresh);
   assert.equal(refreshes.length, 0);
 });
@@ -73,7 +96,7 @@ test('ready starts a profile refresh without awaiting it, then repeats it on the
 test('ready runs one refresh immediately', async () => {
   const { bot, log, refreshes } = setup();
   await bot.start();
-  log[0][2]();
+  await ready(log)();
   assert.equal(refreshes.length, 1);
 });
 
@@ -81,15 +104,55 @@ test('a refresh interval of 0 disables the refresh at ready and the interval', a
   const { bot, log, handlers, intervals, refreshes } = setup();
   const config = loadConfig({ DISCORD_BOT_TOKEN: 'tok' });
   const off = createBot({
-    client: { user: { tag: 't' }, once: (e, fn) => log.push(['once', e, fn]), on: () => {}, login: async () => {} },
+    client: { user: { tag: 't' }, channels: { fetch: async () => 'channel' }, once: (e, fn) => log.push(['once', e, fn]), on: () => {}, login: async () => {} },
     config: { ...config, profiles: { ...config.profiles, refreshIntervalMs: 0 } },
     handlers,
-    clock: { setInterval: (fn, ms) => intervals.push([fn, ms]) },
-    logger: { info: () => {} },
+    lifecycle: { track: (fn) => fn, every: (fn, ms) => intervals.push([fn, ms]), shutdown: async () => {} },
+    startupTasks: { restoreState: () => {}, catchUp: async () => ({ capped: false }) },
+    logger: { info: () => {}, error: () => {}, warn: () => {} },
   });
   await off.start();
-  log.at(-1)[2]();
+  await ready(log)();
   assert.deepEqual(intervals.map(([, ms]) => ms), [600000]);
   assert.equal(refreshes.length, 0);
   assert.ok(bot);
+});
+
+test('ready restores state, starts the intervals, catches up, then restores again with the capped flag', async () => {
+  const { bot, log, intervals, startupTasks } = setup();
+  const order = [];
+  startupTasks.restoreState = (arg) => order.push(['restore', arg, intervals.length]);
+  startupTasks.catchUp = async () => {
+    order.push(['catchUp', intervals.length]);
+    return { capped: true };
+  };
+  await bot.start();
+  await ready(log)();
+  assert.deepEqual(order.map((o) => o[0]), ['restore', 'catchUp', 'restore']);
+  assert.deepEqual(order[0].slice(1), [undefined, 0]);
+  assert.equal(order[1][1], 2);
+  assert.deepEqual(order[2][1], { capped: true });
+});
+
+test('a failing startup step is logged and the next step still runs', async () => {
+  const { bot, log, startupTasks, intervals } = setup();
+  let restores = 0;
+  startupTasks.restoreState = () => {
+    restores += 1;
+    if (restores === 1) throw new Error('db');
+  };
+  startupTasks.catchUp = async () => { throw new Error('fetch'); };
+  await bot.start();
+  await ready(log)();
+  assert.equal(intervals.length, 2);
+  assert.equal(restores, 1);
+});
+
+test('ready runs its work once when emitted twice', async () => {
+  const { bot, log, intervals, tasks } = setup();
+  await bot.start();
+  await ready(log)();
+  await ready(log)();
+  assert.equal(intervals.length, 2);
+  assert.equal(tasks.filter(([name]) => name === 'catchUp').length, 1);
 });

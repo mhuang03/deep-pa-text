@@ -40,6 +40,9 @@ import { createReplyCommandHandler } from './bot/handlers/replyCommand.js';
 import { createReviveTick } from './bot/handlers/reviveTick.js';
 import { createProfileRefresh } from './bot/handlers/profileRefresh.js';
 import { createBot } from './bot/bot.js';
+import { createLifecycle } from './bot/lifecycle.js';
+import { restoreState } from './bot/stateRestore.js';
+import { createCatchUp } from './backfill/catchUp.js';
 import { createHistoryReader } from './backfill/historyReader.js';
 import { createBotMessageImporter } from './backfill/botMessageImporter.js';
 import { createHistoryImporter } from './backfill/historyImporter.js';
@@ -136,10 +139,8 @@ const buildCore = ({ config, vendor, data, clock, logger }) => {
 
 const buildHandlers = ({
   config, data, clock, logger, client, core, responder, delivery, memberProfiles,
-  botMessageResolver, chainBuilder,
+  botMessageResolver, chainBuilder, activity, replyPolicy,
 }) => {
-  const activity = createActivityTracker({ now: clock.now });
-  const replyPolicy = createReplyPolicy({ config, now: clock.now, random: clock.random });
   const chainPolicy = createChainPolicy({ config, random: clock.random });
   const { ingest, messageFilter, personaSelector, botMessageStore, messageStore } = core;
   const deleteHandler = createMessageDeleteHandler({ config, ingest, clock, logger });
@@ -189,8 +190,17 @@ const buildBackfill = ({ config, clock, logger, client, core, channelHistory, we
   return { historyReader, botMessageImporter, historyImporter, vectorSync };
 };
 
+const buildStartupTasks = ({ core, activity, replyPolicy, catchUp, clock }) => ({
+  restoreState: ({ capped = false } = {}) => restoreState({
+    messageStore: core.messageStore, botMessageStore: core.botMessageStore, activity, replyPolicy,
+    now: clock.now, capped,
+  }),
+  catchUp: catchUp.run,
+});
+
 export const buildContainer = ({
   config, vendor, data, clock = defaultClock(), logger = createLogger(), cacheMessages = true, client: given = null,
+  exit = () => {}, closeDatabase = null,
 }) => {
   const core = buildCore({ config, vendor, data, clock, logger });
   const client = given ?? createDiscordClient(vendor.Client, { cacheMessages });
@@ -214,14 +224,24 @@ export const buildContainer = ({
   const chainBuilder = createChainBuilder({
     botMessageStore, messageStore: core.messageStore, messageFilter: core.messageFilter, userDirectory, config,
   });
+  const activity = createActivityTracker({ now: clock.now });
+  const replyPolicy = createReplyPolicy({ config, now: clock.now, random: clock.random });
   const handlers = buildHandlers({
     config, data, clock, logger, client, core, responder, delivery, memberProfiles,
-    botMessageResolver, chainBuilder,
+    botMessageResolver, chainBuilder, activity, replyPolicy,
   });
-  const bot = createBot({ client, config, handlers, clock, logger });
+  const lifecycle = createLifecycle({
+    client, closeDatabase: closeDatabase ?? (() => core.db.close()), clock, logger, exit, config,
+  });
   const backfill = buildBackfill({ config, clock, logger, client, core, channelHistory, webhooks });
+  const catchUp = createCatchUp({
+    channelHistory, historyImporter: backfill.historyImporter, messageStore: core.messageStore,
+    lifecycle, clock, config, logger,
+  });
+  const startupTasks = buildStartupTasks({ core, activity, replyPolicy, catchUp, clock });
+  const bot = createBot({ client, config, handlers, lifecycle, startupTasks, logger });
   return {
-    bot, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder,
+    bot, lifecycle, client, logger, gifResolver, composer, delivery, responder, botMessageResolver, contextBuilder,
     chainBuilder, memberProfiles, webhooks, ...backfill, ...core,
   };
 };

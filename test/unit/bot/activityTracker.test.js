@@ -42,3 +42,18 @@ test('instances do not share state', () => {
   a.noteHuman({ timestamp: 5, author: 'x' });
   assert.equal(b.get().lastWasBot, true);
 });
+
+test('restore sets the state when nothing live has happened yet', () => {
+  const tracker = createActivityTracker({ now: () => 1000 });
+  tracker.restore({ lastMessageTime: 100, lastWasBot: false });
+  assert.deepEqual(tracker.get(), { lastMessageTime: 100, lastWasBot: false });
+});
+
+test('restore never moves the clock backwards once a live handler has spoken', () => {
+  const tracker = createActivityTracker({ now: () => 1000 });
+  tracker.noteHuman({ timestamp: 500 });
+  tracker.restore({ lastMessageTime: 100, lastWasBot: true });
+  assert.deepEqual(tracker.get(), { lastMessageTime: 500, lastWasBot: false });
+  tracker.restore({ lastMessageTime: 800, lastWasBot: true });
+  assert.deepEqual(tracker.get(), { lastMessageTime: 800, lastWasBot: true });
+});

@@ -27,3 +27,12 @@ export const assertBackfill = (backfill) => checkRules('backfill', backfill, {
   retryDelayMs: atLeast(0),
   pageTimeoutMs: above(0),
 });
+
+export const assertLifecycle = (lifecycle) => checkRules('lifecycle', lifecycle, {
+  graceMs: atLeast(0),
+  pollMs: above(0),
+});
+
+export const assertCatchUp = (catchUp) => checkRules('catchUp', catchUp, {
+  maxMessages: integer(1),
+});
