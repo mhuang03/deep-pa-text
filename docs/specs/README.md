@@ -36,6 +36,15 @@ Each spec defines one change completely: behaviour, interfaces, schema and confi
 | [24](24-edits-and-deletes.md) | Message edits and deletes (soft) | 15, 18, 19, 20, 21, 22 |
 | [25](25-backfill.md) | History import machinery, backfill and vector sync | 10, 15, 17, 21, 23, 24 |
 | [26](26-full-reimport.md) | Full re-import from Discord (final step) | 23, 24, 25 |
+| [27](27-config-and-startup-validation.md) | Configuration and startup validation | 26 |
+| [28](28-lifecycle-and-restart-continuity.md) | Process lifecycle, gateway resilience and restart continuity | 27 |
+| [29](29-vector-store-resilience.md) | Vector-store resilience | 28 |
+| [30](30-reply-control-and-command-ack.md) | Reply control, cost limits and command acknowledgement | 29 |
+| [31](31-output-safety.md) | Output safety, text handling and safe logging | 30 |
+| [32](32-data-and-reimport-correctness.md) | Data, retrieval and re-import correctness | 31 |
+| [33](33-standards-and-test-gaps.md) | Standards compliance and test gaps | 32 |
+
+Specs 27–33 come from the audit recorded in [`docs/audit/findings.md`](../audit/findings.md); each cites the findings it resolves.
 
 ## Implementation order
 
@@ -58,6 +67,13 @@ Each line is a wave; specs on one line touch disjoint areas and may be implement
 24
 25
 26
+27
+28
+29
+30
+31
+32
+33
 ```
 
 Most later specs extend the same pipeline (responder, generator, prompts, message store), so they are implemented one at a time.
