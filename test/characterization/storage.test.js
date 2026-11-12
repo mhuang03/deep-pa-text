@@ -50,6 +50,8 @@ test('recording the same id twice leaves one row in each table and does not thro
   assert.equal(world.sqlite.all('SELECT id FROM messages').length, 1);
   assert.equal(world.sqlite.all('SELECT id FROM filtered_messages').length, 1);
   assert.equal(world.chroma.collection('message_embeddings').rows.size, 1);
+  assert.equal(world.chroma.collection('message_embeddings').upserts.length, 1);
+  assert.equal(world.chroma.collection('message_reply_embeddings').upserts.length, 0);
 });
 
 test('a kept message gets a filtered_messages row with transformed content and has_gif 0', async (t) => {
@@ -206,13 +208,13 @@ test('recordMessage rejects when Chroma fails and keeps the rows written before 
   ]);
 });
 
-test('upserts a kept message into message_embeddings with transformed content and author/timestamp metadata', async (t) => {
+test('upserts a kept message into message_embeddings with transformed content and author, timestamp and has_gif metadata', async (t) => {
   const world = await newWorld(t);
   await record(world, msg('m1', 'alice', '<@222> hello there', T0, null));
   const row = world.chroma.collection('message_embeddings').rows.get('m1');
   assert.equal(row.id, 'm1');
   assert.equal(row.document, '@bob hello there');
-  assert.deepEqual(row.metadata, { author: 'alice', timestamp: T0 });
+  assert.deepEqual(row.metadata, { author: 'alice', timestamp: T0, has_gif: false });
 });
 
 test('does not upsert a dropped message into message_embeddings', async (t) => {
@@ -226,12 +228,12 @@ test('does not upsert a dropped message into message_embeddings', async (t) => {
   assert.equal(world.chroma.collection('message_embeddings').upserts.length, 0);
 });
 
-test('KNOWN BUG (spec 10): stored metadata has no has_gif key even for a gif message', async (t) => {
+test('stored metadata has has_gif true for a gif message and false otherwise', async (t) => {
   const world = await newWorld(t);
   await record(world, msg('m1', 'alice', 'https://tenor.com/view/funny-cat-dance-gif-12345', T0, null));
   const row = world.chroma.collection('message_embeddings').rows.get('m1');
   assert.equal(row.document, '<gif! funny cat dance>');
-  assert.equal('has_gif' in row.metadata, false);
+  assert.equal(row.metadata.has_gif, true);
 });
 
 test('stores a reply under the referenced message embedding in message_reply_embeddings', async (t) => {
@@ -246,7 +248,7 @@ test('stores a reply under the referenced message embedding in message_reply_emb
   assert.deepEqual([...replies.rows.keys()], ['m2']);
   const row = replies.rows.get('m2');
   assert.equal(row.document, 'totally different words');
-  assert.deepEqual(row.metadata, { author: 'bob', timestamp: T0 + 1000 });
+  assert.deepEqual(row.metadata, { author: 'bob', timestamp: T0 + 1000, has_gif: false });
   assert.deepEqual(row.embedding, embeddings.rows.get('m1').embedding);
   assert.notDeepEqual(row.embedding, embeddings.rows.get('m2').embedding);
 });
@@ -258,7 +260,7 @@ test('does not store a message with an explicit reference to an unknown id in me
   assert.equal(world.chroma.collection('message_embeddings').rows.size, 1);
 });
 
-test('KNOWN BUG (spec 10): a message with a heuristic-inferred reference is not stored in message_reply_embeddings', async (t) => {
+test('a message with a heuristic-inferred reference is stored in message_reply_embeddings', async (t) => {
   const world = await newWorld(t);
   await record(
     world,
@@ -266,7 +268,9 @@ test('KNOWN BUG (spec 10): a message with a heuristic-inferred reference is not 
     msg('m2', 'bob', 'second message here', T0 + 1000, null),
   );
   assert.equal(filteredReference(world, 'm2'), 'm1');
-  assert.equal(world.chroma.collection('message_reply_embeddings').rows.size, 0);
+  const replies = world.chroma.collection('message_reply_embeddings');
+  assert.deepEqual([...replies.rows.keys()], ['m2']);
+  assert.deepEqual(replies.rows.get('m2').embedding, world.chroma.collection('message_embeddings').rows.get('m1').embedding);
 });
 
 test('wires Chroma on port 7429, the OpenAI embedding function and both collections', async (t) => {

@@ -84,7 +84,7 @@ test('shows a modal with the original message and an author select', async (t) =
   const world = await newWorld(t);
   const interaction = await world.openReplyCommand({ target: { content: CONTENT, author: 'alice' } });
   const modal = interaction.modal;
-  assert.equal(modal.custom_id, 'replyModal');
+  assert.equal(modal.custom_id, `replyModal:${interaction.id}`);
   assert.equal(modal.title, 'Reply using deep pa-text');
   assert.equal(modal.components.length, 2);
 

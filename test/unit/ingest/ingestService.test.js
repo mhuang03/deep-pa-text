@@ -4,14 +4,14 @@ import { createIngestService } from '../../../src/ingest/ingestService.js';
 
 const record = { id: '1', author: 'alice', content: 'raw <@1>', timestamp: 5, reference: 'r1' };
 
-const setup = ({ kept = true, vectorError = null } = {}) => {
+const setup = ({ kept = true, vectorError = null, duplicate = false } = {}) => {
   const calls = [];
   const filtered = { ...record, content: 'clean' };
   const messageStore = {
     insertRaw: (r) => calls.push(['insertRaw', r]),
     insertFiltered: (r) => {
       calls.push(['insertFiltered', r]);
-      return { ...r, reference: 'resolved', hasGif: true };
+      return duplicate ? null : { ...r, reference: 'resolved', hasGif: true };
     },
   };
   const messageFilter = {
@@ -37,23 +37,31 @@ test('records raw, filters, stores filtered, then upserts vectors in order', asy
   assert.equal(calls[0][1], record);
   assert.equal(calls[1][1], record);
   assert.equal(calls[2][1], filtered);
-  assert.deepEqual(result, { filtered });
+  assert.equal(result.filtered, filtered);
+  assert.equal(result.stored.reference, 'resolved');
 });
 
-test('KNOWN BUG (spec 10): passes the filter output, not the StoredMessage, to the vector store', async () => {
-  const { ingest, calls, filtered } = setup();
-  await ingest.recordMessage(record);
+test('passes the StoredMessage with resolved reference and hasGif to the vector store', async () => {
+  const { ingest, calls } = setup();
+  const { stored } = await ingest.recordMessage(record);
   const [sent] = calls[3][1];
-  assert.equal(sent, filtered);
-  assert.equal(sent.reference, 'r1');
-  assert.equal('hasGif' in sent, false);
+  assert.equal(sent, stored);
+  assert.equal(sent.reference, 'resolved');
+  assert.equal(sent.hasGif, true);
+});
+
+test('a duplicate makes no vector call and returns stored null', async () => {
+  const { ingest, calls, filtered } = setup({ duplicate: true });
+  const result = await ingest.recordMessage(record);
+  assert.deepEqual(calls.map((c) => c[0]), ['insertRaw', 'filter', 'insertFiltered']);
+  assert.deepEqual(result, { filtered, stored: null });
 });
 
 test('a dropped message is stored raw only', async () => {
   const { ingest, calls } = setup({ kept: false });
   const result = await ingest.recordMessage(record);
   assert.deepEqual(calls.map((c) => c[0]), ['insertRaw', 'filter']);
-  assert.deepEqual(result, { filtered: null });
+  assert.deepEqual(result, { filtered: null, stored: null });
 });
 
 test('a vector store failure rejects after the rows were written', async () => {

@@ -39,7 +39,7 @@ const installPatches = (world, random, undo) => {
     undo.push(() => handle.mock.restore());
   };
   CONSOLE_METHODS.forEach((name) => mockMethod(console, name, (...args) => world.logs[name].push(args)));
-  mock.timers.enable({ apis: ['setInterval', 'Date'], now: world.options.now });
+  mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'], now: world.options.now });
   undo.push(() => mock.timers.reset());
   mockMethod(Math, 'random', random.next);
   mockMethod(globalThis, 'fetch', (...args) => world.fakes.gifs.fetch(...args));

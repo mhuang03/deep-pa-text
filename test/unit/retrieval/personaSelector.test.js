@@ -7,6 +7,7 @@ import { createPersonaSelector } from '../../../src/retrieval/personaSelector.js
 const config = {
   chroma: { messagesCollection: 'message_embeddings', repliesCollection: 'message_reply_embeddings' },
   retrieval: { likelyRepliers: 3 },
+  persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
 };
 const users = [
   { username: 'alice', name: 'Alice' }, { username: 'bob', name: 'Bob' },
@@ -62,35 +63,63 @@ test('likelyRepliers is empty for an empty collection', async () => {
   assert.deepEqual(await selector.likelyRepliers(record), []);
 });
 
-test('pickReplier maps the roll to a list index with one roll', async () => {
+test('likelyReplierHits exposes the hits with distance and metadata', async () => {
+  const { selector, seed } = await setup();
+  seedReplies(seed);
+  const hits = await selector.likelyReplierHits(record);
+  assert.deepEqual(hits.map((h) => h.metadata.author), ['bob', 'bob', 'carol']);
+  assert.ok(hits.every((h) => Number.isFinite(h.distance)));
+});
+
+test('pickReplier maps the roll onto the weighted authors with one roll', async () => {
   const first = await setup([0]);
   seedReplies(first.seed);
   assert.equal(await first.selector.pickReplier(record), 'bob');
   assert.equal(first.state.rolls, 1);
-  const last = await setup([0.99]);
+  const last = await setup([0.999999]);
   seedReplies(last.seed);
   assert.equal(await last.selector.pickReplier(record), 'carol');
-  const mid = await setup([0.34]);
-  seedReplies(mid.seed);
-  assert.equal(await mid.selector.pickReplier(record), 'bob');
-  const third = await setup([0.67]);
-  seedReplies(third.seed);
-  assert.equal(await third.selector.pickReplier(record), 'carol');
 });
 
-test('pickReplier falls back to a random user with a second roll when the list is empty', async () => {
+test('pickReplier ignores hits by authors outside the user directory', async () => {
+  const { selector, seed } = await setup([0.999999]);
+  seed([['1', 'cats rule', 'bob', 10], ['2', 'cats rule', 'ghost', 20]]);
+  assert.equal(await selector.pickReplier(record), 'bob');
+});
+
+test('pickReplier falls back with a second roll that excludes the message author', async () => {
   const { selector, state } = await setup([0, 0.99]);
   assert.equal(await selector.pickReplier(record), 'dave');
   assert.equal(state.rolls, 2);
 });
 
-test('the fallback may pick the message author', async () => {
+test('the fallback never picks the message author', async () => {
   const { selector } = await setup([0, 0]);
-  assert.equal(await selector.pickReplier(record), 'alice');
+  assert.equal(await selector.pickReplier(record), 'bob');
 });
 
-test('pickRandomUser uses one roll', async () => {
+test('pickRandomUser uses one roll and no exclusion by default', async () => {
   const { selector, state } = await setup([0.5]);
   assert.equal(selector.pickRandomUser(), 'carol');
   assert.equal(state.rolls, 1);
+});
+
+test('pickRandomUser excludes the given username, keeping directory order', async () => {
+  const { selector } = await setup([0, 0.5, 0.99]);
+  assert.equal(selector.pickRandomUser({ exclude: 'alice' }), 'bob');
+  assert.equal(selector.pickRandomUser({ exclude: 'bob' }), 'carol');
+  assert.equal(selector.pickRandomUser({ exclude: 'dave' }), 'carol');
+});
+
+test('pickRandomUser uses everyone when the exclusion leaves nobody', async () => {
+  const fake = createFakeChroma();
+  const vectorStore = createVectorStore({
+    client: new fake.ChromaClient({}),
+    embeddingFunction: new fake.OpenAIEmbeddingFunction({}),
+    config,
+  });
+  const selector = createPersonaSelector({
+    vectorStore, users: [{ username: 'alice', name: 'Alice' }], random: () => 0, config,
+  });
+  assert.equal(selector.pickRandomUser({ exclude: 'alice' }), 'alice');
 });

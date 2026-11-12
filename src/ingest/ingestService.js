@@ -2,13 +2,11 @@ export const createIngestService = ({ messageStore, vectorStore, messageFilter }
   const recordMessage = async (record) => {
     messageStore.insertRaw(record);
     const filtered = messageFilter.filter(record);
-    if (filtered) {
-      messageStore.insertFiltered(filtered);
-      // Pinned legacy bug (spec 10): the filter output, not the stored message, goes to the
-      // vector store, so it carries the raw reference and no hasGif.
-      await vectorStore.upsertMessages([filtered]);
-    }
-    return { filtered };
+    if (!filtered) return { filtered: null, stored: null };
+    const stored = messageStore.insertFiltered(filtered);
+    // A duplicate delivery must not re-resolve a reference or rewrite existing vectors.
+    if (stored) await vectorStore.upsertMessages([stored]);
+    return { filtered, stored };
   };
 
   return { recordMessage };

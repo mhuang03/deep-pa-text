@@ -71,8 +71,9 @@ test('refuses a target in another channel after fetching the guild', async () =>
 test('shows the modal and waits with the configured timeout', async () => {
   const { handler, command } = setup();
   await run(handler, command);
-  assert.equal(command.modal.custom_id, 'replyModal');
-  assert.deepEqual(command.modalOptions, { time: 120000 });
+  assert.equal(command.modal.custom_id, `replyModal:${command.id}`);
+  assert.equal(command.modalOptions.time, 120000);
+  assert.equal(typeof command.modalOptions.filter, 'function');
   await command.timeout();
 });
 
@@ -132,8 +133,8 @@ test('a modal timeout is logged and ends the flow without touching state', async
   await run(handler, command);
   await command.timeout();
   assert.deepEqual(events, []);
-  assert.equal(logs.error.length, 1);
-  assert.match(String(logs.error[0][0]), /modal submission/);
+  assert.deepEqual(logs.error, []);
+  assert.deepEqual(logs.info, ['reply modal dismissed or timed out']);
 });
 
 test('failures before the modal are logged, not thrown', async () => {

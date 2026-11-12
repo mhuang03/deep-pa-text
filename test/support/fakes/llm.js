@@ -8,6 +8,12 @@ const resolveResponse = (responder, request) => {
   return value;
 };
 
+const isRawCompletion = (value) =>
+  value !== null && typeof value === 'object' && 'choices' in value;
+
+// null, '' and strings become message content; an object with `choices` is returned verbatim.
+const toCompletion = (value) => (isRawCompletion(value) ? value : { choices: [{ message: { content: value } }] });
+
 const pickResponder = (responder, consumed) =>
   Array.isArray(responder) ? responder[Math.min(consumed, responder.length - 1)] : responder;
 
@@ -36,7 +42,7 @@ export const createFakeOpenAI = () => {
       state.calls.push(request);
       state.callClients.push(this.options);
       const content = resolveResponse(pickResponder(responder, consumed++), request);
-      return { choices: [{ message: { content } }] };
+      return toCompletion(content);
     }
 
     #embed(input) {

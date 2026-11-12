@@ -1,6 +1,15 @@
+import { sanitizeResponse } from './sanitize.js';
 import { SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt } from './prompts.js';
 
+const EMPTY_RESPONSE_MESSAGE = 'LLM returned an empty response';
+
 export const createGenerator = ({ chatClient, retriever, userDirectory }) => {
+  const complete = async (user) => {
+    const response = sanitizeResponse(await chatClient.complete({ system: SYSTEM_PROMPT, user }));
+    if (response === '') throw new Error(EMPTY_RESPONSE_MESSAGE);
+    return response;
+  };
+
   const generateReply = async (persona, record) => {
     const buckets = await retriever.retrieveForReply(persona, record);
     const user = buildReplyPrompt({
@@ -9,7 +18,7 @@ export const createGenerator = ({ chatClient, retriever, userDirectory }) => {
       message: record.content,
       buckets,
     });
-    return chatClient.complete({ system: SYSTEM_PROMPT, user });
+    return complete(user);
   };
 
   const generateRevive = async (persona) => {
@@ -19,7 +28,7 @@ export const createGenerator = ({ chatClient, retriever, userDirectory }) => {
       name: userDirectory.nameOf(persona),
       examples,
     });
-    return chatClient.complete({ system: SYSTEM_PROMPT, user });
+    return complete(user);
   };
 
   return { generateReply, generateRevive };

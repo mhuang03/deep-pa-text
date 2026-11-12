@@ -2,8 +2,8 @@ import { MessageFlags } from 'discord.js';
 import { toMessageRecord } from '../../discord/messageRecord.js';
 import { REPLY_COMMAND_NAME } from '../../discord/commands.js';
 import {
-  buildReplyModal, readSelectedAuthor, REPLY_MODAL_ID, RANDOM_AUTHOR,
-  NOT_REPLYABLE_MESSAGE, WRONG_CHANNEL_MESSAGE,
+  buildReplyModal, buildModalId, readSelectedAuthor, isModalTimeout, RANDOM_AUTHOR,
+  NOT_REPLYABLE_MESSAGE, WRONG_CHANNEL_MESSAGE, MODAL_TIMEOUT_LOG,
 } from '../../discord/replyModal.js';
 import { formatCommandRequest, formatReply } from '../logLines.js';
 
@@ -24,11 +24,14 @@ export const createReplyCommandHandler = (deps) => {
     return selected === RANDOM_AUTHOR ? personaSelector.pickReplier(target) : selected;
   };
 
-  const awaitSubmit = async (interaction) => {
+  // Only this user's submission of this invocation's modal may resolve the wait.
+  const awaitSubmit = async (interaction, modalId) => {
+    const filter = (i) => i.customId === modalId && i.user.id === interaction.user.id;
     try {
-      return await interaction.awaitModalSubmit({ time: config.discord.modalTimeoutMs });
+      return await interaction.awaitModalSubmit({ time: config.discord.modalTimeoutMs, filter });
     } catch (error) {
-      logger.error('Error handling modal submission:', error);
+      if (!isModalTimeout(error)) throw error;
+      logger.info(MODAL_TIMEOUT_LOG);
       return null;
     }
   };
@@ -61,9 +64,10 @@ export const createReplyCommandHandler = (deps) => {
   const run = async (interaction) => {
     const prepared = await prepare(interaction);
     if (!prepared) return;
-    await interaction.showModal(buildReplyModal({ record: prepared.target, users }));
-    const modalInteraction = await awaitSubmit(interaction);
-    if (!modalInteraction || modalInteraction.customId !== REPLY_MODAL_ID) return;
+    const modalId = buildModalId(interaction.id);
+    await interaction.showModal(buildReplyModal({ record: prepared.target, users, modalId }));
+    const modalInteraction = await awaitSubmit(interaction, modalId);
+    if (!modalInteraction) return;
     await answer({ interaction, modalInteraction, ...prepared });
   };
 

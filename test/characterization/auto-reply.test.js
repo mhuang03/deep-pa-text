@@ -85,10 +85,10 @@ test('a reply is one message.reply with the processed content, a persona embed a
   assert.equal(payload.content, 'sounds good to me');
   assert.equal(payload.embeds.length, 1);
   const { author, color } = authorEmbed(payload);
-  assert.equal(author.name, 'alice');
-  assert.equal(author.icon_url, 'https://cdn.example/avatars/alice.png');
+  assert.equal(author.name, 'bob');
+  assert.equal(author.icon_url, 'https://cdn.example/avatars/bob.png');
   assert.equal(color, BLURPLE);
-  assert.deepEqual(world.discord.guild.members.calls, [{ query: 'alice', limit: 1 }]);
+  assert.deepEqual(world.discord.guild.members.calls, [{ query: 'bob', limit: 1 }]);
   assert.deepEqual(world.discord.channel.sent, []);
 });
 
@@ -126,10 +126,10 @@ test('with no likely repliers the fallback roll indexes USERS', async (t) => {
   assert.equal(world.randomCalls, 3);
 });
 
-test('the fallback persona can be the message author itself', async (t) => {
+test('the fallback persona never picks the message author', async (t) => {
   const world = await newWorld(t, { random: [0, 0, 0] });
   const message = await world.emitMessage({ author: 'alice', content: HELLO });
-  assert.equal(authorEmbed(message.replies[0]).author.name, 'alice');
+  assert.equal(authorEmbed(message.replies[0]).author.name, 'bob');
 });
 
 test('a non-approved author can be replied to but gets no filtered_messages row', async (t) => {
@@ -211,7 +211,7 @@ test('an avatar lookup failure still sends the reply without an icon', async (t)
   const message = await world.emitMessage({ content: HELLO });
   assert.equal(message.replies.length, 1);
   const { author } = authorEmbed(message.replies[0]);
-  assert.equal(author.name, 'alice');
+  assert.equal(author.name, 'bob');
   assert.ok(!author.icon_url);
   assert.deepEqual(world.errors, []);
 });
@@ -295,7 +295,7 @@ test('a resolved GIF token becomes an image embed ahead of the author embed and 
   assert.equal(payload.content, 'haha ');
   assert.equal(payload.embeds.length, 2);
   assert.equal(payload.embeds[0].data.image.url, 'https://gif.example/cat.gif');
-  assert.equal(payload.embeds[1].data.author.name, 'alice');
+  assert.equal(payload.embeds[1].data.author.name, 'bob');
 });
 
 test('an unresolved GIF token stays as an INSERT GIF placeholder with only the author embed', async (t) => {
@@ -306,5 +306,5 @@ test('an unresolved GIF token stays as an INSERT GIF placeholder with only the a
   assert.ok(payload.content.includes('<INSERT GIF:'));
   assert.ok(!payload.content.includes('<gif!'));
   assert.equal(payload.embeds.length, 1);
-  assert.equal(payload.embeds[0].data.author.name, 'alice');
+  assert.equal(payload.embeds[0].data.author.name, 'bob');
 });

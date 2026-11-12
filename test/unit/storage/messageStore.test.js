@@ -43,9 +43,17 @@ test('stores has_gif as 1 or 0', () => {
 
 test('insertFiltered is idempotent', () => {
   const { db, store } = setup();
-  store.insertFiltered(msg('1', 'a', 10));
-  store.insertFiltered(msg('1', 'a', 10));
+  assert.ok(store.insertFiltered(msg('1', 'a', 10)));
+  assert.equal(store.insertFiltered(msg('1', 'a', 10)), null);
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM filtered_messages').get().n, 1);
+});
+
+test('a duplicate does not re-resolve a reference', () => {
+  const { db, store } = setup();
+  store.insertFiltered(msg('1', 'a', 10));
+  store.insertFiltered(msg('2', 'b', 20));
+  assert.equal(store.insertFiltered(msg('2', 'b', 20, { reference: '1' })), null);
+  assert.equal(refOf(db, '2'), '1');
 });
 
 test('keeps an explicit reference to a stored message', () => {

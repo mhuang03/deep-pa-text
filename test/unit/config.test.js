@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, loadConfig } from '../../src/config.js';
+import { DEFAULTS, assertPersona, loadConfig } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -11,6 +11,8 @@ const EXPECTED_DEFAULTS = {
     botName: 'deep-pa-text',
     embedColor: 0x5865F2,
     modalTimeoutMs: 120000,
+    maxMessageLength: 2000,
+    truncateLookbackChars: 200,
   },
   reply: {
     probability: 0.1, minIntervalMs: 300000, escalateAfterMisses: 10, escalationStep: 0.05, override: false,
@@ -29,14 +31,16 @@ const EXPECTED_DEFAULTS = {
   retrieval: {
     replyResults: 10, similarResults: 20, gifResults: 10, otherResults: 10, reviveSamples: 50, likelyRepliers: 20,
   },
+  persona: { recencyHalfLifeMs: 15552000000, minRecencyWeight: 0.25 },
   llm: {
     apiKey: undefined, baseURL: 'https://api.deepseek.com', model: 'deepseek-v4-flash', thinking: true, stream: false,
+    timeoutMs: 120000, maxRetries: 1, emptyRetries: 1,
   },
   gifs: {
     klipyApiKey: undefined, giphyApiKey: undefined, humorApiKey: undefined, maxQueryLength: 50,
     klipyBaseUrl: 'https://api.klipy.com/api/v1', klipyPerPage: 8, klipyCustomerId: 'deep-pa-text',
     klipyLocale: 'us', klipyContentFilter: 'off', klipyFormatFilter: 'gif',
-    humorUrl: 'https://api.humorapi.com/gif/search', humorNumber: 1, giphyLimit: 1,
+    humorUrl: 'https://api.humorapi.com/gif/search', candidates: 5, timeoutMs: 5000,
   },
   logging: { locale: 'en-US', timeZone: 'America/Chicago' },
 };
@@ -100,4 +104,15 @@ test('does not share state between calls', () => {
   assert.notEqual(loadConfig({}), loadConfig({}));
   assert.equal(loadConfig({ GUILD_ID: 'x' }).discord.guildId, 'x');
   assert.equal(loadConfig({}).discord.guildId, '478743674826784769');
+});
+
+test('assertPersona rejects an invalid half-life or recency floor', () => {
+  const valid = { recencyHalfLifeMs: 1000, minRecencyWeight: 1 };
+  assert.equal(assertPersona(valid), valid);
+  [0, -1, NaN, Infinity, undefined].forEach((recencyHalfLifeMs) => {
+    assert.throws(() => assertPersona({ ...valid, recencyHalfLifeMs }), /recencyHalfLifeMs/);
+  });
+  [0, -0.1, 1.01, NaN, undefined].forEach((minRecencyWeight) => {
+    assert.throws(() => assertPersona({ ...valid, minRecencyWeight }), /minRecencyWeight/);
+  });
 });

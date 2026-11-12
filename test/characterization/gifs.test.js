@@ -119,22 +119,23 @@ test('Humor request has the pinned host, path and query', async (t) => {
   assert.equal(url.pathname, '/gif/search');
   assert.deepEqual(Object.fromEntries(url.searchParams), {
     'api-key': world.env.HUMOR_API_KEY,
-    number: '1',
+    number: '5',
     query: 'funny cat',
   });
 });
 
-test('Giphy is called with the term and { limit: 1 }', async (t) => {
+test('Giphy is called with the term and { limit: 5 }', async (t) => {
   const world = await newWorld(t);
   await world.subject.processGIFs('<gif! funny cat>');
-  assert.deepEqual(world.gifs.giphy.calls, [['funny cat', { limit: 1 }]]);
+  assert.deepEqual(world.gifs.giphy.calls, [['funny cat', { limit: 5 }]]);
 });
 
 for (const engine of ['klipy', 'giphy', 'humor']) {
-  test(`KNOWN BUG (spec 13): processGIFs rejects when ${engine} throws`, async (t) => {
+  test(`${engine} throwing no longer rejects: the token gets the placeholder`, async (t) => {
     const world = await newWorld(t);
-    const boom = new Error(`${engine} down`);
-    world.gifs[engine].setResult(boom);
-    await assert.rejects(world.subject.processGIFs('<gif! funny cat>'), boom);
+    world.gifs[engine].setResult(new Error(`${engine} down`));
+    const result = await world.subject.processGIFs('<gif! funny cat>');
+    assert.equal(result.content, '<INSERT GIF:  funny cat>');
+    assert.deepEqual(result.gifLinks, [{ match: '<gif! funny cat>', url: '' }]);
   });
 }

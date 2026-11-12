@@ -91,23 +91,52 @@ test('upsertMessages stores a reply under the parent embedding', async () => {
   assert.deepEqual(reply.metadata, { author: 'a', timestamp: 10, has_gif: false });
 });
 
-test('KNOWN BUG (spec 10): upserts every referencing message once one parent is found', async () => {
+test('only messages whose parent embedding exists get a reply row, with no undefined embedding', async () => {
   const { fake, store } = setup();
   await store.upsertMessages([m('1', 'parent')]);
-  const orphan = m('3', 'orphan', { reference: 'ghost' });
-  await assert.rejects(store.upsertMessages([m('2', 'child', { reference: '1' }), orphan]));
-  const [call] = fake.state.collection('message_reply_embeddings').upserts;
-  assert.deepEqual(call.ids, ['2', '3']);
-  assert.equal(call.embeddings[1], undefined);
+  await store.upsertMessages([m('2', 'child', { reference: '1' }), m('3', 'orphan', { reference: 'ghost' })]);
+  const replies = fake.state.collection('message_reply_embeddings');
+  assert.deepEqual(replies.upserts.map((c) => c.ids), [['2']]);
+  assert.ok(replies.upserts.every((c) => c.embeddings.every((e) => Array.isArray(e))));
+  assert.deepEqual([...replies.rows.keys()], ['2']);
 });
 
-test('KNOWN BUG (spec 10): metadata has_gif is undefined without hasGif', async () => {
+test('metadata has_gif is always a boolean', async () => {
   const { fake, store } = setup();
-  await store.upsertMessages([m('1', 'plain')]);
+  await store.upsertMessages([m('1', 'plain'), m('2', 'gif', { hasGif: true })]);
   const [call] = fake.state.collection('message_embeddings').upserts;
-  assert.equal(call.metadatas[0].has_gif, undefined);
-  assert.ok('has_gif' in call.metadatas[0]);
-  assert.equal('has_gif' in fake.state.collection('message_embeddings').rows.get('1').metadata, false);
+  assert.deepEqual(call.metadatas.map((x) => x.has_gif), [false, true]);
+  assert.equal(fake.state.collection('message_embeddings').rows.get('1').metadata.has_gif, false);
+});
+
+test('a child whose parent is new in the same batch uses the parent embedding', async () => {
+  const { fake, store } = setup();
+  await store.upsertMessages([m('1', 'parent text'), m('2', 'child text', { reference: '1' })]);
+  assert.deepEqual(fake.state.collection('message_reply_embeddings').rows.get('2').embedding, fakeEmbed('parent text'));
+});
+
+test('a parent with an empty embedding is treated as missing', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  fake.state.collection('message_embeddings').seed([{ id: '1', document: 'p', metadata: {}, embedding: [] }]);
+  await store.upsertMessages([m('2', 'child', { reference: '1' })]);
+  assert.equal(fake.state.collection('message_reply_embeddings').upserts.length, 0);
+});
+
+test('no parent lookup without references and no replies call when nothing qualifies', async () => {
+  const { fake, store } = setup();
+  await store.connect();
+  const messages = fake.state.collection('message_embeddings');
+  let gets = 0;
+  const original = messages.get.bind(messages);
+  messages.get = (args) => {
+    gets += 1;
+    return original(args);
+  };
+  await store.upsertMessages([m('1', 'x')]);
+  assert.equal(gets, 0);
+  await store.upsertMessages([m('2', 'y', { reference: 'ghost' })]);
+  assert.equal(fake.state.collection('message_reply_embeddings').upserts.length, 0);
 });
 
 const seeded = async () => {

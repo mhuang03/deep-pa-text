@@ -1,6 +1,23 @@
-import { DEFAULTS } from '../config.js';
+const URL_PATTERN = /^https?:\/\//;
 
-const getJson = async (fetch, url) => (await fetch(url)).json();
+const isUrl = (value) => typeof value === 'string' && URL_PATTERN.test(value);
+
+// Defensive: an unexpected body shape yields no URLs rather than throwing.
+const collectUrls = (items, pick, limit) => {
+  if (!Array.isArray(items)) return [];
+  const urls = items.map(pick).filter(isUrl);
+  return [...new Set(urls)].slice(0, limit);
+};
+
+const getJson = async (fetch, url, name) => {
+  const response = await fetch(url);
+  if (response.ok === false) throw new Error(`${name} responded ${response.status}`);
+  return response.json();
+};
+
+const klipyUrl = (item) => item?.file?.hd?.gif?.url;
+const giphyUrl = (item) => item?.images?.original?.url;
+const humorUrl = (item) => item?.url;
 
 export const createKlipyEngine = ({ fetch, config }) => ({
   name: 'klipy',
@@ -16,21 +33,19 @@ export const createKlipyEngine = ({ fetch, config }) => ({
       format_filter: g.klipyFormatFilter,
     });
     const url = `${g.klipyBaseUrl}/${g.klipyApiKey}/gifs/search?${params.toString()}`;
-    const data = await getJson(fetch, url);
-    return data.data?.data[0]?.file.hd.gif.url || '';
+    const data = await getJson(fetch, url, 'klipy');
+    return collectUrls(data?.data?.data, klipyUrl, g.candidates);
   },
 });
 
-export const createGiphyEngine = ({ giphy, config }) => {
-  const limit = config?.gifs.giphyLimit ?? DEFAULTS.gifs.giphyLimit;
-  return {
-    name: 'giphy',
-    search: async (query) => {
-      const { data: gifs } = await giphy.search(query, { limit });
-      return gifs[0]?.images?.original?.url || '';
-    },
-  };
-};
+export const createGiphyEngine = ({ giphy, config }) => ({
+  name: 'giphy',
+  search: async (query) => {
+    const limit = config.gifs.candidates;
+    const result = await giphy.search(query, { limit });
+    return collectUrls(result?.data, giphyUrl, limit);
+  },
+});
 
 export const createHumorEngine = ({ fetch, config }) => ({
   name: 'humor',
@@ -38,10 +53,10 @@ export const createHumorEngine = ({ fetch, config }) => ({
     const g = config.gifs;
     const params = new URLSearchParams({
       'api-key': g.humorApiKey,
-      number: g.humorNumber,
+      number: g.candidates,
       query,
     });
-    const data = await getJson(fetch, `${g.humorUrl}?${params.toString()}`);
-    return data.images[0]?.url || '';
+    const data = await getJson(fetch, `${g.humorUrl}?${params.toString()}`, 'humor');
+    return collectUrls(data?.images, humorUrl, g.candidates);
   },
 });

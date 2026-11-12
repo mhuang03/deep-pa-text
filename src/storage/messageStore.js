@@ -65,9 +65,11 @@ export const createMessageStore = ({ db, config }) => {
   const insertFiltered = (record) => {
     const hasGif = record.content.includes(GIF_TOKEN);
     const reference = resolveReference(record);
-    insertFilteredSql.run(
+    const { changes } = insertFilteredSql.run(
       record.id, record.author, record.content, record.timestamp, reference, hasGif ? 1 : 0,
     );
+    // A duplicate id inserts nothing; callers must not treat it as a new message.
+    if (Number(changes) === 0) return null;
     return { ...record, reference, hasGif };
   };
 

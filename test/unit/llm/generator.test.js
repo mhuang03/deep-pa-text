@@ -30,9 +30,9 @@ const setup = ({ retrieverError = null, chatError = null } = {}) => {
 };
 const record = { author: 'bob', content: 'hello', timestamp: 5 };
 
-test('generateReply assembles the prompt and returns the raw response', async () => {
+test('generateReply assembles the prompt and returns the sanitised response', async () => {
   const { calls, generator } = setup();
-  assert.equal(await generator.generateReply('alice', record), '  raw response ');
+  assert.equal(await generator.generateReply('alice', record), 'raw response');
   assert.deepEqual(calls.reply, [['alice', record]]);
   assert.deepEqual(calls.chat, [{
     system: SYSTEM_PROMPT,
@@ -57,7 +57,7 @@ test('an unknown persona renders undefined as the name', async () => {
 
 test('generateRevive builds the contextless prompt', async () => {
   const { calls, generator } = setup();
-  assert.equal(await generator.generateRevive('alice'), '  raw response ');
+  assert.equal(await generator.generateRevive('alice'), 'raw response');
   assert.deepEqual(calls.revive, [['alice']]);
   assert.deepEqual(calls.chat, [{
     system: SYSTEM_PROMPT,
@@ -75,4 +75,25 @@ test('chat errors propagate', async () => {
   const { generator } = setup({ chatError: new Error('llm down') });
   await assert.rejects(generator.generateReply('alice', record), /llm down/);
   await assert.rejects(generator.generateRevive('alice'), /llm down/);
+});
+
+const setupWith = (completion) => {
+  const generator = createGenerator({
+    chatClient: { complete: async () => completion },
+    retriever: { retrieveForReply: async () => buckets, retrieveForRevive: async () => [] },
+    userDirectory: { nameOf: () => 'Alice Example' },
+  });
+  return generator;
+};
+
+test('sanitises replies and revives', async () => {
+  const generator = setupWith('"line one\\nline two"');
+  assert.equal(await generator.generateReply('alice', record), 'line one\nline two');
+  assert.equal(await generator.generateRevive('alice'), 'line one\nline two');
+});
+
+test('throws when the sanitised response is empty', async () => {
+  const generator = setupWith('  "" ');
+  await assert.rejects(generator.generateReply('alice', record), /LLM returned an empty response/);
+  await assert.rejects(generator.generateRevive('alice'), /LLM returned an empty response/);
 });

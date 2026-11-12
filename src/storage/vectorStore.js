@@ -1,6 +1,6 @@
 const QUERY_INCLUDE = ['documents', 'metadatas', 'distances'];
 
-const buildMetadata = (m) => ({ author: m.author, timestamp: m.timestamp, has_gif: m.hasGif });
+const buildMetadata = (m) => ({ author: m.author, timestamp: m.timestamp, has_gif: Boolean(m.hasGif) });
 
 const toHits = (result) =>
   result.ids[0].map((id, i) => ({
@@ -56,11 +56,23 @@ export const createVectorStore = ({ client, embeddingFunction, config }) => {
     return embedding;
   };
 
+  const hasEmbedding = (embedding) => Array.isArray(embedding) && embedding.length > 0;
+
   const loadParentEmbeddings = async (messagesCollection, withReference) => {
     const ids = Array.from(new Set(withReference.map((m) => m.reference)));
     const referenced = await messagesCollection.get({ ids, include: ['embeddings'] });
-    if (referenced.ids.length === 0) return null;
-    return new Map(referenced.ids.map((id, i) => [id, referenced.embeddings[i]]));
+    const entries = referenced.ids.map((id, i) => [id, referenced.embeddings?.[i]]);
+    return new Map(entries.filter(([, embedding]) => hasEmbedding(embedding)));
+  };
+
+  const upsertReplies = async (repliesCollection, rows, parents) => {
+    if (rows.length === 0) return;
+    await repliesCollection.upsert({
+      ids: rows.map((m) => m.id),
+      documents: rows.map((m) => m.content),
+      metadatas: rows.map(buildMetadata),
+      embeddings: rows.map((m) => parents.get(m.reference)),
+    });
   };
 
   const upsertMessages = async (msgs) => {
@@ -73,14 +85,8 @@ export const createVectorStore = ({ client, embeddingFunction, config }) => {
     const withReference = msgs.filter((m) => m.reference);
     if (withReference.length === 0) return;
     const parents = await loadParentEmbeddings(messages, withReference);
-    if (!parents) return;
-    // Legacy behaviour, pinned: every referencing message is upserted, even if its parent was not found.
-    await replies.upsert({
-      ids: withReference.map((m) => m.id),
-      documents: withReference.map((m) => m.content),
-      metadatas: withReference.map(buildMetadata),
-      embeddings: withReference.map((m) => parents.get(m.reference)),
-    });
+    const qualifying = withReference.filter((m) => parents.has(m.reference));
+    await upsertReplies(replies, qualifying, parents);
   };
 
   const query = async (name, { embedding, text, where, limit }) => {

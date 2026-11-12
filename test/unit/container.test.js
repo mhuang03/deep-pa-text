@@ -47,7 +47,7 @@ test('constructs each third-party client once with the configured options', () =
   assert.deepEqual(fakes.chroma.state.constructed, [{ port: 9000 }]);
   assert.deepEqual(fakes.chroma.state.embeddingFunctionOptions, { ...config.embedding });
   assert.deepEqual(fakes.llm.state.constructed, [
-    { apiKey: ENV.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' },
+    { apiKey: ENV.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com', timeout: 120000, maxRetries: 1 },
   ]);
   assert.deepEqual(fakes.gifs.state.constructed, [[ENV.GIPHY_API_KEY]]);
   assert.deepEqual(fakes.discord.state.clientOptions.intents.length, 3);
@@ -92,7 +92,7 @@ test('buildGifResolver resolves through the vendor fetch and GiphyFetch', async 
 });
 
 test('defaultClock wraps the globals lazily', (t) => {
-  t.mock.timers.enable({ apis: ['Date', 'setInterval'], now: 1000 });
+  t.mock.timers.enable({ apis: ['Date', 'setInterval', 'setTimeout'], now: 1000 });
   const clock = defaultClock();
   t.mock.method(Math, 'random', () => 0.25);
   assert.equal(clock.now(), 1000);
@@ -101,4 +101,10 @@ test('defaultClock wraps the globals lazily', (t) => {
   clock.setInterval(() => ticks.push(clock.now()), 100);
   t.mock.timers.tick(250);
   assert.equal(ticks.length >= 1, true);
+  const fired = [];
+  const handle = clock.setTimeout(() => fired.push('late'), 100);
+  clock.setTimeout(() => fired.push('on time'), 100);
+  clock.clearTimeout(handle);
+  t.mock.timers.tick(100);
+  assert.deepEqual(fired, ['on time']);
 });

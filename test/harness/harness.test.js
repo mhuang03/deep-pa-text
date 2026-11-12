@@ -70,8 +70,9 @@ test('revive fires at +3h10m, once, and each interval sees its own time', async 
 test('reply command parks on the modal without blocking the world', async (t) => {
   const world = await newWorld(t);
   const interaction = await world.openReplyCommand({ target: { content: 'hello there friends' }, user: 'carol' });
-  assert.equal(interaction.modal.custom_id, 'replyModal');
+  assert.equal(interaction.modal.custom_id, `replyModal:${interaction.id}`);
   assert.equal(interaction.modalOptions.time, 120_000);
+  assert.equal(typeof interaction.modalOptions.filter, 'function');
 
   await world.emitMessage({ content: 'another message here' });
   await world.advance(MINUTE);
@@ -84,7 +85,7 @@ test('reply command parks on the modal without blocking the world', async (t) =>
   await other.timeout();
   assert.equal(other.replies.length, 0);
   assert.equal(world.errors.length, 0);
-  assert.equal(world.logs.error.length, 1);
+  assert.equal(world.logs.error.length, 0);
 });
 
 test('close with a pending modal does not hang', async () => {
@@ -109,11 +110,21 @@ test('random, llm and gif controls', async (t) => {
   assert.equal(await subject.getRandomResponse('alice'), 'three');
   assert.equal(world.llm.callClients[0].apiKey, ENV.DEEPSEEK_API_KEY);
 
+  world.llm.respondWith([null, '', { choices: [] }, { choices: [{ message: { content: 'raw' } }] }]);
+  const probe = new world.fakes.llm.OpenAI({ apiKey: 'k' });
+  const ask = async () => probe.chat.completions.create({ messages: [] });
+  assert.equal((await ask()).choices[0].message.content, null);
+  assert.equal((await ask()).choices[0].message.content, '');
+  assert.deepEqual(await ask(), { choices: [] });
+  assert.equal((await ask()).choices[0].message.content, 'raw');
+
   world.gifs.klipy.setResult('https://gif.example/cat.gif');
   const { gifLinks } = await subject.processGIFs('<gif! cat>');
   assert.equal(gifLinks[0].url, 'https://gif.example/cat.gif');
   world.gifs.klipy.setResult(new Error('klipy down'));
-  await assert.rejects(subject.processGIFs('<gif! cat>'), /klipy down/);
+  const { gifLinks: failed } = await subject.processGIFs('<gif! cat>');
+  assert.equal(failed[0].url, '');
+  assert.equal(world.logs.warn.length, 1);
   await assert.rejects(globalThis.fetch('https://other.example/x'), /unexpected fetch/);
 });
 
@@ -186,4 +197,50 @@ test('close restores globals and a later world still gets fake clients', async (
   } finally {
     await again.close();
   }
+});
+
+test('fake modal waits: submit is offered to every wait, timeout rejects with a collector error', async (t) => {
+  const world = await newWorld(t);
+  const a = await world.openReplyCommand({ target: { content: 'hello there friends' }, user: 'alice' });
+  const b = await world.openReplyCommand({ target: { content: 'hello there friends' }, user: 'bob' });
+  assert.throws(() => a.awaitModalSubmit({}), /numeric time/);
+  const stray = await a.submit({ author: 'bob', user: { id: 'user-zed', username: 'zed' } });
+  assert.deepEqual(stray.replies, []);
+  await b.timeout();
+  await assert.rejects(b.timeout(), /no modal wait is pending/);
+  assert.equal((await a.submit({ author: 'bob' })).replies.length, 1);
+});
+
+test('world.advance fires mocked setTimeout timers', async (t) => {
+  const world = await newWorld(t);
+  const fired = [];
+  setTimeout(() => fired.push('t'), 1000);
+  await world.advance(999);
+  assert.deepEqual(fired, []);
+  await world.advance(1);
+  assert.deepEqual(fired, ['t']);
+});
+
+test('fake gifs setResult accepts strings, arrays, null, errors, hang, status, body and functions', async (t) => {
+  const world = await newWorld(t);
+  const { fetch, GiphyFetch } = world.fakes.gifs;
+  const klipy = () => fetch('https://api.klipy.com/api/v1/k/gifs/search?q=cat');
+  const jsonOf = async () => (await klipy()).json();
+  world.gifs.klipy.setResult(['https://a/1.gif', 'https://a/2.gif']);
+  assert.equal((await jsonOf()).data.data.length, 2);
+  world.gifs.klipy.setResult(null);
+  assert.deepEqual((await jsonOf()).data.data, []);
+  world.gifs.klipy.setResult({ status: 503 });
+  assert.deepEqual([(await klipy()).ok, (await klipy()).status], [false, 503]);
+  world.gifs.klipy.setResult({ body: { odd: true } });
+  assert.deepEqual(await jsonOf(), { odd: true });
+  world.gifs.klipy.setResult((q) => `https://a/${q}.gif`);
+  assert.equal((await jsonOf()).data.data[0].file.hd.gif.url, 'https://a/cat.gif');
+  world.gifs.klipy.setResult(new Error('down'));
+  await assert.rejects(klipy(), /down/);
+  world.gifs.klipy.setResult({ hang: true });
+  assert.equal(await Promise.race([klipy(), Promise.resolve('pending')]), 'pending');
+  world.gifs.giphy.setResult(['https://a/1.gif', 'https://a/2.gif', 'https://a/3.gif']);
+  const found = await new GiphyFetch('k').search('cat', { limit: 2 });
+  assert.equal(found.data.length, 2);
 });

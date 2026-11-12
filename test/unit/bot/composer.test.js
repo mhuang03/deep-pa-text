@@ -25,7 +25,7 @@ const setup = ({ links = [], text = 'hello' } = {}) => {
     },
   };
   const authorEmbeds = createAuthorEmbeds({ config: loadConfig({}), logger: { warn: () => {} } });
-  const composer = createComposer({ generator, gifResolver, authorEmbeds });
+  const composer = createComposer({ generator, gifResolver, authorEmbeds, config: loadConfig({}) });
   return { composer, calls, guild: state.guild };
 };
 
@@ -65,7 +65,40 @@ test('propagates generator errors without resolving GIFs', async () => {
     generator: { generateReply: async () => { throw new Error('llm down'); } },
     gifResolver: { resolve: async () => calls.push('resolve') },
     authorEmbeds: { make: async () => calls.push('embed') },
+    config: loadConfig({}),
   });
   await assert.rejects(failing.composeReply({ persona: 'bob', record: {}, guild }), /llm down/);
   assert.deepEqual(calls, []);
+});
+
+const truncationSetup = (text, links = []) => {
+  const config = loadConfig({});
+  const composer = createComposer({
+    generator: { generateReply: async () => text },
+    gifResolver: { resolve: async (response) => ({ content: response, gifLinks: links }) },
+    authorEmbeds: { make: async () => null },
+    config,
+  });
+  return { composer, max: config.discord.maxMessageLength };
+};
+
+test('truncates only the delivered content, not the returned response', async () => {
+  const text = 'a'.repeat(2500);
+  const { composer, max } = truncationSetup(text);
+  const { response, payload } = await composer.composeReply({ persona: 'bob', record: {}, guild: {} });
+  assert.equal(response, text);
+  assert.equal(payload.content.length, max);
+});
+
+test('truncates after GIF processing', async () => {
+  const text = `<gif! cat>${'a'.repeat(1995)}`;
+  const gifResolver = { resolve: async () => ({ content: 'a'.repeat(1995), gifLinks: [] }) };
+  const composer = createComposer({
+    generator: { generateReply: async () => text },
+    gifResolver,
+    authorEmbeds: { make: async () => null },
+    config: loadConfig({}),
+  });
+  const { payload } = await composer.composeReply({ persona: 'bob', record: {}, guild: {} });
+  assert.equal(payload.content.length, 1995);
 });

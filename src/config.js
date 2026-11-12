@@ -6,6 +6,8 @@ const buildDiscord = (env) => ({
   botName: 'deep-pa-text',
   embedColor: 0x5865F2,
   modalTimeoutMs: 120000,
+  maxMessageLength: 2000,
+  truncateLookbackChars: 200,
 });
 
 const buildReply = (env) => ({
@@ -68,12 +70,31 @@ const buildRetrieval = () => ({
   likelyRepliers: 20,
 });
 
+export const assertPersona = (persona) => {
+  const { recencyHalfLifeMs, minRecencyWeight } = persona;
+  if (!(Number.isFinite(recencyHalfLifeMs) && recencyHalfLifeMs > 0)) {
+    throw new Error('persona.recencyHalfLifeMs must be a number greater than 0');
+  }
+  if (!(Number.isFinite(minRecencyWeight) && minRecencyWeight > 0 && minRecencyWeight <= 1)) {
+    throw new Error('persona.minRecencyWeight must be a number in (0, 1]');
+  }
+  return persona;
+};
+
+const buildPersona = () => assertPersona({
+  recencyHalfLifeMs: 15552000000,
+  minRecencyWeight: 0.25,
+});
+
 const buildLlm = (env) => ({
   apiKey: env.DEEPSEEK_API_KEY,
   baseURL: 'https://api.deepseek.com',
   model: 'deepseek-v4-flash',
   thinking: true,
   stream: false,
+  timeoutMs: 120000,
+  maxRetries: 1,
+  emptyRetries: 1,
 });
 
 const buildGifs = (env) => ({
@@ -88,8 +109,8 @@ const buildGifs = (env) => ({
   klipyContentFilter: 'off',
   klipyFormatFilter: 'gif',
   humorUrl: 'https://api.humorapi.com/gif/search',
-  humorNumber: 1,
-  giphyLimit: 1,
+  candidates: 5,
+  timeoutMs: 5000,
 });
 
 const buildLogging = () => ({
@@ -112,6 +133,7 @@ const buildConfig = (env) => ({
   chroma: buildChroma(env),
   embedding: buildEmbedding(),
   retrieval: buildRetrieval(),
+  persona: buildPersona(),
   llm: buildLlm(env),
   gifs: buildGifs(env),
   logging: buildLogging(),

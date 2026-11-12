@@ -27,16 +27,18 @@ export const defaultClock = () => ({
   now: () => Date.now(),
   random: () => Math.random(),
   setInterval: (fn, ms) => setInterval(fn, ms),
+  setTimeout: (fn, ms) => setTimeout(fn, ms),
+  clearTimeout: (handle) => clearTimeout(handle),
 });
 
-export const buildGifResolver = ({ config, vendor }) => {
+export const buildGifResolver = ({ config, vendor, clock = defaultClock(), logger = createLogger() }) => {
   const giphy = new vendor.GiphyFetch(config.gifs.giphyApiKey);
   const engines = [
     createKlipyEngine({ fetch: vendor.fetch, config }),
     createGiphyEngine({ giphy, config }),
     createHumorEngine({ fetch: vendor.fetch, config }),
   ];
-  return createGifResolver({ engines, config });
+  return createGifResolver({ engines, config, random: clock.random, logger, clock });
 };
 
 const buildVectorStore = ({ config, vendor }) => {
@@ -51,8 +53,9 @@ const buildVectorStore = ({ config, vendor }) => {
 };
 
 const buildGenerator = ({ config, vendor, retriever, userDirectory }) => {
-  const { apiKey, baseURL } = config.llm;
-  const chatClient = createChatClient({ client: new vendor.OpenAI({ apiKey, baseURL }), config });
+  const { apiKey, baseURL, timeoutMs, maxRetries } = config.llm;
+  const client = new vendor.OpenAI({ apiKey, baseURL, timeout: timeoutMs, maxRetries });
+  const chatClient = createChatClient({ client, config });
   return createGenerator({ chatClient, retriever, userDirectory });
 };
 
@@ -97,9 +100,9 @@ export const buildContainer = ({
 }) => {
   const core = buildCore({ config, vendor, data, clock });
   const client = createDiscordClient(vendor.Client);
-  const gifResolver = buildGifResolver({ config, vendor });
+  const gifResolver = buildGifResolver({ config, vendor, clock, logger });
   const authorEmbeds = createAuthorEmbeds({ config, logger });
-  const composer = createComposer({ generator: core.generator, gifResolver, authorEmbeds });
+  const composer = createComposer({ generator: core.generator, gifResolver, authorEmbeds, config });
   const handlers = buildHandlers({ config, data, clock, logger, client, core, composer, authorEmbeds });
   const bot = createBot({ client, config, handlers, clock, logger });
   return { bot, client, logger, gifResolver, composer, ...core };

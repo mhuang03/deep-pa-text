@@ -27,7 +27,8 @@ test('logs in once with the Discord bot token', async (t) => {
 test('constructs an OpenAI-compatible client with the DeepSeek key and base URL', async (t) => {
   const world = await newWorld(t);
   const match = world.llm.constructed.filter(
-    (options) => options.apiKey === world.env.DEEPSEEK_API_KEY && options.baseURL === 'https://api.deepseek.com',
+    (options) => options.apiKey === world.env.DEEPSEEK_API_KEY && options.baseURL === 'https://api.deepseek.com'
+      && options.timeout === 120000 && options.maxRetries === 1,
   );
   assert.equal(match.length, 1);
 });

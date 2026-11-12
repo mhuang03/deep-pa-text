@@ -1,25 +1,39 @@
+import { pickWeighted, weighAuthors } from './personaWeights.js';
+
 const pickIndex = (roll, length) => Math.floor(roll * length);
 
 export const createPersonaSelector = ({ vectorStore, users, random, config }) => {
-  const likelyRepliers = async (record) => {
-    const hits = await vectorStore.query('replies', {
+  const likelyReplierHits = (record) =>
+    vectorStore.query('replies', {
       text: record.content,
       where: {
         $and: [{ author: { $ne: record.author } }, { timestamp: { $lt: record.timestamp } }],
       },
       limit: config.retrieval.likelyRepliers,
     });
-    return hits.map((hit) => hit.metadata.author);
+
+  const likelyRepliers = async (record) =>
+    (await likelyReplierHits(record)).map((hit) => hit.metadata.author);
+
+  const pickRandomUser = ({ exclude } = {}) => {
+    const others = users.filter((user) => user.username !== exclude);
+    const pool = others.length > 0 ? others : users;
+    return pool[pickIndex(random(), pool.length)].username;
   };
 
-  const pickRandomUser = () => users[pickIndex(random(), users.length)].username;
+  const weighHits = (hits, record) => weighAuthors(hits, {
+    referenceTimeMs: record.timestamp,
+    halfLifeMs: config.persona.recencyHalfLifeMs,
+    minRecency: config.persona.minRecencyWeight,
+    allowedAuthors: users.map((user) => user.username),
+  });
 
   const pickReplier = async (record) => {
-    const list = await likelyRepliers(record);
-    // The roll is consumed even when the list is empty (pinned Math.random order).
-    const chosen = list[pickIndex(random(), list.length)];
-    return chosen === undefined ? pickRandomUser() : chosen;
+    const hits = await likelyReplierHits(record);
+    // The roll is consumed even when there are no hits (pinned Math.random order).
+    const chosen = pickWeighted(weighHits(hits, record), random());
+    return chosen === undefined ? pickRandomUser({ exclude: record.author }) : chosen;
   };
 
-  return { likelyRepliers, pickReplier, pickRandomUser };
+  return { likelyRepliers, likelyReplierHits, pickReplier, pickRandomUser };
 };

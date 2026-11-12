@@ -104,7 +104,7 @@ All three only act on the configured channel (`PATEXT_CHANNEL_ID`), and bot-auth
 
 | Trigger | When | Persona | Posts as |
 | --- | --- | --- | --- |
-| Auto reply | A human message that passes the content filters, at least 5 min after the last bot reply, with probability 0.1. After 10 consecutive random misses the chance rises 0.05 per miss until a reply happens. | Random pick from the authors of the 20 nearest entries in `message_reply_embeddings` (people who replied to similar messages, excluding the message's author); falls back to a random user. | Discord reply to the message |
+| Auto reply | A human message that passes the content filters, at least 5 min after the last bot reply, with probability 0.1. After 10 consecutive random misses the chance rises 0.05 per miss until a reply happens. | Weighted pick from the authors of the 20 nearest entries in `message_reply_embeddings` (people who replied to similar messages, excluding the message's author). Each hit weighs `1 / (1 + distance)` times a recency factor that halves every `persona.recencyHalfLifeMs` (180 days) and never drops below `persona.minRecencyWeight` (0.25); an author's weight is the sum over their hits. With no usable hits it falls back to a random user other than the message's author. | Discord reply to the message |
 | Revive | Checked every 10 min. Fires only when the last activity in the channel was a human message (not a bot reply or revive, and not a fresh start) and it is more than 3 h old during 10:00–22:59 Central, or more than 12 h old otherwise. The bot therefore never revives twice in a row. | Random user | Plain channel message |
 | `reply` context menu | A user right-clicks a message, then **Apps → reply**, and picks a persona (or `random`, which uses the auto-reply selection) in a modal. Skips the probability and rate limit. | Chosen in the modal | Interaction reply (not a Discord reply to the target) |
 
@@ -120,7 +120,7 @@ SQLite (`messages.db`):
 Chroma:
 
 - `message_embeddings`: one entry per filtered message, embedded on its own content. Metadata: `author`, `timestamp`, `has_gif`.
-- `message_reply_embeddings`: one entry per filtered message that has a (Discord) reference, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
+- `message_reply_embeddings`: one entry per filtered message whose resolved reference (explicit Discord reply, else the inferred previous message) has an embedding in `message_embeddings`, stored under the embedding of the message it replies to. Querying it with a new message returns what people said in response to similar messages.
 
 ## Retrieval and prompting
 
@@ -145,16 +145,16 @@ Predicates: approved author, non-empty, 5–200 characters, no bot-command prefi
 
 ## GIFs
 
-`<gif! terms>` is the corpus representation of a GIF. When the LLM emits one, the GIF resolver searches Klipy, then Giphy, then Humor API with the first 50 characters of the terms and takes the first hit. Resolved GIFs are removed from the text and attached as image embeds; unresolved ones are left as `<INSERT GIF: terms>`.
+`<gif! terms>` is the corpus representation of a GIF. When the LLM emits one, the GIF resolver searches Klipy, then Giphy, then Humor API with the first 50 characters of the terms. Each engine returns up to 5 results (`gifs.candidates`) and the first engine with any result wins; one of its results is picked at random, so the same terms do not always give the same GIF. Each lookup has a 5 s timeout (`gifs.timeoutMs`); an engine that throws, times out or answers with an HTTP error is logged as a warning and the next engine is tried. If every engine fails the token stays as a placeholder and the reply is still sent. Resolved GIFs are removed from the text and attached as image embeds; unresolved ones are left as `<INSERT GIF: terms>`.
+
+## LLM calls and output cleaning
+
+The chat client is built with `llm.timeoutMs` (120 s) and `llm.maxRetries` (1), so the SDK aborts a slow attempt and retries connection errors, timeouts, 408, 409, 429 and 5xx. A completion with no content is retried up to `llm.emptyRetries` (1) more times, then fails with `LLM returned an empty response`; the handler logs it and nothing is sent. Every completion is cleaned before use: surrounding quotes are removed (a JSON string is decoded) and stray `\n`, `\t` and `\"` escapes become the real characters. Delivered text is cut to `discord.maxMessageLength` (2000) characters, at whitespace within the last `discord.truncateLookbackChars` (200) characters when possible; the untruncated cleaned text is what is logged.
 
 ## Known issues
 
 These behaviours are pinned by the characterization tests in `test/characterization/` and are fixed by later specs.
 
-- Live messages are stored in Chroma with `has_gif: undefined` (the stored message is not passed on), so they never match the GIF bucket.
-- The inferred (previous-message) reference is saved to SQLite but not passed to the vector store, so live messages only enter `message_reply_embeddings` when they are explicit Discord replies.
-- `awaitModalSubmit` has no filter, so two users with the modal open at once can receive each other's submission. A dismissed modal logs a timeout error after 2 min.
-- A GIF API that throws (rather than returning no results) fails the whole response.
 - The bot's own messages are not stored, so there is no record of which persona wrote a given bot message.
 - There is no history backfill.
-- `message.reply` and `channel.send` are not awaited: a failed send is logged, but the bot's state is updated as if it had succeeded. There are no timeouts on external calls.
+- `message.reply` and `channel.send` are not awaited: a failed send is logged, but the bot's state is updated as if it had succeeded.

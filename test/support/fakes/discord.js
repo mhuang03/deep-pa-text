@@ -97,7 +97,7 @@ export const createFakeDiscord = () => {
   const guild = createGuild();
   const channel = createChannel(CHANNEL_ID, guild, nextId);
   const otherChannel = createChannel(OTHER_CHANNEL_ID, guild, nextId);
-  const pendingModals = new Set();
+  const pendingWaits = [];
   const state = {
     client: null,
     clientOptions: null,
@@ -172,19 +172,15 @@ export const createFakeDiscord = () => {
     return submit;
   };
 
+  const TIMEOUT_MESSAGE = 'Collector received no interactions before ending with reason: time';
+
   const makeReplyCommand = ({ target, user = 'alice' }) => {
     let entry = null;
-    let pending = null;
-    const release = () => {
-      pendingModals.delete(pending);
-      pending = null;
+    let own = null;
+    const release = (wait) => {
+      pendingWaits.splice(pendingWaits.indexOf(wait), 1);
+      if (own === wait) own = null;
       if (entry) entry.parked = false;
-    };
-    const takePending = () => {
-      if (!pending) throw new Error('fake discord: no modal wait is pending');
-      const taken = pending;
-      release();
-      return taken;
     };
     const interaction = makeInteraction({
       commandName: 'reply',
@@ -201,22 +197,35 @@ export const createFakeDiscord = () => {
       interaction.modal = modal.toJSON();
     };
     interaction.awaitModalSubmit = (options) => {
+      if (typeof options?.time !== 'number') {
+        throw new TypeError('fake discord: awaitModalSubmit requires a numeric time');
+      }
       interaction.modalOptions = options;
       if (entry) entry.parked = true;
       return new Promise((resolve, reject) => {
-        pending = { resolve, reject, release };
-        pendingModals.add(pending);
+        const wait = { filter: options.filter, resolve, reject, release: () => release(wait) };
+        own = wait;
+        pendingWaits.push(wait);
       });
     };
-    interaction.submit = async ({ author, customId = interaction.modal?.custom_id }) => {
-      const taken = takePending();
-      const submitted = makeModalSubmit({ customId, user: interaction.user, author });
-      taken.resolve(submitted);
+    interaction.submit = async ({
+      author, customId = interaction.modal?.custom_id, user: submitter = interaction.user,
+    }) => {
+      const submitted = makeModalSubmit({ customId, user: submitter, author });
+      [...pendingWaits]
+        .filter((wait) => !wait.filter || wait.filter(submitted))
+        .forEach((wait) => {
+          wait.release();
+          wait.resolve(submitted);
+        });
       await tracker.settle();
       return submitted;
     };
     interaction.timeout = async () => {
-      takePending().reject(new Error('fake discord: modal timed out'));
+      if (!own) throw new Error('fake discord: no modal wait is pending');
+      const wait = own;
+      wait.release();
+      wait.reject(Object.assign(new Error(TIMEOUT_MESSAGE), { code: 'InteractionCollectorError' }));
       await tracker.settle();
     };
     return interaction;
@@ -225,7 +234,7 @@ export const createFakeDiscord = () => {
   state.makeMessage = makeMessage;
   state.makeInteraction = makeInteraction;
   state.closePending = () => {
-    [...pendingModals].forEach((pending) => {
+    [...pendingWaits].forEach((pending) => {
       pending.release();
       pending.reject(new Error('fake discord: closed while waiting for a modal'));
     });

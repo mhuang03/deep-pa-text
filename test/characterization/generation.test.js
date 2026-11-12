@@ -53,7 +53,9 @@ test('getRAGResponse sends the request through the client built with the deepsee
   const world = await newWorld(t);
   await world.subject.getRAGResponse('alice', msg('q', 'bob', 'hello world', QUERY_TIME));
   assert.deepEqual(world.llm.callClients, [
-    { apiKey: world.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' },
+    {
+      apiKey: world.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com', timeout: 120000, maxRetries: 1,
+    },
   ]);
 });
 
@@ -94,7 +96,9 @@ test('getRandomResponse sends contextlessInput built from a subset of the person
   assert.equal(userContent, world.subject.contextlessInput('bob', 'Bob Example', shown));
   assertRequestShape(world, userContent);
   assert.deepEqual(world.llm.callClients, [
-    { apiKey: world.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com' },
+    {
+      apiKey: world.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com', timeout: 120000, maxRetries: 1,
+    },
   ]);
 });
 

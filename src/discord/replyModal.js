@@ -3,7 +3,7 @@ import {
   LabelBuilder, TextDisplayBuilder,
 } from 'discord.js';
 
-export const REPLY_MODAL_ID = 'replyModal';
+export const REPLY_MODAL_PREFIX = 'replyModal';
 export const AUTHOR_SELECT_ID = 'authorSelect';
 export const RANDOM_AUTHOR = 'random';
 
@@ -12,6 +12,7 @@ export const AUTHOR_LABEL = 'Who should I reply as?';
 export const AUTHOR_PLACEHOLDER = 'Select an author';
 export const RANDOM_DESCRIPTION = 'Reply as a random user';
 export const NOT_REPLYABLE_MESSAGE = 'The selected message is not replyable.';
+export const MODAL_TIMEOUT_LOG = 'reply modal dismissed or timed out';
 export const WRONG_CHANNEL_MESSAGE = 'This command can only be used in the #pa-text channel.';
 
 const buildUserOption = (user) =>
@@ -34,11 +35,16 @@ const buildAuthorLabel = (users) => {
   return new LabelBuilder().setLabel(AUTHOR_LABEL).setStringSelectMenuComponent(select);
 };
 
-export const buildReplyModal = ({ record, users }) => {
+export const buildModalId = (interactionId) => `${REPLY_MODAL_PREFIX}:${interactionId}`;
+
+// discord.js rejects a modal wait with this code when time runs out.
+export const isModalTimeout = (error) => error?.code === 'InteractionCollectorError';
+
+export const buildReplyModal = ({ record, users, modalId }) => {
   const display = new TextDisplayBuilder()
     .setContent(`**Original message from ${record.author}:**\n${record.content}`);
   return new ModalBuilder()
-    .setCustomId(REPLY_MODAL_ID)
+    .setCustomId(modalId)
     .setTitle(MODAL_TITLE)
     .addTextDisplayComponents(display)
     .addLabelComponents(buildAuthorLabel(users));
