@@ -125,3 +125,18 @@ README: triggers (in-flight guard, cooldowns, chain and command limits, behaviou
 ## Acceptance
 
 `npm test` passes; existing assertions change only as listed.
+
+## Amendments after review (these override the text above where they differ)
+
+1. **Claim token.** `decide()` returns `{ reply: true, reason, release }` when it accepts; `release` is a closure that frees that claim and is idempotent. In-flight is a counter, so an `override` claim and a normal claim do not clear each other. Only the handler that received `reply: true` calls `release` (in a `finally`). There is no separate `release()` method. The chain path does not claim.
+2. **`noteFailure`** is called by the auto-reply path for any failure whose stage is not delivery, including a failed `pickReplier`. Chain and command failures do not call it.
+3. **Activity rollback.** `activity.noteBot()` returns an `undo()` function. `undo` restores the state from before that `noteBot` **only if nothing has changed the tracker since** (a version counter); otherwise it does nothing. There is no `snapshot()`. Edge case: a human message that arrives during a failing generation keeps its timestamp after the failure.
+4. **Revive cooldown** state lives in the closure of `createReviveTick` (not persisted; a restart clears it). Any failed attempt counts, including a delivery failure.
+5. **Chains disabled.** The handler checks `config.chain.enabled` before building a chain; when it is false, no chain is built and `chainPolicy.decide` is not called. The `chain-disabled` reason is removed.
+6. **Command limiter.** `begin(userId)` re-checks and claims atomically and returns `{ allowed, reason }`; `end()` is called only after a successful `begin`. The check before the modal is a courtesy. A refusal at submission is answered with an ephemeral `modalInteraction.reply` and no `deferReply`. Both maps prune entries older than their window on every check.
+7. **Before the modal** the handler does no network call: the guild lookup (`client.guilds.fetch` when `message.guild` is missing) moves after `deferReply`.
+8. **Placeholder.** The payload passed to `editReply` has no `flags` (the ephemeral flag is set by `deferReply`). `deferOptions()` exists on both delivery adapters.
+9. **Modal default.** The default persona is used only if it is in the user directory.
+10. **Empty output retry.** Only an empty result from post-processing is retried, up to `llm.postProcessRetries: 1` extra completions per generation. Post-processing signals it with an error marked `isEmptyOutput: true`; an exhausted chat client (its own empty-completion retries) is not retried again.
+11. **Config validation** for the new keys follows spec 27 (`chain.windowMs > 0`; `chain.maxPerWindow`, `command.maxConcurrent` integers ≥ 1; cooldowns ≥ 0). The container builds `commandLimiter` and passes it to the reply-command handler.
+12. **Existing tests to update:** `test/characterization/auto-reply.test.js` and `revive.test.js` (LLM-failure cases), `reply-command.test.js` (acknowledgement sequence), the chain scenario for `CHAIN_REPLIES=false`, and the handler unit tests.

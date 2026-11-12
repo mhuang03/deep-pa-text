@@ -80,3 +80,16 @@ README: operations section (what happens when Chroma or the embedding API is dow
 ## Acceptance
 
 `npm test` passes. No call to a Chroma collection or the embedding function exists outside `withTimeout`.
+
+## Amendments after review (these override the text above where they differ)
+
+1. **Placement.** `vectorSync.js` moves to `src/ingest/vectorSync.js` and the new module is `src/ingest/vectorHealth.js` (both use only storage). The container builds stores → `vectorSync` → `vectorHealth` → `ingest` (with `onVectorError: vectorHealth.noteFailure`), so no late binding is needed. `src/backfill/` imports `vectorSync` from `src/ingest/`.
+2. **Timeout scope.** The timeout applies to each Chroma call, not to a whole method. Interactive calls use `chroma.timeoutMs`; the batch operations used by backfill, re-import and sync (`upsertMessages` of more than one message, `fillMetadata`, `addReplyRows`, `getRecords`) use `chroma.batchTimeoutMs: 120000`. The collections promise is evicted only if it is still the cached one. `withTimeout` abandons a request without cancelling it; that is accepted and documented.
+3. **Tagging.** The tagged error copies the original message, is created once (an already tagged error passes through), and argument-validation errors (`exactly one of embedding or text`, unknown collection) are thrown before the tagged region and are not tagged. Unit tests whose vector-store stubs throw untagged errors and expect tolerance are updated to throw tagged ones.
+4. **`createVectorStore` requires `clock`.** Every existing construction in tests is updated (`vectorStore`, `retriever`, `personaSelector`, `vectorSync` tests).
+5. **`vectorHealth` races.** Debt is a counter: `repair` snapshots it and clears the debt only if it is unchanged when the sync finishes. Only one sync runs at a time: a `repair` or `startupRepair` that finds one in flight returns immediately. A failed `startupRepair` and a failed catch-up (spec 28) call `noteFailure`. Both are tracked by the lifecycle. Repair runs log one summary line, not one line per page.
+6. **`pageFiltered`** uses a row-value comparison so that it seeks: `WHERE deleted_at IS NULL AND (timestamp, id) > (?, ?) ORDER BY timestamp, id LIMIT ?`, with `(-1, '')` for no cursor. Verify with `EXPLAIN QUERY PLAN` that the plan is a `SEARCH` on the timestamp index.
+7. **Shapes.** `recordMessage` resolves `{ filtered, stored, vectorFailed }`; `recordEdit` resolves `{ changed, vectorFailed }` and forwards the option when it falls through to `recordMessage`; `recordDelete` has no such option (it writes no vectors).
+8. **Dimension check (A47).** `connect` reads one stored embedding from the messages collection when it is not empty (`peek({ limit: 1 })` with embeddings) and throws a config error if its length differs from `config.embedding.dimensions`. No embedding request is made. A changed model with the same dimension cannot be detected; the README says so.
+9. **Fake Chroma** rejects an upsert with an empty id list or duplicate ids, as the real server does; `hang` also covers `getOrCreateCollection`, `peek` and the fake embedding function.
+10. **Not covered here (recorded in spec 33):** Discord REST calls rely on discord.js's own request timeout and retries (the other half of A31).

@@ -84,3 +84,17 @@ Each of these is a test that must fail if the behaviour regresses:
 ## Acceptance
 
 `npm test` passes, including `layering`, `sizeLimits` and `coverageMap`.
+
+## Amendments after review (these override the text above where they differ)
+
+1. **Everything over the limits is split, not only the listed factories.** At the time this spec is implemented, any file over 200 lines and any function over 40 lines (top-level or inner closure), including growth from specs 27 to 32, is split by responsibility with its public keys unchanged. Known additional offenders: `createWebhookDelivery`, `createRetriever`, `createMessageCreateHandler`, `createDatabaseSwitch`, `createVectorSync`, `createIngestService`, `createBotMessageImporter`, `createHistoryReader`. A destructured options object counts as one parameter.
+2. **Layer rule, precisely.** Add `container/` to level 5. A top-level file and the directory with the same stem (`config.js` and `config/`, `container.js` and `container/`) are one unit. Imports between different directories of the same level are forbidden on levels 1 to 4; levels 0 and 5 may import within their level (no cycles). The scanner covers `import … from`, `export … from`, side-effect imports and dynamic `import()`, and fails on a relative path that does not resolve. Pure helpers moved to `src/text/` take what they need as parameters; they do not import the configuration.
+3. **Tunables.** Only these move to configuration: `persona.missingSimilarity: 0.5`, `storage.chunkSize: 500`, `backfill.comparisonPageSize: 500`. `ONE_HOUR_MS`, `TWO_DAYS_MS`, `MS_PER_DAY` and `HALF_LIFE_BASE` are unit conversions, phrase boundaries or mathematical constants and stay as named constants; `describeQuiet` keeps its signature.
+4. **Wrong-channel text:** three assertions change (two in `test/characterization/reply-command.test.js`, one in the reply-command handler unit test).
+5. **`coverageMap`** requires, for every file under `src/` except `src/main.js`, a test file that imports it directly by resolved path. That includes the modules added by specs 27 to 32.
+6. **A34.** Add a human-to-human reply to the re-import scenario's seed (updating the counts that depend on it, or in a separate test) and assert its reply row; the reply to a bot message must have none.
+7. **A70.** The fake modal-submit interaction records the messages its `editReply` resolved to (`editedMessages`), so the command scenario can compare the stored id.
+8. **Scanner self-tests** also cover regular-expression literals containing braces or quotes, nested `${…}`, object-method shorthand and `async` arrows.
+9. **Unused exports** are enforced by `test/unit/unusedExports.test.js`: every named export under `src/` is imported somewhere in `src/`, `scripts/` or `test/`.
+10. **README (A80):** the file map lists every directory under `src/` and `test/`, the handlers for profile refresh, edits and deletes, and the operations section reflects what specs 27 to 29 actually deliver.
+11. **Further decisions recorded (no change):** Discord REST calls rely on discord.js's own request timeout and retries (the Discord half of A31); a dry run may apply additive migrations and create empty collections (A44); the reply command has no role allow-list, since the per-user cooldown and concurrency cap bound its cost (A19); GIF engine errors are logged by message only and secrets are redacted by the logger (A66).
