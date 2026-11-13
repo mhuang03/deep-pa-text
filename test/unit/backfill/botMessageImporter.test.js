@@ -41,6 +41,7 @@ test('imports an embed-mode message with the persona from the embed and trigger 
   assert.deepEqual(counts, { imported: 1, alreadyStored: 0, unattributed: 0, skippedEmpty: 0 });
   assert.deepEqual(botMessageStore.getById('1'), {
     id: '1', persona: 'alice', content: 'hi', timestamp: 100, reference: 'p', trigger: 'imported',
+    conversation_id: null, turn_index: null,
   });
 });
 
@@ -50,6 +51,7 @@ test('lookup rows take precedence for persona, content, reference and trigger', 
   importer.run([embedMessage('1', 'alice', 'discord text')], { lookup: (id) => (id === '1' ? known : null) });
   assert.deepEqual(botMessageStore.getById('1'), {
     id: '1', persona: 'bob', content: 'kept <gif! cat>', timestamp: 100, reference: 'r', trigger: 'chain',
+    conversation_id: null, turn_index: null,
   });
 });
 

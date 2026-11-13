@@ -20,6 +20,8 @@ const replyContext = async ({ contextBuilder, logger }, { channel, target }) => 
 
 export const createContextResolver = (deps) => ({
   contextFor: (request) => {
+    // A scripted conversation turn carries everything it needs; there is no history to fetch.
+    if (request.conversation) return { conversation: request.conversation };
     if (request.chain) return { chain: request.chain };
     return request.target === null ? reviveContext(deps, request.channel) : replyContext(deps, request);
   },

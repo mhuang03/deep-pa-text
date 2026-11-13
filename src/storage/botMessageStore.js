@@ -1,6 +1,6 @@
 const INSERT = `
-  INSERT INTO bot_messages (id, persona, content, timestamp, reference, trigger)
-  VALUES (?, ?, ?, ?, ?, ?)
+  INSERT INTO bot_messages (id, persona, content, timestamp, reference, trigger, conversation_id, turn_index)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO NOTHING
 `;
 const BY_ID = 'SELECT * FROM bot_messages WHERE id = ?';
@@ -28,6 +28,13 @@ const toBotMessage = (row) => {
   return deletedAt === null || deletedAt === undefined ? rest : { ...rest, deleted: true };
 };
 
+const checkedLimit = (limit) => {
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new Error(`recent: limit is required and must be a non-negative integer, got ${limit}`);
+  }
+  return limit;
+};
+
 export const createBotMessageStore = ({ db, config }) => {
   const windowMs = config.burst.siblingWindowMs;
   const insertSql = db.prepare(INSERT);
@@ -36,18 +43,15 @@ export const createBotMessageStore = ({ db, config }) => {
   const siblingsSql = db.prepare(SIBLINGS);
   const markDeletedSql = db.prepare(MARK_DELETED);
 
-  const insert = ({ id, persona, content, timestamp, reference = null, trigger }) => {
-    insertSql.run(id, persona, content, timestamp, reference ?? null, trigger);
+  const insert = ({
+    id, persona, content, timestamp, reference = null, trigger, conversationId = null, turnIndex = null,
+  }) => {
+    insertSql.run(id, persona, content, timestamp, reference ?? null, trigger, conversationId ?? null, turnIndex ?? null);
   };
 
   const getById = (id) => toBotMessage(byIdSql.get(id));
 
-  const recent = ({ limit }) => {
-    if (!Number.isInteger(limit) || limit < 0) {
-      throw new Error(`recent: limit is required and must be a non-negative integer, got ${limit}`);
-    }
-    return recentSql.all(limit).map(toBotMessage);
-  };
+  const recent = ({ limit }) => recentSql.all(checkedLimit(limit)).map(toBotMessage);
 
   // The parts of one burst share persona, trigger and reference; the window keeps separate revives apart.
   const siblings = (botMessage) =>

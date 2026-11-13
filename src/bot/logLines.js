@@ -19,6 +19,9 @@ export const formatReply = ({ persona, response }) => `    [REPLY] ${persona}: $
 
 export const formatRevive = ({ persona, response }) => `[REVIVE] ${persona}: ${response}`;
 
+export const formatConversation = ({ topic, personas, delivered, planned }) =>
+  `[CONVERSATION] ${topic} (${personas.join(', ')}): ${delivered} of ${planned} turns delivered`;
+
 export const formatCommandRequest = ({ requester, record, logging }) =>
   `[REQUEST REPLY from ${requester}] [${stamp(record.timestamp, logging)}] ${record.author}: ${record.content}`;
 
@@ -28,7 +31,7 @@ export const formatChainDecision = ({ persona, botTurns, decision }) =>
   `    [CHAIN: ${persona}, ${botTurns} bot turns, ${decision.reason}${decision.reply ? '' : ', no reply'}]`;
 
 const TRIGGER_LABELS = {
-  auto: 'auto reply', chain: 'chain reply', command: 'command reply', revive: 'revive',
+  auto: 'auto reply', chain: 'chain reply', command: 'command reply', revive: 'revive', conversation: 'conversation turn',
 };
 
 // The label of a handler-level error log: which work failed, for whom and where.

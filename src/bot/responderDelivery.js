@@ -1,5 +1,5 @@
 import { burstDelay } from '../llm/burst.js';
-import { TRIGGERS } from './triggers.js';
+import { TRIGGERS } from '../util/triggers.js';
 import { formatFailure } from './logLines.js';
 import { DELIVERY_STAGE, tagFailure } from './responderFailure.js';
 
@@ -19,9 +19,9 @@ const send = async ({ delivery }, { via, request, part }) => {
 };
 
 const deliverPart = async (ctx, request, { via, part }) => {
-  const { persona, target, trigger } = request;
+  const { persona, target, trigger, conversation } = request;
   const message = await send(ctx, { via, request, part });
-  ctx.record({ message, text: part.text, persona, target, trigger });
+  ctx.record({ message, text: part.text, persona, target, trigger, conversation });
   return message;
 };
 

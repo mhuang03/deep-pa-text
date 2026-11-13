@@ -16,6 +16,11 @@ const BURST_TEMPLATE = 'This user often sends several short messages in a row in
 
 const THREAD_INTRO = 'You are in a reply thread. Your own earlier messages in it appear as assistant turns; other people\'s messages are prefixed with their username. Write your next message in the thread.';
 const LAST_CONVERSATION_INTRO = 'Here is the end of the last conversation in the channel, oldest first:';
+const TOPIC_EXAMPLES_INTRO = 'Here are messages this user has sent about similar things:';
+const ONLY_THESE = 'Only these people take part; do not address anyone else.';
+const OPENER_TASK = 'You are starting it. Write the message that opens the conversation. Do not greet the channel.';
+const TURN_TASK = 'Write your next message. React to what was just said, stay with the topic unless the conversation has naturally moved on, and do not end every message with a question.';
+const LAST_TURN = 'Nobody replies after this message, so do not ask the others a question.';
 const STARTERS_INTRO = 'Here are messages this user has sent to start a conversation after the channel had been quiet:';
 
 export const identity = ({ author, name }) =>
@@ -75,6 +80,20 @@ export const starters = ({ starters: list }) => {
 };
 
 export const pastExamples = ({ examples: list }) => examples(EXAMPLES_INTRO.past, list);
+
+export const topicExamples = ({ buckets }) => {
+  if (buckets.similar.length === 0) return null;
+  return examples(TOPIC_EXAMPLES_INTRO, buckets.similar);
+};
+
+// What the persona is doing in a scripted conversation; one paragraph, so the model reads it as one brief.
+export const conversationBrief = ({ conversation, isOpener }) => {
+  const { participants, topic, premise, isLast, remaining } = conversation;
+  const lead = `You are taking part in a conversation in the channel between ${participants.join(', ')}. It is about: ${topic}. ${premise}`;
+  if (isOpener) return [lead, ONLY_THESE, OPENER_TASK].join(' ');
+  const tail = isLast ? LAST_TURN : `${remaining} more messages follow yours.`;
+  return [lead, ONLY_THESE, TURN_TASK, tail].join(' ');
+};
 
 export const assemble = (sections, ctx) =>
   sections.map((section) => section(ctx)).filter((text) => text !== null).join('\n\n');

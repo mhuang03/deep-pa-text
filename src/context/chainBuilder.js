@@ -1,3 +1,5 @@
+import { TRIGGERS } from '../util/triggers.js';
+
 const JOINER = '\n';
 
 // The parts of one burst are a single turn.
@@ -31,8 +33,10 @@ const step = (ctx, { id, parent, persona }) => {
   if (!bot) return humanStep(ctx, id);
   // A deleted bot message ends the walk (a deleted direct parent is rejected by build).
   if (bot.deleted) return null;
-  // A fallback parent has reference null, so its unknown ancestry ends the walk.
-  return { turn: toBotTurn(burstOf(ctx, bot), persona), next: bot.reference ?? null, isBot: true };
+  // A fallback parent has reference null, so its unknown ancestry ends the walk. Conversation turns are
+  // scripted, not answers in the thread, so they are shown to the model but do not count as bot turns.
+  const counts = bot.trigger !== TRIGGERS.CONVERSATION;
+  return { turn: toBotTurn(burstOf(ctx, bot), persona), next: bot.reference ?? null, isBot: counts };
 };
 
 const walk = (ctx, parent, persona) => {

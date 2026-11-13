@@ -1,6 +1,6 @@
 import { readPersonaFromEmbeds } from '../discord/botPersona.js';
 import { REPLY_LINK_PREFIX } from '../discord/webhookDelivery.js';
-import { TRIGGERS } from '../bot/triggers.js';
+import { TRIGGERS } from '../util/triggers.js';
 import { truncateCodePoints } from '../text/truncate.js';
 
 // Webhook delivery puts a link to the replied-to message on the first line.

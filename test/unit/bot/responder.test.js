@@ -70,7 +70,11 @@ const setup = ({
 test('composes then delivers and returns the response and the sent message', async () => {
   const { responder, events } = setup();
   const result = await responder.respond(REQUEST);
-  assert.deepEqual(result, { response: 'raw', messages: [{ id: 'sent', createdTimestamp: 55 }] });
+  assert.deepEqual(result, {
+    response: 'raw',
+    messages: [{ id: 'sent', createdTimestamp: 55 }],
+    delivered: [{ message: { id: 'sent', createdTimestamp: 55 }, text: 'raw' }],
+  });
   assert.deepEqual(events, [
     ['context', { channel: channelStub, target: { id: '1' } }],
     ['compose', { persona: 'bob', target: { id: '1' }, context: { transcript: ['t'] } }],
@@ -142,6 +146,7 @@ test('records the sent message after delivery with persona, raw response, timest
   await responder.respond(REQUEST);
   assert.deepEqual(rows, [{
     id: 'sent', persona: 'bob', content: 'raw', timestamp: 55, reference: '1', trigger: 'auto',
+    conversationId: null, turnIndex: null,
   }]);
 });
 
@@ -292,4 +297,75 @@ test('typing is stopped when generation fails and skipped when disabled', async 
   const off = setup({ configOverrides: { typing } });
   await off.responder.respond(REQUEST);
   assert.deepEqual(off.timers, []);
+});
+
+const CONVERSATION = { id: 'c1', turnIndex: 2, topic: 't', premise: 'p', participants: ['bob'], turns: [] };
+
+test('a conversation request skips every history fetch and composes with the conversation as context', async () => {
+  const { responder, events } = setup();
+  await responder.respond({ ...REQUEST, trigger: 'conversation', conversation: CONVERSATION });
+  assert.deepEqual(events.map(([name]) => name), ['compose', 'deliver']);
+  assert.deepEqual(events[0], ['compose', { persona: 'bob', target: { id: '1' }, context: { conversation: CONVERSATION } }]);
+});
+
+test('a conversation turn is recorded with its conversation id and turn index and references the previous turn', async () => {
+  const { responder, rows } = setup();
+  await responder.respond({ ...REQUEST, trigger: 'conversation', conversation: CONVERSATION });
+  assert.deepEqual(rows, [{
+    id: 'sent', persona: 'bob', content: 'raw', timestamp: 55, reference: '1', trigger: 'conversation',
+    conversationId: 'c1', turnIndex: 2,
+  }]);
+});
+
+test('every part of a burst turn carries the conversation id and turn index', async () => {
+  const { responder, rows } = setup({ parts: BURST });
+  await responder.respond({ ...REQUEST, trigger: 'conversation', conversation: CONVERSATION });
+  assert.deepEqual(rows.map((row) => [row.conversationId, row.turnIndex]), [['c1', 2], ['c1', 2], ['c1', 2]]);
+});
+
+test('beforeDeliver runs after generation and before the first part, while typing is on', async () => {
+  const { responder, events, timers } = setup();
+  const seen = [];
+  const beforeDeliver = async () => {
+    seen.push(events.map(([name]) => name), timers.map(([name]) => name));
+  };
+  await responder.respond({ ...REQUEST, beforeDeliver });
+  assert.deepEqual(seen, [['context', 'compose'], ['setInterval']]);
+  assert.deepEqual(events.map(([name]) => name), ['context', 'compose', 'deliver']);
+});
+
+test('beforeDeliver is awaited: the part is not delivered until it settles', async () => {
+  const { responder, events } = setup();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const pending = responder.respond({ ...REQUEST, beforeDeliver: () => gate });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(events.some(([name]) => name === 'deliver'), false);
+  release();
+  await pending;
+  assert.equal(events.some(([name]) => name === 'deliver'), true);
+});
+
+test('an aborting beforeDeliver rejects with its own error, delivers nothing, records nothing and stops typing', async () => {
+  const { responder, events, rows, timers } = setup();
+  const aborted = Object.assign(new Error('abandoned'), { isConversationAborted: true });
+  await assert.rejects(responder.respond({ ...REQUEST, beforeDeliver: async () => { throw aborted; } }), (error) => error === aborted);
+  assert.equal(events.some(([name]) => name === 'deliver'), false);
+  assert.deepEqual(rows, []);
+  assert.deepEqual(timers.at(-1), ['clearInterval', 'handle']);
+});
+
+test('without a beforeDeliver nothing is awaited and the request is delivered as before', async () => {
+  const { responder, events } = setup();
+  await responder.respond(REQUEST);
+  assert.deepEqual(events.map(([name]) => name), ['context', 'compose', 'deliver']);
+});
+
+test('delivered lists the text of each part actually sent, and stops where a later part failed', async () => {
+  const full = setup({ parts: BURST });
+  assert.deepEqual((await full.responder.respond(REQUEST)).delivered.map((d) => d.text), ['one', 'two', '<gif! cat>']);
+  const cut = setup({ parts: BURST, failDeliverAt: 2 });
+  const result = await cut.responder.respond(REQUEST);
+  assert.deepEqual(result.delivered.map((d) => d.text), ['one']);
+  assert.deepEqual(result.delivered[0].message, result.messages[0]);
 });

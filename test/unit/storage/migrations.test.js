@@ -49,3 +49,15 @@ test('they upgrade a database that only has the legacy tables, keeping its rows'
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name);
   ['bot_messages', 'user_profiles', 'message_revisions', 'meta'].forEach((name) => assert.ok(tables.includes(name), name));
 });
+
+test('the conversation migrations come after the topic bank ones: the table, two nullable columns and the index', () => {
+  const tableAt = MIGRATIONS.findIndex((m) => m.sql?.includes('CREATE TABLE IF NOT EXISTS conversations'));
+  const topicsAt = MIGRATIONS.findIndex((m) => m.sql?.includes('CREATE TABLE IF NOT EXISTS topic_messages'));
+  assert.ok(tableAt > topicsAt);
+  assert.deepEqual(MIGRATIONS.slice(tableAt + 1).map((m) => m.addColumn ?? 'sql'), [
+    { table: 'bot_messages', column: 'conversation_id', definition: 'TEXT' },
+    { table: 'bot_messages', column: 'turn_index', definition: 'INTEGER' },
+    'sql',
+  ]);
+  assert.match(MIGRATIONS.at(-1).sql, /CREATE INDEX IF NOT EXISTS idx_bot_messages_conversation ON bot_messages \(conversation_id\)/);
+});

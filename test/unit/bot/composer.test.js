@@ -125,3 +125,23 @@ test('composes each part with its own GIF resolution and truncation, keeping the
   ]);
   assert.equal(result.response, 'one\n<split>\n<gif! cat>');
 });
+
+test('a context with a conversation routes to generateConversationTurn with the persona, target and conversation', async () => {
+  const calls = [];
+  const conversation = { id: 'c1', turns: [] };
+  const target = { id: 't' };
+  const composer = createComposer({
+    generator: {
+      generateConversationTurn: async (...args) => { calls.push(args); return { response: 'in turn', parts: ['in turn'] }; },
+      generateReply: async () => { throw new Error('wrong generator'); },
+      generateRevive: async () => { throw new Error('wrong generator'); },
+    },
+    gifResolver: { resolve: async (text) => ({ content: `resolved ${text}`, gifLinks: [] }) },
+    config: loadConfig({}),
+  });
+  const opener = await composer.compose({ persona: 'bob', target: null, context: { conversation } });
+  const later = await composer.compose({ persona: 'carol', target, context: { conversation } });
+  assert.deepEqual(calls, [['bob', null, conversation], ['carol', target, conversation]]);
+  assert.deepEqual(opener.parts, [{ text: 'in turn', content: 'resolved in turn', gifLinks: [] }]);
+  assert.equal(later.response, 'in turn');
+});

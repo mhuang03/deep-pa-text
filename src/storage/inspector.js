@@ -32,6 +32,22 @@ const referenceSql = (columns) => {
 
 const toBotRow = (row) => ({ ...row, author: `${row.persona} [${row.trigger}]` });
 
+// Delivered turns are the distinct turn indexes of a conversation's visible bot messages.
+const deliveredSql = (botColumns) => {
+  if (!botColumns.includes('conversation_id') || !botColumns.includes('turn_index')) return '0';
+  const visible = botColumns.includes('deleted_at') ? ` AND b.${VISIBLE}` : '';
+  return `(SELECT COUNT(DISTINCT b.turn_index) FROM bot_messages b WHERE b.conversation_id = c.id${visible})`;
+};
+
+const toConversationRow = (row) => ({
+  id: row.id,
+  timestamp: row.started_at,
+  topic: row.topic,
+  personas: JSON.parse(row.personas),
+  planned: JSON.parse(row.turns).length,
+  delivered: row.delivered,
+});
+
 export const createInspector = ({ db }) => {
   const query = (table, build, map = (row) => row) => (limit) => {
     const columns = columnsOf(db, table);
@@ -47,6 +63,12 @@ export const createInspector = ({ db }) => {
     latestFiltered: query('filtered_messages', (c) => latestSql('filtered_messages', visibleWhere(c))),
     latestWithReference: query('filtered_messages', referenceSql),
     latestWithGif: query('filtered_messages', (c) => latestSql('filtered_messages', gifWhere(c))),
+    latestConversations: (limit) => {
+      if (columnsOf(db, 'conversations').length === 0) return missing('conversations');
+      const sql = `SELECT c.*, ${deliveredSql(columnsOf(db, 'bot_messages'))} AS delivered
+        FROM conversations c ORDER BY c.started_at DESC, c.id DESC LIMIT ?`;
+      return { rows: db.prepare(sql).all(limit).map(toConversationRow) };
+    },
     latestBot: query('bot_messages', (c) => latestSql('bot_messages', visibleWhere(c), 'timestamp DESC, id DESC'), toBotRow),
   };
 };

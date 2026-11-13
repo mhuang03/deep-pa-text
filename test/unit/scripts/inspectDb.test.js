@@ -42,7 +42,7 @@ const run = (cwd, tmp = os.tmpdir()) => spawnSync(process.execPath, ['--no-warni
   cwd, encoding: 'utf8', env: { PATH: process.env.PATH, TMPDIR: tmp },
 });
 
-test('prints the five sections from a seeded database', (t) => {
+test('prints the six sections from a seeded database', (t) => {
   const dir = makeDir(t);
   seed(dir);
   const result = run(dir);
@@ -54,6 +54,7 @@ test('prints the five sections from a seeded database', (t) => {
     'Latest filtered messages with reference:',
     'Latest filtered messages with gif:',
     'Latest bot messages:',
+    'Latest conversations:',
   ]);
   assert.ok(lines.includes('[11/12/2026, 12:00:02 PM] bob [revive]: bot says hi (reference: null)'));
   assert.ok(lines.includes('[11/12/2026, 12:00:01 PM] bob: reply <gif! cat> here (reference: a)'));
@@ -131,4 +132,32 @@ test('a corrupt database prints one line and exits 1 without a stack', (t) => {
   const result = run(dir);
   assert.equal(result.status, 1);
   assert.equal(result.stderr.trim().split('\n').length, 1);
+});
+
+test('lists conversations with their topic, personas and turn counts', (t) => {
+  const dir = makeDir(t);
+  seed(dir);
+  const db = openDatabase(path.join(dir, 'messages.db'));
+  db.exec(`INSERT INTO conversations (id, started_at, topic, premise, personas, turns)
+    VALUES ('c1', ${T0 + 5000}, 'Weekend plans', 'p', '["alice","bob"]', '["alice","bob","alice"]')`);
+  const bots = createBotMessageStore({ db, config: loadConfig({}) });
+  bots.insert({ id: 'k1', persona: 'alice', content: 'hi', timestamp: T0 + 6000, trigger: 'conversation', conversationId: 'c1', turnIndex: 0 });
+  bots.insert({ id: 'k2', persona: 'bob', content: 'yo', timestamp: T0 + 7000, trigger: 'conversation', conversationId: 'c1', turnIndex: 1, reference: 'k1' });
+  db.close();
+  const result = run(dir);
+  assert.equal(result.status, 0, result.stderr);
+  const lines = result.stdout.split('\n');
+  assert.equal(lines[lines.indexOf('Latest conversations:') + 1], '[11/12/2026, 12:00:05 PM] Weekend plans (alice, bob; 2/3 turns delivered)');
+});
+
+test('prints a placeholder when the conversations table does not exist yet', (t) => {
+  const dir = makeDir(t);
+  const db = new DatabaseSync(path.join(dir, 'messages.db'));
+  db.exec(MIGRATIONS[0].sql);
+  db.exec(MIGRATIONS[1].sql);
+  db.close();
+  const result = run(dir);
+  assert.equal(result.status, 0, result.stderr);
+  const lines = result.stdout.split('\n');
+  assert.equal(lines[lines.indexOf('Latest conversations:') + 1], '(no conversations table yet)');
 });

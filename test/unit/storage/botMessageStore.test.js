@@ -5,7 +5,8 @@ import { loadConfig } from '../../../src/config.js';
 import { createBotMessageStore } from '../../../src/storage/botMessageStore.js';
 
 const row = (id, timestamp, extra = {}) => ({
-  id, persona: 'bob', content: `text ${id}`, timestamp, reference: null, trigger: 'auto', ...extra,
+  id, persona: 'bob', content: `text ${id}`, timestamp, reference: null, trigger: 'auto',
+  conversation_id: null, turn_index: null, ...extra,
 });
 
 const setup = () => createBotMessageStore({ db: openDatabase(':memory:'), config: loadConfig({}) });
@@ -102,4 +103,27 @@ test('newest returns the newest visible row among the given triggers, or null', 
   assert.equal(store.newest({ triggers: ['chain'] }).id, '2');
   assert.equal(store.newest({ triggers: ['command'] }), null);
   assert.throws(() => store.newest({ triggers: [] }), /non-empty/);
+});
+
+test('stores the conversation id and turn index and reads them back', () => {
+  const store = setup();
+  store.insert(row('1', 10, { conversationId: 'c1', turnIndex: 2, trigger: 'conversation', reference: 'p' }));
+  assert.deepEqual(store.getById('1'), row('1', 10, {
+    trigger: 'conversation', reference: 'p', conversation_id: 'c1', turn_index: 2,
+  }));
+});
+
+test('without a conversation the id and turn index default to null', () => {
+  const store = setup();
+  store.insert({ id: '1', persona: 'bob', content: 'x', timestamp: 1, trigger: 'auto' });
+  const stored = store.getById('1');
+  assert.equal(stored.conversation_id, null);
+  assert.equal(stored.turn_index, null);
+});
+
+test('newest finds a conversation turn among its own trigger only', () => {
+  const store = setup();
+  store.insert(row('1', 10, { trigger: 'conversation', conversationId: 'c1', turnIndex: 0 }));
+  store.insert(row('2', 20, { trigger: 'revive' }));
+  assert.equal(store.newest({ triggers: ['conversation'] }).id, '1');
 });

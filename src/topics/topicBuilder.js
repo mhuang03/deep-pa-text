@@ -1,5 +1,6 @@
 import { clusterCount, kmeans } from '../util/kmeans.js';
 import { createRowDot } from '../util/vectorMath.js';
+import { utcStamp } from '../util/utcStamp.js';
 import { buildMatrix } from './embeddingMatrix.js';
 import { createTopicSampler } from './topicSampler.js';
 import { createTopicLabeller } from './topicLabeller.js';
@@ -14,9 +15,8 @@ const HEX_DIGITS = 4;
 
 // t<UTC YYYYMMDDHHMMSS>-<4 hex digits>, so two builds in one second still differ.
 const newBuildId = ({ now, random }) => {
-  const stamp = new Date(now).toISOString().replace(/\D/g, '').slice(0, 14);
   const suffix = Math.floor(random() * HEX_SPACE).toString(HEX_RADIX).padStart(HEX_DIGITS, '0');
-  return `t${stamp}-${suffix}`;
+  return `t${utcStamp(now)}-${suffix}`;
 };
 
 const startReport = (buildId) => ({

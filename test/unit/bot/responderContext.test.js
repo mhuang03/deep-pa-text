@@ -42,3 +42,11 @@ test('failed contexts degrade to empty ones and log a warning', async () => {
   assert.deepEqual(await reply.contextFor({ target: { id: '9' }, channel: {} }), { transcript: [] });
   assert.match(reply.logs[0][0], /transcript for 9/);
 });
+
+test('a conversation request carries its own context and builds nothing, even for a non-null target', async () => {
+  const { contextFor, calls } = setup();
+  const conversation = { id: 'c1', turns: [] };
+  assert.deepEqual(await contextFor({ conversation, target: { id: '1' }, channel: {} }), { conversation });
+  assert.deepEqual(await contextFor({ conversation, target: null, channel: {} }), { conversation });
+  assert.deepEqual(calls, []);
+});

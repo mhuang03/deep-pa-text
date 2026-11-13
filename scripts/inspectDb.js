@@ -23,6 +23,18 @@ const printSection = (config, { title, result, describe }) => {
   });
 };
 
+const printConversations = (config, result) => {
+  console.log('Latest conversations:');
+  if (result.missing) {
+    console.log(noTable(result.missing));
+    return;
+  }
+  result.rows.forEach((row) => {
+    const when = formatTimestamp(row.timestamp, config.logging);
+    console.log(`[${when}] ${row.topic} (${row.personas.join(', ')}; ${row.delivered}/${row.planned} turns delivered)`);
+  });
+};
+
 const sectionsOf = (inspector) => [
   { title: 'Latest messages', result: inspector.latestRaw(LIMIT), describe: (m) => `reference: ${m.reference}` },
   {
@@ -48,6 +60,7 @@ const run = (config) => {
   try {
     const inspector = createInspector({ db });
     sectionsOf(inspector).forEach((section) => printSection(config, section));
+    printConversations(config, inspector.latestConversations(LIMIT));
   } finally {
     db.close();
   }

@@ -1,5 +1,5 @@
 // The thread-continuation path of the message handler.
-import { TRIGGERS } from '../triggers.js';
+import { TRIGGERS } from '../../util/triggers.js';
 import { formatReply, formatChainDecision, joinLines } from '../logLines.js';
 import { respondTo } from './messageAutoReply.js';
 

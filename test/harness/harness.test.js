@@ -715,3 +715,20 @@ test('a message records the messages its replies resolved to', async (t) => {
   assert.match(message.sentMessages[0].id, /^auto-/);
   assert.notEqual(message.sentMessages[0].id, message.id);
 });
+
+test('the default test environment turns conversations off and a world can turn them on', async (t) => {
+  assert.equal(ENV.CONVERSATIONS, 'false');
+  const off = await createWorld({ random: 0 });
+  assert.deepEqual(off.container.conversationPolicy.decide(), { start: false, reason: 'disabled' });
+  await off.close();
+  const on = await newWorld(t, { random: 0, env: { CONVERSATIONS: 'true' } });
+  assert.deepEqual(on.container.conversationPolicy.decide(), { start: true, roll: 0 });
+});
+
+test('the world exposes the conversation services and the topic store for seeding the bank', async (t) => {
+  const world = await newWorld(t);
+  ['conversationStore', 'conversationPolicy', 'conversationPlanner', 'conversationRunner', 'topicStore'].forEach((key) => {
+    assert.equal(typeof world.container[key], 'object', key);
+  });
+  assert.deepEqual(await world.container.conversationPlanner.plan({ channel: world.discord.channel }), { failed: 'no-topics' });
+});

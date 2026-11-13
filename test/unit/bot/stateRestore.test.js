@@ -22,8 +22,8 @@ const run = ({ human = null, bots = {}, capped = false, now = 10_000 } = {}) => 
   return { activity, policy, queries };
 };
 
-const NATURAL = 'auto,revive';
-const REPLIES = 'auto,chain,command';
+const NATURAL = 'auto,revive,conversation';
+const REPLIES = 'auto,chain,command,conversation';
 
 test('no stored human message leaves activity alone but still restores the rate limit', () => {
   const { activity, policy } = run({ bots: { [REPLIES]: { timestamp: 500 } } });
@@ -46,11 +46,21 @@ test('chain and command replies restore the rate limit but not the activity', ()
   const { activity, policy, queries } = run({ human: { timestamp: 100 }, bots: { [REPLIES]: { timestamp: 200 } } });
   assert.deepEqual(activity, [{ lastMessageTime: 100, lastWasBot: false }]);
   assert.deepEqual(policy, [{ replyTime: 200 }]);
-  assert.deepEqual(queries, [['auto', 'revive'], ['auto', 'chain', 'command']]);
+  assert.deepEqual(queries, [['auto', 'revive', 'conversation'], ['auto', 'chain', 'command', 'conversation']]);
 });
 
 test('a capped catch-up restores the fresh-start activity instead of the stored newest message', () => {
   const { activity, policy } = run({ human: { timestamp: 100 }, capped: true, now: 777, bots: { [REPLIES]: { timestamp: 5 } } });
   assert.deepEqual(activity, [{ lastMessageTime: 777, lastWasBot: true }]);
   assert.deepEqual(policy, [{ replyTime: 5 }]);
+});
+
+test('a conversation turn is a natural bot message: it makes the bot the last speaker when newest', () => {
+  const { activity } = run({ human: { timestamp: 100 }, bots: { [NATURAL]: { timestamp: 150, trigger: 'conversation' } } });
+  assert.deepEqual(activity, [{ lastMessageTime: 150, lastWasBot: true }]);
+});
+
+test('the last conversation turn restores the rate limit', () => {
+  const { policy } = run({ human: { timestamp: 100 }, bots: { [REPLIES]: { timestamp: 300, trigger: 'conversation' } } });
+  assert.deepEqual(policy, [{ replyTime: 300 }]);
 });

@@ -123,3 +123,36 @@ test('burst is absent below the minimum rate, when disabled, or without settings
   assert.equal(sections.burst({ burstRate: 0.9, burst: { ...BURST_SETTINGS, enabled: false } }), null);
   assert.equal(sections.burst({}), null);
 });
+
+test('topicExamples lists the similar bucket and is omitted when it is empty', () => {
+  assert.equal(
+    sections.topicExamples({ buckets: { similar: ['a', 'b'] } }),
+    'Here are messages this user has sent about similar things:\n["a","b"]',
+  );
+  assert.equal(sections.topicExamples({ buckets: { similar: [] } }), null);
+});
+
+const CONVERSATION = {
+  participants: ['alice', 'bob'], topic: 'Weekend plans', premise: 'A hike is floated.', remaining: 3, isLast: false,
+};
+const LEAD = 'You are taking part in a conversation in the channel between alice, bob. It is about: Weekend plans. A hike is floated. Only these people take part; do not address anyone else.';
+
+test('conversationBrief for the opener names the people and the topic and asks for an opening message', () => {
+  assert.equal(
+    sections.conversationBrief({ conversation: CONVERSATION, isOpener: true }),
+    `${LEAD} You are starting it. Write the message that opens the conversation. Do not greet the channel.`,
+  );
+});
+
+test('conversationBrief for a later turn says how many messages follow', () => {
+  assert.equal(
+    sections.conversationBrief({ conversation: CONVERSATION, isOpener: false }),
+    `${LEAD} Write your next message. React to what was just said, stay with the topic unless the conversation has naturally moved on, and do not end every message with a question. 3 more messages follow yours.`,
+  );
+});
+
+test('conversationBrief for the last turn says nobody replies instead of counting', () => {
+  const brief = sections.conversationBrief({ conversation: { ...CONVERSATION, remaining: 0, isLast: true }, isOpener: false });
+  assert.ok(brief.endsWith('Nobody replies after this message, so do not ask the others a question.'));
+  assert.ok(!brief.includes('more messages follow'));
+});

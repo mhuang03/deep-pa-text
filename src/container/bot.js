@@ -38,7 +38,8 @@ const buildHandlers = ({ config, data, clock, logger, parts }) => {
     }),
     profileRefresh: createProfileRefresh({ client, config, memberProfiles, logger }),
     reviveTick: createReviveTick({
-      client, config, activity, personaSelector, responder, clock: { now: clock.now }, logger,
+      client, config, activity, personaSelector, responder, replyPolicy, clock: { now: clock.now }, logger,
+      ...parts.conversation,
     }),
   };
 };
@@ -69,8 +70,9 @@ const buildStartupTasks = ({ storage, orchestration, catchUp, clock }) => ({
 });
 
 export const buildBot = ({ config, data, clock, logger, parts }) => {
-  const { storage, services, discord, orchestration, lifecycle, topics, catchUp } = parts;
-  const handlers = buildHandlers({ config, data, clock, logger, parts: { ...orchestration, client: discord.client, storage, services, discord } });
+  const { storage, services, discord, orchestration, lifecycle, topics, conversation, catchUp } = parts;
+  const handlerParts = { ...orchestration, client: discord.client, storage, services, discord, conversation };
+  const handlers = buildHandlers({ config, data, clock, logger, parts: handlerParts });
   const startupTasks = buildStartupTasks({ storage, orchestration, catchUp, clock });
   return createBot({
     client: discord.client, config, handlers, lifecycle, startupTasks, vectorHealth: services.vectorHealth,

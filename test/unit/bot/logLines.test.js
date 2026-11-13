@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReceived, formatNoReply, formatNotReplyable, formatReply, formatRevive,
-  formatCommandRequest, formatChainDecision, formatFailure, joinLines,
+  formatCommandRequest, formatChainDecision, formatFailure, formatConversation, joinLines,
 } from '../../../src/bot/logLines.js';
 
 const logging = { locale: 'en-US', timeZone: 'America/Chicago' };
@@ -62,4 +62,18 @@ test('formatFailure leaves out what is unknown', () => {
   assert.equal(formatFailure({ what: 'Error', messageId: '9', stage: 'generation' }), 'Error 9 (stage generation):');
   assert.equal(formatFailure({ what: 'Error', persona: 'bob' }), 'Error (as bob):');
   assert.equal(formatFailure({ what: 'Error', trigger: 'chain' }), 'Error (chain reply):');
+});
+
+test('formatConversation summarises topic, people and delivered turns', () => {
+  assert.equal(
+    formatConversation({ topic: 'Weekend plans', personas: ['alice', 'bob'], delivered: 2, planned: 4 }),
+    '[CONVERSATION] Weekend plans (alice, bob): 2 of 4 turns delivered',
+  );
+});
+
+test('formatFailure labels a conversation turn', () => {
+  assert.equal(
+    formatFailure({ what: 'Conversation c1 ended', trigger: 'conversation', persona: 'bob', stage: 'generation' }),
+    'Conversation c1 ended (conversation turn as bob, stage generation):',
+  );
 });

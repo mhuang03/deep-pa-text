@@ -39,7 +39,9 @@ test('delivers the first part through the request via and records it', async () 
   assert.deepEqual(messages, [{ id: 'm1' }]);
   assert.equal(delivered[0].via.type, 'reply');
   assert.equal(delivered[0].content, 'shown one');
-  assert.deepEqual(recorded, [{ message: { id: 'm1' }, text: 'one', persona: 'bob', target: { id: 't' }, trigger: 'auto' }]);
+  assert.deepEqual(recorded, [{
+    message: { id: 'm1' }, text: 'one', persona: 'bob', target: { id: 't' }, trigger: 'auto', conversation: undefined,
+  }]);
 });
 
 test('later parts go to the channel after a pause and a typing pulse', async () => {

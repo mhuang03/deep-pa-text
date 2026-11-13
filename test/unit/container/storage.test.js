@@ -12,7 +12,7 @@ test('returns the stores, the filter and the user directory over one open databa
   const parts = makeParts();
   const storage = buildStorage(parts);
   assert.deepEqual(Object.keys(storage).sort(), [
-    'botMessageStore', 'db', 'messageFilter', 'messageStore', 'metaStore', 'profileStore', 'userDirectory', 'vectorStore',
+    'botMessageStore', 'conversationStore', 'db', 'messageFilter', 'messageStore', 'metaStore', 'profileStore', 'userDirectory', 'vectorStore',
   ]);
   assert.equal(storage.userDirectory.nameOf('alice'), 'Alice Example');
   storage.db.close();

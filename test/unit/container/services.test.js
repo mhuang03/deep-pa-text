@@ -9,7 +9,7 @@ test('returns the ingest, retrieval, generation and gif services', () => {
   assert.deepEqual(Object.keys(services).sort(), [
     'burstProfile', 'chatClient', 'composer', 'generator', 'gifResolver', 'ingest', 'personaSelector', 'retriever', 'vectorHealth', 'vectorSync',
   ]);
-  assert.deepEqual(Object.keys(services.generator).sort(), ['generateReply', 'generateRevive']);
+  assert.deepEqual(Object.keys(services.generator).sort(), ['generateConversationTurn', 'generateReply', 'generateRevive']);
   assert.deepEqual(Object.keys(services.retriever).sort(), ['retrieveForReply', 'retrieveForRevive']);
   storage.db.close();
 });

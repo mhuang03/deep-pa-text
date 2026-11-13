@@ -1,14 +1,14 @@
 # deep-pa-text
 
-A Discord bot that imitates the members of one group chat. It records every human message in a single channel. It occasionally replies to a message, or revives a quiet channel, "as" one of the members. Each reply uses retrieval over that member's past messages plus an LLM.
+A Discord bot that imitates the members of one group chat. It records every human message in a single channel. It occasionally replies to a message, revives a quiet channel, or plays out a short conversation between several members, "as" those members. Each reply uses retrieval over that member's past messages plus an LLM.
 
 ## How it works
 
 ```
 Discord message (configured channel, humans only)
   -> ingest: raw row -> corpus filter -> corpus row -> Chroma vectors
-  -> triggers: auto reply | reply chain | reply command | revive
-  -> persona: weighted pick, the command's choice, or random (revive)
+  -> triggers: auto reply | reply chain | reply command | revive | scripted conversation
+  -> persona: weighted pick, the command's choice, random (revive) or planned (conversation)
   -> context (channel transcript or reply thread) + retrieval (examples, dedup, frequent phrases)
   -> LLM chat completion (DeepSeek)
   -> post-processing: unwrap quotes, split bursts, strip links, cap GIFs, resolve GIFs, truncate
@@ -90,6 +90,7 @@ Every trigger acts only in the configured channel (`PATEXT_CHANNEL_ID`). Bot-aut
 | Reply chain | A human replies to a bot message whose persona is still in `users.json` | The persona of that bot message | Discord reply to the message |
 | `reply` command | A user picks **Apps -> reply** on a message and chooses a persona in a modal | The modal choice, or the auto-reply pick for `random` | Interaction reply (not a Discord reply to the target) |
 | Revive | A timer finds the channel idle after a human message | Random member | Plain channel message |
+| Scripted conversation | A due revive that wins a roll (see below) | 2 to 5 members whose history fits the topic | Plain channel messages, one persona after another |
 
 The author of an auto-reply or command target need not be a listed member (the content filter skips only the approved-author rule). A chain reply also skips the minimum length, so a short reply such as `why` can continue a thread.
 
@@ -111,14 +112,22 @@ A failure before delivery also hands the channel activity back to the human mess
 
 **Revive.** Checked every `revive.checkIntervalMs` (10 min).
 - It fires only when the last activity was a human message, not a fresh start and not a naturally spawned bot message. That message is more than `revive.dayIdleMs` (3 h) old between 10:00 and 22:59 in `revive.timeZone`, or more than `revive.nightIdleMs` (12 h) old otherwise.
-- Only auto replies and revives count as the bot speaking last. Chain and command replies do not, so idle time keeps running from the last human message. The bot never revives twice in a row.
+- Only auto replies, revives and conversation turns count as the bot speaking last. Chain and command replies do not, so idle time keeps running from the last human message. The bot never revives twice in a row.
 - A failed revive hands the activity back and blocks new attempts for `revive.failureCooldownMs` (kept in memory, cleared by a restart).
+
+**Scripted conversation.** When a revive is due, there is a `conversation.chance` (10%) that the bot plays out a short conversation instead, provided no conversation turn was sent in the last `conversation.minIntervalMs` (24 h; read from `bot_messages`, so it survives restarts). `CONVERSATIONS=false` turns it off.
+- **Planning.** The topic candidates come from the [topic bank](#topic-bank), or from a neighbourhood search of the corpus while the bank is empty. One LLM call picks and sharpens one of up to `conversation.topicCandidates` candidates, given the time, the end of the last real conversation, the topics of the last `conversation.avoidRecentTopics` conversations (not offered again) and messages that restarted the chat in the past. An invalid answer is asked for again `conversation.planRetries` times. The personas (`conversation.minPersonas` to `maxPersonas`) are drawn from the people who wrote about the topic, weighted by their share and how recently they did, and topped up from a search of the history when the topic has too few authors. The number of messages is drawn from `minMessages` to `maxMessages`. Every persona speaks at least once and nobody speaks twice in a row. A burst counts as one message.
+- **If planning fails** (no topic, an unusable topic answer, too few personas) the reason is logged and a normal revive is sent in the same check.
+- **Playing.** Each turn is generated on its own, with retrieval for its speaker and the messages so far in the prompt, and sent `conversation.minDelayMs` to `maxDelayMs` (5 to 30 s) after the previous one, or as soon as it is ready if generation took longer. Every turn after the first references the previous turn, so replies and chains work on it. The typing indicator shows during the wait.
+- **Talking over people.** A human posting mid-conversation does not stop or change it: the message is recorded as usual and the remaining turns go out as planned. While a conversation is planned or played, no auto reply starts, so the bot does not answer bystanders in the middle of its own conversation. A direct reply to one of its turns still gets a chain reply from that turn's persona, who sees the turns up to that point.
+- **Failure and shutdown.** If the first turn fails it is a failed revive (activity handed back, `revive.failureCooldownMs`) and no fallback revive is sent. If a later turn fails, the error is logged and the conversation ends there. A shutdown ends it quietly. A conversation is never resumed after a restart; its last turn restores the rate limit and counts as the bot speaking last.
+- Webhook display (`PERSONA_DISPLAY=webhook`) suits conversations better than embeds, because each turn then reads as a message by that person. Run `npm run topics` first: with an empty bank the conversations fall back to a plain neighbourhood search and are noticeably worse.
 
 **All reply types** arm the 5 minute rate limit after delivery, except revive. Edits and deletes never trigger anything.
 
 **Overrides.** `REPLY_OVERRIDE` replies to every message, ignoring randomness, rate limit and the in-flight guard. `REVIVE_OVERRIDE` checks every `revive.overrideCheckIntervalMs` (1 min) and revives regardless of idle time or who spoke last. Both are for testing.
 
-**Typing and bursts.** While an auto reply, chain reply or revive is worked on, the bot shows the typing indicator (`typing.*`). The `reply` command does not type.
+**Typing and bursts.** While an auto reply, chain reply, revive or conversation turn is worked on, the bot shows the typing indicator (`typing.*`). The `reply` command does not type.
 - A persona who often sends several short messages in a row may answer with a burst. At least `burst.minSamples` of their raw messages must exist, and at least `burst.minRate` of them must have been followed by another message from the same author within `burst.windowMs`. The rate is cached per author for `burst.cacheMs`.
 - Such personas get a prompt section saying the answer may be split into up to `burst.maxMessages` messages with `<split>` on its own line. A `<split>` from any persona is honoured. With `BURSTS=false` it becomes a newline in one message.
 - The first part is sent as usual. Later parts are plain channel messages (follow-ups for the command), each with its own author embed and GIFs. Each follows a pause of `burst.msPerChar` per character, clamped to `burst.minDelayMs` and `burst.maxDelayMs`, with a typing pulse. Only the first part can ping the replied user.
@@ -173,13 +182,14 @@ SQLite file `messages.db` (source of truth):
 | --- | --- |
 | `messages` | Every human message, raw: `id`, `author` (username), `content`, `timestamp` (ms), `reference`, `deleted_at` |
 | `filtered_messages` | Messages that passed the filter, with transformed content, `has_gif`, `source_id` and `deleted_at`. `reference` is the Discord reply target if that is also in the table, else the previous filtered message when it is from a different author and less than `storage.inferredReferenceWindowMs` (1 h) older, else null. A human reply to a bot message gets a null reference and no reply embedding |
-| `bot_messages` | Every message the bot sent and Discord accepted: `id`, `persona`, `content` (corpus form, GIF tokens kept), `timestamp`, `reference` (the message it answered, null for a revive), `trigger` (`auto`, `command`, `revive`, `chain` or `imported`), `deleted_at`. One row per burst part. A failed insert is logged and does not affect the reply |
+| `bot_messages` | Every message the bot sent and Discord accepted: `id`, `persona`, `content` (corpus form, GIF tokens kept), `timestamp`, `reference` (the message it answered, null for a revive or a conversation opener, the previous turn's first message for a conversation turn), `trigger` (`auto`, `command`, `revive`, `chain`, `conversation` or `imported`), `deleted_at`, `conversation_id` and `turn_index` (conversation turns only; a burst's parts share the turn index). One row per burst part. A failed insert is logged and does not affect the reply |
+| `conversations` | One row per planned scripted conversation: `id`, `started_at`, `topic_id` (null for a neighbourhood topic), `topic`, `premise`, `personas` and `turns` (JSON lists of usernames; the planned speaker of each turn). A row can exist without delivered turns (the opener failed). Timing never reads it, only `bot_messages` |
 | `user_profiles` | Append-only observations of members' Discord profiles: `username`, `user_id`, `display_name`, `avatar_url`, `observed_at`. The newest row per user is current |
 | `message_revisions` | Append-only edit history: `message_id`, `content`, `edited_at` |
 | `topic_builds`, `topics`, `topic_authors`, `topic_messages` | The topic bank (see [Topic bank](#topic-bank)): one `topic_builds` row per completed build, and per topic its label, summary, size, cohesion, median timestamp, authors with their share, and the corpus ids of its representative messages. Append-only: a build adds rows, and only `topics.deleted_at` (set by `--hide`) is ever updated |
 | `meta` | Installation facts, written once and never overwritten. `chroma_generation` names the Chroma generation. `reimport_started_at` and `reimport_completed_at` mark a re-import |
 
-Indexes cover corpus timestamp, author and content (frequency counts), `source_id`, bot message timestamp, raw `(timestamp, id)` and the topics of a build. Migrations are additive and idempotent, run on every non-read-only open, and work on a database from any earlier version.
+Indexes cover corpus timestamp, author and content (frequency counts), `source_id`, bot message timestamp and conversation id, raw `(timestamp, id)` and the topics of a build. Migrations are additive and idempotent, run on every non-read-only open, and work on a database from any earlier version.
 
 **Soft deletes and edits.** Nothing is removed or overwritten. A message has one logical id, its Discord id. A corpus row's logical id is `COALESCE(source_id, id)`, and `reference` columns hold logical ids.
 - A delete sets `deleted_at` on the raw row, on every corpus row of that logical id, and on the `bot_messages` row if the bot sent it.
@@ -217,7 +227,7 @@ The profile used at send time was read within the last `profiles.minCheckInterva
 
 **Gateway failures.** discord.js reports a disconnect only when the gateway closed for good, for example close code 4004 (bad `DISCORD_BOT_TOKEN`) or 4014 (Message Content intent not enabled). The bot logs the code with a hint and exits 1 instead of idling. Run it under a supervisor (systemd `Restart=on-failure`, pm2, a container restart policy). A supervisor will also restart a bot that exits because Chroma is down, so start Chroma first. Reconnects and resumes are logged at info level.
 
-**Restart continuity.** From the database the bot restores the reply rate limit (newest auto, chain or command reply, so a restart allows no extra reply) and who spoke last and when (newest human message, or a newer auto reply or revive). A channel that was already quiet is revived at the first check. The miss counter restarts at 0. With an empty database the bot counts as the last speaker.
+**Restart continuity.** From the database the bot restores the reply rate limit (newest auto, chain, command or conversation reply, so a restart allows no extra reply) and who spoke last and when (newest human message, or a newer auto reply, revive or conversation turn). A channel that was already quiet is revived at the first check. The miss counter restarts at 0. With an empty database the bot counts as the last speaker.
 
 **Catch-up.** At ready the bot fetches messages posted after the newest stored one, up to `catchUp.maxMessages`. It imports them like a backfill (corpus, embeddings, own bot messages) and generates no replies. It does nothing on an empty database (use `npm run backfill`). If more than the cap were missed, the oldest are imported, a warning says to run `npm run backfill`, and activity restarts as on a fresh start. A failed fetch is a warning. `CATCH_UP=false` turns it off. A bot message delivered but not recorded before a crash is imported as `imported`, so it does not restore the rate limit.
 
@@ -260,7 +270,7 @@ Everything is additive and idempotent. The script logs in without starting the b
 
 ### Topic bank
 
-`npm run topics` builds a list of the subjects this group talks about, for conversations that need something to start from. It clusters message embeddings that are already stored in Chroma (nothing is embedded again), asks the LLM to name each cluster, and appends the result to SQLite. Clustering runs in this script, never in the bot, because k-means on 10,000 messages takes seconds of CPU. Run it once in a while, and again after a large import. At ready the bot logs one line when the bank is empty or older than `topics.maxAgeMs` (90 days). With an empty bank the bot falls back to a neighbourhood search at conversation time.
+`npm run topics` builds a list of the subjects this group talks about, for conversations that need something to start from. It clusters message embeddings that are already stored in Chroma (nothing is embedded again), asks the LLM to name each cluster, and appends the result to SQLite. Clustering runs in this script, never in the bot, because k-means on 10,000 messages takes seconds of CPU. Run it once in a while, and again after a large import. Scripted conversations (see [Triggers](#triggers)) choose their topic from it. At ready the bot logs one line when the bank is empty or older than `topics.maxAgeMs` (90 days). With an empty bank the bot falls back to a neighbourhood search at conversation time.
 
 ```
 npm run topics -- [--dry-run] [--max-messages <n>] [--list] [--hide <id>]
@@ -321,6 +331,7 @@ Credentials are listed under [Setup](#setup). Boolean variables accept `true` or
 | `REPLY_OVERRIDE` | `false` | `true` replies to every message (testing) |
 | `REVIVE_OVERRIDE` | `false` | `true` checks every minute and revives regardless of idle time (testing) |
 | `CHAIN_REPLIES` | `true` | `false` turns off reply chains |
+| `CONVERSATIONS` | `true` | `false` turns off scripted conversations |
 | `BURSTS` | `true` | `false` turns off multi-message bursts |
 | `PING_REPLIED_USER` | `true` | `false` stops replies from pinging the author of the message they answer |
 | `CATCH_UP` | `true` | `false` skips importing messages posted while the bot was down |
@@ -475,6 +486,23 @@ Times are in milliseconds unless the key says otherwise.
 | `topics.conversationSamples` | 8 | Sample messages offered with a topic. Integer, 1 or more |
 | `topics.fallbackSeeds`, `neighbourhoodSize`, `minNeighbours` | 6, 30, 8 | Empty-bank fallback: seeds tried, hits per seed (integer, 2 or more) and hits needed (integer, 2 or more) |
 
+**`conversation`** (only `enabled` has an environment override, `CONVERSATIONS`; all counts and times are integers)
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `conversation.enabled` | `true` | Scripted conversations on or off |
+| `conversation.chance` | 0.1 | Chance that a due revive becomes a conversation. 0 to 1; 0 never rolls |
+| `conversation.minIntervalMs` | 86400000 | Minimum time since the last conversation turn. 0 or more |
+| `conversation.minPersonas`, `maxPersonas` | 2, 5 | Personas per conversation. `minPersonas` 2 or more, `maxPersonas` at least `minPersonas` |
+| `conversation.minMessages`, `maxMessages` | 3, 6 | Messages (turns) per conversation. `minMessages` 1 or more, `maxMessages` at least `minMessages` and at least `maxPersonas` |
+| `conversation.minDelayMs`, `maxDelayMs` | 5000, 30000 | Gap before each turn after the first. `minDelayMs` 0 or more, `maxDelayMs` at least `minDelayMs` |
+| `conversation.topicCandidates` | 5 | Candidates offered to the topic call. 1 or more |
+| `conversation.openerSamples`, `avoidRecentTopics` | 6, 10 | Past chat restarters shown to the topic call; recent conversations whose topics are excluded and listed. 0 or more |
+| `conversation.planRetries` | 1 | Extra asks after an unusable topic answer. 0 or more |
+| `conversation.personaHits` | 60 | History hits used to top up the personas. 1 or more |
+| `conversation.maxTopicChars`, `maxPremiseChars` | 80, 300 | Cut-offs for the chosen topic and premise. 1 or more |
+| `conversation.arrangeAttempts` | 50 | Random arrangements tried before a fixed interleave is used. 1 or more |
+
 **`backfill`, `lifecycle`, `catchUp`, `logging`**
 
 | Key | Default | Meaning |
@@ -499,8 +527,8 @@ Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are
 | `src/main.js`, `src/container.js`, `src/container/`, `src/vendor.js` | Entry point; the only place services are wired (one builder per layer, plus the default clock); the only place real third-party constructors are collected |
 | `src/config.js`, `src/config/` | Every tunable, strict environment parsing, range validation, required-variable checks, the secret list and the optional `.env` loader |
 | `src/backfill/` | History import, catch-up and the full re-import (steps, guards, database switch, archive reader, plan, comparison, report). Imported only by scripts and the container |
-| `src/bot/` | Triggers and orchestration: the handlers (message create, edit, delete, `reply` command, revive tick, profile refresh), reply, chain, revive and command-limit policies, activity tracker, composer, responder, lifecycle, startup and ready steps, process hooks and state restore |
-| `src/ingest/`, `src/retrieval/`, `src/context/`, `src/profiles/`, `src/llm/`, `src/gifs/`, `src/topics/` | Recording into SQLite and Chroma, vector sync and repair; retrieval and persona choice; transcript and thread builders; member profile checks; prompts, generators, chat client and output cleaning; GIF engines and resolver; the topic bank (sampling, clustering filter, labelling, builder, topic source and neighbourhood fallback) |
+| `src/bot/` | Triggers and orchestration: the handlers (message create, edit, delete, `reply` command, revive tick, profile refresh), reply, chain, revive and command-limit policies, activity tracker, composer, responder, lifecycle, startup and ready steps, process hooks and state restore. `src/bot/conversation/` holds the conversation policy, planner (topic call, persona draw, turn order) and runner |
+| `src/ingest/`, `src/retrieval/`, `src/context/`, `src/profiles/`, `src/llm/`, `src/gifs/`, `src/topics/` | Recording into SQLite and Chroma, vector sync and repair; retrieval and persona choice; transcript and thread builders; member profile checks; prompts, generators (reply, revive and conversation turn), chat client and output cleaning; GIF engines and resolver; the topic bank (sampling, clustering filter, labelling, builder, topic source and neighbourhood fallback) |
 | `src/storage/`, `src/discord/` | SQLite schema, migrations, stores and the read-only inspector, and the Chroma vector store; Discord client, payloads, embeds, delivery, webhooks, the reply modal, command definition, login and error codes |
 | `src/corpus/`, `src/text/`, `src/util/`, `src/userData/`, `src/logger.js` | Content transformers and filter predicates; pure text helpers; small pure helpers; validation of `data/*.json`; the logger |
 | `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js`, `reimport.js`, `topics.js` |
@@ -522,4 +550,4 @@ Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are
 - Edits and deletes made while the bot is offline are not seen until a re-import. A re-import does not carry over edit history or soft-delete markers.
 - A dry run of `backfill` may apply additive schema migrations and create empty collections.
 - Recent channel messages, including from people not in `users.json`, are sent to the LLM provider as context.
-- The topic bank is built and read (`topicSource.candidates`, `openers`, `bankStatus`) but nothing in the bot consumes it until scripted conversations (spec 35); at ready the bot only logs when the bank is empty or stale.
+- Scripted conversations need a topic bank to be good. With an empty bank they fall back to a neighbourhood search of one seeded corner of the corpus, and at ready the bot logs that the bank is empty or stale.

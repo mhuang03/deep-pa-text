@@ -27,6 +27,13 @@ export const REVIVE_SYSTEM_PROMPT = replaceOnce(
   replaceOnce(SYSTEM_PROMPT, FIRST_PARAGRAPH, REVIVE_FIRST_PARAGRAPH), GIF_SEGMENT, REVIVE_GIF_SEGMENT,
 );
 
+const REVIVE_OPENS_SENTENCE = 'It can follow up on the last conversation or bring up something new, as that user would.';
+
+// The first message of a scripted conversation: a revive whose subject is given.
+export const CONVERSATION_OPENER_SYSTEM_PROMPT = replaceOnce(
+  REVIVE_SYSTEM_PROMPT, REVIVE_OPENS_SENTENCE, 'It opens a conversation on the topic you are given.',
+);
+
 const REPLY_SECTIONS = [
   sections.identity, sections.transcript, sections.target,
   sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
@@ -44,8 +51,22 @@ const REVIVE_SECTIONS = [
   sections.pastExamples, sections.burst, sections.avoidRepeats,
 ];
 
+const CONVERSATION_OPENER_SECTIONS = [
+  sections.identity, sections.conversationBrief, sections.situation, sections.starters,
+  sections.topicExamples, sections.pastExamples, sections.burst, sections.avoidRepeats,
+];
+
+const CONVERSATION_TURN_SECTIONS = [
+  sections.identity, sections.conversationBrief, sections.transcript, sections.target,
+  sections.replyExamples, sections.similarExamples, sections.gifExamples, sections.otherExamples,
+  sections.frequentPhrases, sections.burst, sections.avoidRepeats,
+];
+
 export const buildReplyPrompt = (ctx) => sections.assemble(REPLY_SECTIONS, ctx);
 
 export const buildRevivePrompt = (ctx) => sections.assemble(REVIVE_SECTIONS, ctx);
 
 export const buildChainPrompt = (ctx) => sections.assemble(CHAIN_SECTIONS, ctx);
+
+export const buildConversationPrompt = (ctx) =>
+  sections.assemble(ctx.isOpener ? CONVERSATION_OPENER_SECTIONS : CONVERSATION_TURN_SECTIONS, ctx);

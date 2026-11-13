@@ -19,6 +19,8 @@ export const ENV = {
   GIPHY_API_KEY: 'test-giphy-key',
   HUMOR_API_KEY: 'test-humor-key',
   KLIPY_API_KEY: 'test-klipy-key',
+  // Conversation tests switch it on; every other test keeps the revive path's rolls and LLM calls as they were.
+  CONVERSATIONS: 'false',
 };
 
 export const CHANNEL_ID = '704837777564500149';

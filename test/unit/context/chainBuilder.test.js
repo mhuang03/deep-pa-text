@@ -153,3 +153,43 @@ test('a deleted bot message further up ends the walk', () => {
   assert.deepEqual(chain.turns.map((t) => t.content), ['question', 'second', 'why']);
   assert.equal(chain.botTurns, 1);
 });
+
+const turn = (id, persona, content, reference = null, extra = {}) => ({ id, persona, content, reference, trigger: 'conversation', ...extra });
+
+test('a human reply to a conversation turn walks back through the earlier turns, which do not count as bot turns', () => {
+  const t1 = turn('k1', 'alice', 'who is up for a hike');
+  const t2 = turn('k2', 'bob', 'maybe saturday', 'k1');
+  const result = setup({ bots: { k1: t1 }, names: { bob: 'Bob', alice: 'Alice' } }).build(target, t2);
+  assert.equal(result.persona, 'bob');
+  assert.equal(result.botTurns, 0);
+  assert.deepEqual(result.turns, [
+    { speaker: 'alice', content: 'who is up for a hike', isPersona: false },
+    { speaker: 'bob', content: 'maybe saturday', isPersona: true },
+    { speaker: 'alice', content: 'why', isPersona: false },
+  ]);
+});
+
+test('ordinary bot turns still count when they follow conversation turns in the walk', () => {
+  const t1 = turn('k1', 'alice', 'opener');
+  const reply = { id: 'r1', persona: 'bob', content: 'chain reply', reference: 'h1', trigger: 'chain' };
+  const result = setup({
+    bots: { k1: t1 }, raws: { h1: raw('h1', 'carol', 'huh', 'k1') }, names: { bob: 'Bob', alice: 'Alice' },
+  }).build(target, reply);
+  assert.equal(result.botTurns, 1);
+  assert.equal(result.turns.length, 4);
+});
+
+test('a burst conversation turn is one turn with its parts joined', () => {
+  const part1 = turn('k2', 'bob', 'first part', 'k1', { timestamp: 1 });
+  const part2 = turn('k3', 'bob', 'second part', 'k1', { timestamp: 2 });
+  const result = setup({ siblings: () => [part1, part2], names: { bob: 'Bob' } }).build(target, part1);
+  assert.equal(result.turns[0].content, 'first part\nsecond part');
+  assert.equal(result.botTurns, 0);
+});
+
+test('a soft-deleted conversation turn ends the walk like any deleted bot message', () => {
+  const t1 = turn('k1', 'alice', 'opener', null, { deleted: true });
+  const t2 = turn('k2', 'bob', 'second', 'k1');
+  const result = setup({ bots: { k1: t1 }, names: { bob: 'Bob', alice: 'Alice' } }).build(target, t2);
+  assert.deepEqual(result.turns.map((t) => t.content), ['second', 'why']);
+});

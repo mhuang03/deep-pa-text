@@ -1,5 +1,5 @@
 // Answering a submitted reply modal: acknowledge, choose the persona, respond, and report failures.
-import { TRIGGERS } from '../triggers.js';
+import { TRIGGERS } from '../../util/triggers.js';
 import { SAFE_MENTIONS } from '../../discord/payload.js';
 import { readSelectedAuthor, RANDOM_AUTHOR, GENERATION_FAILED_MESSAGE } from '../../discord/replyModal.js';
 import { COMMAND_REFUSALS } from '../commandLimiter.js';

@@ -85,8 +85,9 @@ test('adds the bot_messages table and index, idempotently, to a legacy database'
   db.exec(MIGRATIONS[0].sql);
   runMigrations(db);
   runMigrations(db);
-  assert.deepEqual(columns(db, 'bot_messages'), ['id', 'persona', 'content', 'timestamp', 'reference', 'trigger', 'deleted_at']);
+  assert.deepEqual(columns(db, 'bot_messages'), ['id', 'persona', 'content', 'timestamp', 'reference', 'trigger', 'deleted_at', 'conversation_id', 'turn_index']);
   assert.ok(names(db, 'index').includes('idx_bot_messages_timestamp'));
+  assert.ok(names(db, 'index').includes('idx_bot_messages_conversation'));
 });
 
 test('spec 24 migrations add the soft-delete columns, index and revisions table to a legacy database, once', () => {

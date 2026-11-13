@@ -225,3 +225,29 @@ test('override ignores the failure cooldown', () => {
   policy.noteFailure();
   assert.equal(policy.decide().reply, true);
 });
+
+test('claim holds the in-flight slot: no auto reply is decided until the hold is released', () => {
+  const { state, policy } = setup({ rolls: [0, 0] });
+  const hold = policy.claim();
+  assert.deepEqual(policy.decide(), { reply: false, reason: 'in-flight' });
+  assert.equal(state.rollCount, 0, 'a held decision consumes no roll');
+  hold();
+  assert.equal(policy.decide().reply, true);
+});
+
+test('releasing a claim twice frees only itself, once', () => {
+  const { policy } = setup({ rolls: [0] });
+  const first = policy.claim();
+  const second = policy.claim();
+  first();
+  first();
+  assert.equal(policy.decide().reason, 'in-flight', 'the second claim still holds');
+  second();
+  assert.equal(policy.decide().reply, true);
+});
+
+test('a claim does not rate-limit by itself and an override still replies through a hold', () => {
+  const { policy } = setup({ env: { REPLY_OVERRIDE: 'true' } });
+  policy.claim();
+  assert.equal(policy.decide().reason, 'override');
+});

@@ -147,4 +147,24 @@ export const MIGRATIONS = [
   )
 `,
   },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    started_at INTEGER NOT NULL,
+    topic_id INTEGER,
+    topic TEXT NOT NULL,
+    premise TEXT NOT NULL,
+    personas TEXT NOT NULL,
+    turns TEXT NOT NULL
+  )
+`,
+  },
+  { addColumn: { table: 'bot_messages', column: 'conversation_id', definition: 'TEXT' } },
+  { addColumn: { table: 'bot_messages', column: 'turn_index', definition: 'INTEGER' } },
+  {
+    sql: `
+  CREATE INDEX IF NOT EXISTS idx_bot_messages_conversation ON bot_messages (conversation_id)
+`,
+  },
 ];

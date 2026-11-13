@@ -44,6 +44,8 @@ export const createReplyPolicy = ({ config, now, random }) => {
   };
   return {
     decide: () => decide(ctx),
+    // A public hold on the in-flight counter: while held, decide() starts no auto reply. Idempotent release.
+    claim: () => claim(ctx.state),
     noteReply: ({ resetMisses }) => {
       ctx.state.replyTime = now();
       if (resetMisses) ctx.state.misses = 0;

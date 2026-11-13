@@ -83,6 +83,11 @@ const EXPECTED_DEFAULTS = {
     minTopics: 3, maxConsecutiveFailures: 3, recencyHalfLifeMs: 15552000000, recencyFloor: 0.1, maxAgeMs: 7776000000,
     conversationSamples: 8, fallbackSeeds: 6, neighbourhoodSize: 30, minNeighbours: 8,
   },
+  conversation: {
+    enabled: true, chance: 0.1, minIntervalMs: 86400000, minPersonas: 2, maxPersonas: 5, minMessages: 3, maxMessages: 6,
+    minDelayMs: 5000, maxDelayMs: 30000, topicCandidates: 5, openerSamples: 6, avoidRecentTopics: 10,
+    planRetries: 1, personaHits: 60, maxTopicChars: 80, maxPremiseChars: 300, arrangeAttempts: 50,
+  },
   logging: { locale: 'en-US', timeZone: 'America/Chicago' },
 };
 

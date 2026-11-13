@@ -1,5 +1,5 @@
 import { startTyping } from '../discord/typing.js';
-import { TRIGGERS } from './triggers.js';
+import { TRIGGERS } from '../util/triggers.js';
 import { GENERATION_STAGE, tagFailure } from './responderFailure.js';
 import { createContextResolver } from './responderContext.js';
 import { createBotMessageRecorder } from './responderRecord.js';
@@ -24,6 +24,9 @@ const generate = async ({ composer, resolver }, request) => {
   }
 };
 
+// The parts that went out, with the text each carried; a burst cut short by a failure is shorter than `parts`.
+const toDelivered = (messages, parts) => messages.map((message, index) => ({ message, text: parts[index].text }));
+
 export const createResponder = ({
   composer, delivery, contextBuilder, botMessageStore, clock, config, logger,
 }) => {
@@ -35,8 +38,10 @@ export const createResponder = ({
     const typing = beginTyping({ clock, config, logger }, request);
     try {
       const { response, parts: toSend } = await generate({ composer, resolver }, request);
+      // The hook may wait (a conversation's spacing) or abort; typing stays on meanwhile.
+      await request.beforeDeliver?.();
       const messages = await parts.deliverAll(request, { parts: toSend, typing });
-      return { response, messages };
+      return { response, messages, delivered: toDelivered(messages, toSend) };
     } finally {
       typing.stop();
     }

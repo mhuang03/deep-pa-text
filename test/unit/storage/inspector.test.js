@@ -61,4 +61,48 @@ test('a missing table is reported by name', () => {
   assert.deepEqual(inspector.latestWithReference(5), { missing: 'filtered_messages' });
   assert.deepEqual(inspector.latestWithGif(5), { missing: 'filtered_messages' });
   assert.deepEqual(inspector.latestBot(5), { missing: 'bot_messages' });
+  assert.deepEqual(inspector.latestConversations(5), { missing: 'conversations' });
+});
+
+const seedConversations = () => {
+  const db = seedCurrent();
+  db.exec(`
+    INSERT INTO conversations (id, started_at, topic_id, topic, premise, personas, turns) VALUES
+      ('c1', ${T0 + 10}, 3, 'Old plans', 'p', '["alice","bob"]', '["alice","bob","alice"]'),
+      ('c2', ${T0 + 20}, NULL, 'New plans', 'p', '["bob","carol"]', '["bob","carol","bob","carol"]');
+    INSERT INTO bot_messages (id, persona, content, timestamp, reference, trigger, conversation_id, turn_index) VALUES
+      ('t0', 'bob', 'one', ${T0 + 21}, NULL, 'conversation', 'c2', 0),
+      ('t0b', 'bob', 'one more', ${T0 + 22}, NULL, 'conversation', 'c2', 0),
+      ('t1', 'carol', 'two', ${T0 + 23}, 't0', 'conversation', 'c2', 1),
+      ('gone', 'bob', 'three', ${T0 + 24}, 't1', 'conversation', 'c2', 2);
+    UPDATE bot_messages SET deleted_at = 9 WHERE id = 'gone' AND deleted_at IS NULL;
+  `);
+  return db;
+};
+
+test('lists the latest conversations with planned and delivered turn counts, a burst counting once', () => {
+  const { rows } = createInspector({ db: seedConversations() }).latestConversations(10);
+  assert.deepEqual(rows, [
+    { id: 'c2', timestamp: T0 + 20, topic: 'New plans', personas: ['bob', 'carol'], planned: 4, delivered: 2 },
+    { id: 'c1', timestamp: T0 + 10, topic: 'Old plans', personas: ['alice', 'bob'], planned: 3, delivered: 0 },
+  ]);
+});
+
+test('conversations honour the limit', () => {
+  assert.deepEqual(createInspector({ db: seedConversations() }).latestConversations(1).rows.map((r) => r.id), ['c2']);
+});
+
+test('conversations are tolerant of a bot_messages table without the conversation columns', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(MIGRATIONS[3].sql);
+  db.exec(MIGRATIONS.find((m) => m.sql?.includes('CREATE TABLE IF NOT EXISTS conversations')).sql);
+  db.exec(`INSERT INTO conversations (id, started_at, topic, premise, personas, turns) VALUES ('c1', 5, 'T', 'p', '["a","b"]', '["a","b","a"]')`);
+  assert.deepEqual(createInspector({ db }).latestConversations(5).rows.map((r) => [r.id, r.planned, r.delivered]), [['c1', 3, 0]]);
+});
+
+test('conversations are tolerant of a missing bot_messages table', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(MIGRATIONS.find((m) => m.sql?.includes('CREATE TABLE IF NOT EXISTS conversations')).sql);
+  db.exec(`INSERT INTO conversations (id, started_at, topic, premise, personas, turns) VALUES ('c1', 5, 'T', 'p', '["a","b"]', '["a","b"]')`);
+  assert.equal(createInspector({ db }).latestConversations(5).rows[0].delivered, 0);
 });

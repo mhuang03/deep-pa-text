@@ -2,6 +2,7 @@ import { createCompleter } from './generatorComplete.js';
 import { createGeneratorInputs } from './generatorInputs.js';
 import { createReplyGenerator } from './replyGenerator.js';
 import { createReviveGenerator } from './reviveGenerator.js';
+import { createConversationGenerator } from './conversationGenerator.js';
 
 export const createGenerator = ({
   chatClient, retriever, userDirectory, botMessageStore, messageStore, burstProfile, config, logger,
@@ -9,5 +10,7 @@ export const createGenerator = ({
   const { complete } = createCompleter({ chatClient, config, logger });
   const inputs = createGeneratorInputs({ botMessageStore, messageStore, burstProfile, config, logger });
   const shared = { complete, retriever, userDirectory, inputs, config };
-  return { ...createReplyGenerator(shared), ...createReviveGenerator(shared) };
+  return {
+    ...createReplyGenerator(shared), ...createReviveGenerator(shared), ...createConversationGenerator(shared),
+  };
 };

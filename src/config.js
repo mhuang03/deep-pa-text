@@ -4,6 +4,8 @@ import * as check from './config/validate.js';
 import * as checkFeature from './config/validateFeatures.js';
 import { buildTopics } from './config/topicSections.js';
 import { assertTopics } from './config/validateTopics.js';
+import { buildConversation } from './config/conversationSections.js';
+import { assertConversation } from './config/validateConversation.js';
 
 export { DEFAULT_BUSY_TIMEOUT_MS } from './config/sections.js';
 export { createConfigError, isConfigError } from './config/errors.js';
@@ -12,6 +14,7 @@ export {
 } from './config/validate.js';
 export { assertChain, assertCommand, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector } from './config/validateFeatures.js';
 export { assertTopics } from './config/validateTopics.js';
+export { assertConversation } from './config/validateConversation.js';
 
 const deepFreeze = (value) => {
   if (value === null || typeof value !== 'object') return value;
@@ -42,6 +45,7 @@ const buildConfig = (env) => ({
   catchUp: checkFeature.assertCatchUp(feature.buildCatchUp(env)),
   vector: checkFeature.assertVector(feature.buildVector()),
   topics: assertTopics(buildTopics()),
+  conversation: assertConversation(buildConversation(env)),
   logging: feature.buildLogging(),
 });
 

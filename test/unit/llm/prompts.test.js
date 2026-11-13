@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt, buildChainPrompt } from '../../../src/llm/prompts.js';
+import {
+  SYSTEM_PROMPT, REVIVE_SYSTEM_PROMPT, CONVERSATION_OPENER_SYSTEM_PROMPT, buildReplyPrompt, buildRevivePrompt,
+  buildChainPrompt, buildConversationPrompt,
+} from '../../../src/llm/prompts.js';
 
 const fixture = fs.readFileSync(new URL('../../characterization/fixtures/system-prompt.txt', import.meta.url), 'utf8');
 
@@ -171,4 +174,110 @@ test('the burst section sits immediately before avoid-repeats in the reply, chai
 test('prompts contain no burst section without a burst rate', () => {
   const { burstRate, ...rest } = BURST_CTX;
   assert.doesNotMatch(buildChainPrompt(rest), /split/);
+});
+
+const SENTENCE = 'It can follow up on the last conversation or bring up something new, as that user would.';
+
+test('CONVERSATION_OPENER_SYSTEM_PROMPT is the revive prompt with only the follow-up sentence replaced', () => {
+  assert.equal(REVIVE_SYSTEM_PROMPT.split(SENTENCE).length, 2);
+  assert.equal(
+    CONVERSATION_OPENER_SYSTEM_PROMPT,
+    REVIVE_SYSTEM_PROMPT.replace(SENTENCE, 'It opens a conversation on the topic you are given.'),
+  );
+  assert.ok(!CONVERSATION_OPENER_SYSTEM_PROMPT.includes('follow up on the last conversation'));
+});
+
+const BRIEF = 'You are taking part in a conversation in the channel between alice, bob, carol. It is about: Weekend plans. A hike is floated. Only these people take part; do not address anyone else.';
+
+const conversation = (extra = {}) => ({
+  participants: ['alice', 'bob', 'carol'], topic: 'Weekend plans', premise: 'A hike is floated.',
+  remaining: 2, isLast: false, ...extra,
+});
+
+test('buildConversationPrompt for an opener equals a literal, sections in order', () => {
+  const out = buildConversationPrompt({
+    isOpener: true, author: 'alice', name: 'Alice Example', conversation: conversation(),
+    nowMs: Date.parse('2026-11-12T18:00:00Z'), quietMs: 5 * 3600000, timeZone: 'America/Chicago',
+    starters: ['anyone around'], buckets: { similar: ['hiking is fun'] }, examples: ['old message'],
+    recentBotMessages: ['bot said this'], burstRate: 0.5, burst: { enabled: true, minRate: 0.2, maxMessages: 3 },
+  });
+  assert.equal(out, `The user you are emulating has username "alice", and their real name is "Alice Example".
+
+${BRIEF} You are starting it. Write the message that opens the conversation. Do not greet the channel.
+
+It is Thursday 12:00 PM. The channel has been quiet for about 5 hours.
+
+Here are messages this user has sent to start a conversation after the channel had been quiet:
+["anyone around"]
+
+Here are messages this user has sent about similar things:
+["hiking is fun"]
+
+Here are some examples of messages that the user has sent in the past:
+["old message"]
+
+This user often sends several short messages in a row instead of one longer message. If that fits here, you may split your response into up to 3 separate messages by putting <split> on its own line between them. Only split where this user would.
+
+The bot you are part of recently sent these messages in the channel. Do not repeat them or reuse their distinctive phrasing:
+["bot said this"]`);
+});
+
+test('the opener leaves out the starters, topic examples and avoid list when they are empty, but keeps the past examples', () => {
+  const out = buildConversationPrompt({
+    isOpener: true, author: 'alice', name: 'A', conversation: conversation(), nowMs: Date.parse('2026-11-12T18:00:00Z'),
+    quietMs: null, timeZone: 'America/Chicago', starters: [], buckets: { similar: [] }, examples: [],
+    recentBotMessages: [], burstRate: 0, burst: { enabled: false },
+  });
+  assert.equal(out, `The user you are emulating has username "alice", and their real name is "A".
+
+${BRIEF} You are starting it. Write the message that opens the conversation. Do not greet the channel.
+
+It is Thursday 12:00 PM.
+
+Here are some examples of messages that the user has sent in the past:
+[]`);
+});
+
+test('buildConversationPrompt for a later turn equals a literal: transcript, then the target, then the examples', () => {
+  const out = buildConversationPrompt({
+    isOpener: false, author: 'bob', name: 'Bob Example', conversation: conversation({ remaining: 2 }),
+    transcript: [{ speaker: 'alice', content: 'who is up for a hike', timestamp: Date.parse('2026-11-12T18:00:00Z') }],
+    message: 'maybe saturday', messageAuthor: 'carol', timeZone: 'America/Chicago', maxEntryChars: 300,
+    buckets: { replies: [{ you: 'r1', them: 'q1' }], similar: ['s1'], gifs: [], other: ['o1'], frequent: [{ text: 'lol', count: 4 }] },
+    recentBotMessages: [], burstRate: 0, burst: { enabled: false },
+  });
+  assert.equal(out, `The user you are emulating has username "bob", and their real name is "Bob Example".
+
+${BRIEF} Write your next message. React to what was just said, stay with the topic unless the conversation has naturally moved on, and do not end every message with a question. 2 more messages follow yours.
+
+Here is the recent conversation in the channel, oldest first, for context:
+[12:00] alice: who is up for a hike
+
+The user has just received this message from "carol": "maybe saturday".
+
+Here are examples of how the user replied to messages similar to the one they just received. "them" is the message the user was responding to and "you" is the user's reply:
+[{"them":"q1","you":"r1"}]
+
+Here are some examples of some messages that the user has sent that are similar in semantic meaning to the message they just received:
+["s1"]
+
+Here are some examples of responses to similar messages where the user's response included a GIF:
+[]
+
+Here are some examples of other messages that the user has sent that are not necessarily similar in semantic meaning to the message they just received, but are still representative of the user's general style and tone:
+["o1"]
+
+The user sends some of these messages often. Number of times they have sent each (use them only where they fit):
+[{"text":"lol","count":4}]`);
+});
+
+test('the last turn says nobody replies and does not count the messages that follow', () => {
+  const out = buildConversationPrompt({
+    isOpener: false, author: 'bob', name: 'B', conversation: conversation({ remaining: 0, isLast: true }),
+    transcript: [], message: 'ok', messageAuthor: 'carol', timeZone: 'UTC', maxEntryChars: 300,
+    buckets: { replies: [], similar: [], gifs: [], other: [] }, recentBotMessages: [], burstRate: 0, burst: { enabled: false },
+  });
+  assert.match(out, /do not end every message with a question\. Nobody replies after this message, so do not ask the others a question\.\n\n/);
+  assert.ok(!out.includes('more messages follow yours'));
+  assert.ok(!out.includes('recent conversation in the channel'), 'an empty transcript is omitted');
 });
