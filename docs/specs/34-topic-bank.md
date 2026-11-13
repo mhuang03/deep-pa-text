@@ -217,3 +217,38 @@ README: a "Topic bank" section under Scripts (what it is, when to run it, option
 ## Acceptance
 
 `npm test` passes. `node scripts/topics.js --bogus` exits 2 without touching the network.
+
+## Amendments after review (these override the text above where they differ)
+
+1. **A bad run never replaces a good bank.** `completeBuild` is called only when at least `topics.minTopics` (3) topics were accepted. The labelling loop stops after `topics.maxConsecutiveFailures` (3) consecutive `failed` clusters with `reason: 'llm-failing'`; a run that ends with too few accepted topics reports `reason: 'too-few-topics'`. In both cases no `topic_builds` row is written, so the previous bank stays current (the topic rows already inserted are orphans and are ignored).
+2. **Cluster ranking.** Kept clusters are ordered by **size**, largest first (not by cohesion: the tightest clusters are the most formulaic), and cut to `topics.maxLabelled`, default **80**. Cohesion is stored and reported but is not a threshold.
+3. **Stronger filler guards.**
+   - `isTopicEligible(content, { minWords, minDistinctWords, minChars })`: words and characters are measured on `topicText` lower-cased with runs of three or more identical letters collapsed to one (the rule in `src/text/normalize.js`; export and reuse it). It requires at least `minWords` words, at least `minDistinctWords` (4) **distinct** words, and at least `minChars` characters. `yeah yeah yeah yeah yeah` and `hahahahahaha lol ok` are therefore not eligible.
+   - Cluster filter adds two rules: the largest author share must not exceed `topics.maxAuthorShare` (0.6); and the most common three-word opening (the first three words of each row's normalised `topicText`) must not cover more than `topics.maxPrefixShare` (0.3) of the rows (catchphrases and templates).
+   - Rows whose author is not in the user directory are dropped in step 2, before clustering.
+   - Residual, accepted: a five-word reaction such as `lol yeah that is so true` is eligible; it is left to the cluster rules and the LLM veto.
+   - Text with no spaces between words (for example Chinese or Japanese) counts as one word and is never eligible; documented in the README.
+4. **Sampling.** Each of the two statements fetches `topics.sampleOverFetch` (2) times its limit. After the eligibility and repeat filters each group is cut to its limit; if one group is short, the other fills the remainder up to `maxMessages`.
+5. **k-means rules.**
+   - Seeding weights are `max(0, 1 − similarity)`; when they sum to 0 (all rows identical to a chosen centre) the next centre is drawn uniformly.
+   - An empty centre is re-seeded from the row least similar to its own centre that has not already been used for a re-seed in this round; ties and equal similarities go to the lowest row index. A round in which a re-seed happened never triggers the early stop.
+   - If a centre's mean has zero length the previous centre is kept.
+   - An empty cluster has cohesion 0.
+   - With fewer rows than `clusters`, the cluster count is reduced to the row count.
+   - Keep every function within the size limits by passing a context object; convert embeddings into the `Float32Array` page by page as they are fetched.
+   - The "separated groups" unit test uses a fixed list of seeds, not "any seed".
+6. **Build ids.** `t<UTC YYYYMMDDHHMMSS>-<4 hex digits drawn from the injected random>`. The current build is the newest by `completed_at DESC, build_id DESC`.
+7. **Transactions.** The `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK` helper now private to `src/storage/messageEdits.js` is extracted to `src/storage/transaction.js` and used by `insertTopic`. `lastInsertRowid` is passed through `Number()`.
+8. **Exclusions and hidden topics.** `candidates({ limit, excludeTopicIds })` has no `excludeLabels`. `topicStore.hiddenLabelKeys() → Set<string>` returns the `normalizeForDedup` keys of every hidden topic of any build; the builder skips a cluster whose label key is in it (counted as `hidden`), so `--hide` survives rebuilds.
+9. **Label hygiene and sensitive subjects.** `topic` and `summary` have every whitespace run collapsed to one space before the length cut. The system prompt gains: `Also set "usable" to false when the messages are mainly about one person's private matters (health, relationships, money, a conflict), or are insults or harassment.`
+10. **Fallback neighbourhood guards.** Hits are deduplicated by `normalizeForDedup` key; `minNeighbours` counts distinct keys; the neighbourhood must also pass the median-length rule (`minMedianChars`).
+11. **Script and required variables.**
+    - `--list` and `--hide` do not build the container: they open the database with `openDatabase` (read-write, so the tables exist on a fresh database) and use `createTopicStore` directly. Purpose `topics-bank` requires nothing.
+    - A build uses purpose `topics` (`DEEPSEEK_API_KEY` and the embedding key variable); `--dry-run` uses purpose `topics-dry-run` (the embedding key variable only, which constructing the container needs).
+    - The script destroys the container's Discord client in a `finally`, like `scripts/backfill.js`. It writes inserts and the `deleted_at` marker only.
+    - README: with thinking enabled, labelling up to 80 clusters one after another can take tens of minutes.
+12. **Layering and wiring.** The layer table lives in `test/support/layering.js` (`LEVELS`): add `topics: 2` there and in `CLAUDE.md`. Configuration goes in a new `src/config/topicSections.js` with `assertTopics` in a matching validator file. The container exposes `chatClient` (spec 35 needs it too), `topicStore`, `topicSource` and `topicBuilder`; the container test that pins the public keys is updated. The stale-bank line at `ClientReady` gets a unit test.
+13. **Module split** (each within the size limits): `src/topics/topicSampler.js` (steps 1 and 2), `embeddingMatrix.js` (step 3), `clusterFilter.js` (step 5), `representatives.js` (step 6), `topicLabeller.js` (step 7), `topicBuilder.js` (orchestration and report), `topicSource.js`, `neighbourhood.js`, `topicPrompts.js`, `args.js`.
+14. **Scenario test.** It overrides `topics.minClusters` and `topics.maxClusters` to 3 and `topics.minClusterSize` to a small number, uses themes with disjoint vocabularies (the fake embedding is a 64-dimension bag of words), and includes short messages of at least 25 characters but fewer than five words as well as repeated-word filler, so each guard is exercised.
+
+New configuration keys from these amendments: `topics.minTopics 3` (≥ 1), `topics.maxConsecutiveFailures 3` (≥ 1), `topics.minDistinctWords 4` (≥ 1), `topics.maxAuthorShare 0.6` (0 to 1), `topics.maxPrefixShare 0.3` (0 to 1), `topics.sampleOverFetch 2` (≥ 1); `topics.maxLabelled` default becomes 80.
