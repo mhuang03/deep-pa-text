@@ -154,14 +154,67 @@ test('a name alone answers the previous message as that persona', async (t) => {
   assert.ok(lastPrompt(world).includes('anyone want to get food later'));
 });
 
-test('a reply to a bot message that starts with another name stays a chain reply by the thread persona', async (t) => {
-  const world = await newWorld(t, { random: 0 });
+const requestOf = (world) => world.llm.calls.at(-1).messages;
+const OTHERS = ['bob', 'carol', 'dave'];
+
+// An auto reply to alice, then a roll that lets nothing else reply by chance.
+const startThread = async (world) => {
   const root = await world.emitMessage({ author: 'alice', content: 'hello there friends' });
-  const persona = personaOf(root);
-  const otherName = ['bob', 'carol', 'dave'].find((name) => name !== persona);
-  const reply = await world.emitMessage({
-    author: 'alice', content: `${PING} ${otherName} say more`, reference: botRows(world)[0].id,
-  });
-  assert.equal(personaOf(reply), persona);
-  assert.equal(botRows(world).at(-1).trigger, 'chain');
+  world.setRandom(0.99);
+  return { root, persona: personaOf(root), bot: botRows(world)[0] };
+};
+
+test('a pinged reply to a bot message that names another persona is answered by it inside the thread', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const { persona, bot } = await startThread(world);
+  const other = OTHERS.find((name) => name !== persona);
+  const reply = await world.emitMessage({ author: 'alice', content: `${PING} ${other} what about you`, reference: bot.id });
+  assert.equal(personaOf(reply), other);
+  const messages = requestOf(world);
+  assert.equal(messages.some((m) => m.role === 'assistant'), false);
+  assert.ok(messages.some((m) => m.role === 'user' && m.content.includes(`${persona}: ${bot.content}`)));
+  assert.ok(messages.at(-1).content.endsWith('alice: what about you'));
+  assert.ok(JSON.stringify(messages).includes('hello there friends'));
+  const row = botRows(world).at(-1);
+  assert.deepEqual({ persona: row.persona, trigger: row.trigger, reference: row.reference }, { persona: other, trigger: 'chain', reference: reply.id });
+});
+
+test('a plain reply to the joined persona continues as it and still sees the whole thread', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const { persona, bot } = await startThread(world);
+  const other = OTHERS.find((name) => name !== persona);
+  await world.emitMessage({ author: 'alice', content: `${PING} ${other} what about you`, reference: bot.id });
+  const joined = botRows(world).at(-1);
+  const next = await world.emitMessage({ author: 'dave', content: 'go on then', reference: joined.id });
+  assert.equal(personaOf(next), other);
+  const messages = requestOf(world);
+  assert.ok(messages.some((m) => m.role === 'assistant' && m.content === joined.content));
+  assert.ok(messages.some((m) => m.role === 'user' && m.content.includes(`${persona}: ${bot.content}`)));
+});
+
+test('only another name in a pinged reply answers the bot message itself', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const { persona, bot } = await startThread(world);
+  const other = OTHERS.find((name) => name !== persona);
+  const reply = await world.emitMessage({ author: 'alice', content: `${PING} ${other}`, reference: bot.id });
+  assert.equal(personaOf(reply), other);
+  assert.ok(requestOf(world).at(-1).content.endsWith(`${persona}: ${bot.content}`));
+  assert.deepEqual(
+    { trigger: botRows(world).at(-1).trigger, reference: botRows(world).at(-1).reference },
+    { trigger: 'chain', reference: bot.id },
+  );
+});
+
+test('naming the thread persona, misspelling another, and a name without a ping', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const { persona, bot } = await startThread(world);
+  const same = await world.emitMessage({ author: 'alice', content: `${PING} ${persona} what else`, reference: bot.id });
+  assert.equal(personaOf(same), persona);
+  assert.ok(requestOf(world).at(-1).content.endsWith('alice: what else'));
+  const typo = await world.emitMessage({ author: 'alice', content: `${PING} caorl say more`, reference: bot.id });
+  assert.equal(personaOf(typo), persona === 'carol' ? persona : 'carol');
+  const other = OTHERS.find((name) => name !== persona);
+  const unpinged = await world.emitMessage({ author: 'alice', content: `${other} say more`, reference: bot.id });
+  assert.equal(personaOf(unpinged), persona);
+  assert.ok(requestOf(world).at(-1).content.endsWith(`alice: ${other} say more`));
 });

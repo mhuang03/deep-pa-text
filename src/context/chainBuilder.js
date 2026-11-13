@@ -55,13 +55,16 @@ const walk = (ctx, parent, persona) => {
   return { turns, botTurns };
 };
 
-const build = (ctx, target, parent) => {
-  const { persona } = parent;
+// `persona` is whose turns are the model's own: the thread's persona, or another one asked to join it.
+// Without a target the thread ends at the parent and no incoming turn is added.
+const build = (ctx, { target, parent, persona }) => {
   if (parent.deleted || !ctx.userDirectory.nameOf(persona)) return null;
   const { turns, botTurns } = walk(ctx, parent, persona);
   const kept = turns.reverse().slice(-(ctx.config.chain.maxContextTurns - 1));
-  const incoming = { speaker: target.author, content: target.content, isPersona: false };
-  return { persona, turns: [...kept, incoming], botTurns };
+  const incoming = target ? [{ speaker: target.author, content: target.content, isPersona: false }] : [];
+  return { persona, turns: [...kept, ...incoming], botTurns };
 };
 
-export const createChainBuilder = (deps) => ({ build: (target, parent) => build(deps, target, parent) });
+export const createChainBuilder = (deps) => ({
+  build: (target, parent, { persona = parent.persona } = {}) => build(deps, { target, parent, persona }),
+});

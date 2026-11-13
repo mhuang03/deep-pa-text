@@ -193,3 +193,29 @@ test('a soft-deleted conversation turn ends the walk like any deleted bot messag
   const result = setup({ bots: { k1: t1 }, names: { bob: 'Bob', alice: 'Alice' } }).build(target, t2);
   assert.deepEqual(result.turns.map((t) => t.content), ['second', 'why']);
 });
+
+test('a persona override makes that persona\'s messages the model\'s own and labels the thread persona as another speaker', () => {
+  const bots = { b1: bot('b1', 'carol', 'carol earlier'), b2: bot('b2', 'bob', 'bob later', 'h1') };
+  const raws = { h1: raw('h1', 'alice', 'question', 'b1') };
+  const chain = setup({ bots, raws }).build(target, bots.b2, { persona: 'carol' });
+  assert.equal(chain.persona, 'carol');
+  assert.deepEqual(chain.turns, [
+    { speaker: 'carol', content: 'carol earlier', isPersona: true },
+    { speaker: 'alice', content: 'question', isPersona: false },
+    { speaker: 'bob', content: 'bob later', isPersona: false },
+    { speaker: 'alice', content: 'why', isPersona: false },
+  ]);
+  assert.equal(chain.botTurns, 2);
+});
+
+test('without a target the thread ends at the parent', () => {
+  const parent = bot('b', 'bob', 'what bob said');
+  const chain = setup().build(null, parent, { persona: 'carol' });
+  assert.deepEqual(chain.turns, [{ speaker: 'bob', content: 'what bob said', isPersona: false }]);
+});
+
+test('the override decides validity: a departed thread persona is fine, an unknown override is not', () => {
+  const parent = bot('b', 'zed', 'from someone who left');
+  assert.equal(setup().build(target, parent, { persona: 'carol' }).persona, 'carol');
+  assert.equal(setup().build(target, bot('b', 'bob', 'x'), { persona: 'nobody' }), null);
+});

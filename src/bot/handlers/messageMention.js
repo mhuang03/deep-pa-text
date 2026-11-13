@@ -29,7 +29,7 @@ const pointedAt = async (deps, { message, record }) => {
 };
 
 // "bob what do you think" asks for bob by name; the name is not part of what is answered.
-const readRequest = ({ config, users, client }, record) => {
+export const readRequest = ({ config, users, client }, record) => {
   const text = stripUserMention(record.content, client.user?.id);
   const named = config.mention.namedPersona ? matchPersonaPrefix(text, users, config.mention) : null;
   return { text: named ? named.rest : text, persona: named?.persona ?? null };

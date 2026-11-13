@@ -15,7 +15,7 @@ const handleMessage = async (deps, { message, record, parents }) => {
     repliesToBot: Boolean(parent), tolerateVectorErrors: true,
   });
   const lines = [formatReceived({ record, kept: filtered !== null, logging: config.logging })];
-  const threaded = buildChain(deps, record, parent);
+  const threaded = buildChain(deps, { message, record, parent });
   if (threaded) return chainReply(deps, { message, threaded, lines });
   if (isMention(deps, message)) return mentionReply(deps, { message, record, lines });
   const target = messageFilter.filterAnyAuthor(record);
