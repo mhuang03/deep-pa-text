@@ -1,5 +1,6 @@
 import { switchPaths } from './databaseSwitch.js';
 import { assertRunnable, buildGeneration } from './reimportGuards.js';
+import { preflight } from './reimportPreflight.js';
 import * as step from './reimportSteps.js';
 
 export { buildGeneration } from './reimportGuards.js';
@@ -31,6 +32,8 @@ const run = async (ctx, { yes = false, resume = false } = {}) => {
   const status = databaseSwitch.inspect(dbPath);
   assertRunnable(status, resume);
   if (resume) step.verifyBeforeSwap(ctx, status);
+  // A dry run needs neither Chroma nor embeddings, so only an applied run is checked.
+  if (yes) await preflight(ctx);
   const { client, channel } = await step.connect(ctx);
   try {
     const messages = await step.readHistory(ctx, channel);

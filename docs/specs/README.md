@@ -45,6 +45,7 @@ Each spec defines one change completely: behaviour, interfaces, schema and confi
 | [33](33-standards-and-test-gaps.md) | Standards compliance and test gaps | 32 |
 | [34](34-topic-bank.md) | Topic bank (clustered conversation topics) | 33 |
 | [35](35-conversations.md) | Scripted conversations | 34 |
+| [36](36-reimport-preflight.md) | Re-import preflight | 26, 32 |
 
 Specs 27–33 come from the audit recorded in [`docs/audit/findings.md`](../audit/findings.md); each cites the findings it resolves.
 
@@ -78,6 +79,7 @@ Each line is a wave; specs on one line touch disjoint areas and may be implement
 33
 34
 35
+36
 ```
 
 Most later specs extend the same pipeline (responder, generator, prompts, message store), so they are implemented one at a time.

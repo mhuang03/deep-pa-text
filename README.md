@@ -72,7 +72,7 @@ For an installation that ran the old flat layout (`node bot.js`, a `messages.db`
    - **With it (recommended once),** every current rule is applied uniformly to the history. Starting the bot first is not needed: the re-import reads the old database read-only and works on the old schema. Follow the steps below.
 9. Re-import:
    1. `npm run reimport` (a dry run). It needs Discord and the variables above, not Chroma. It prints how many messages it would handle and changes nothing.
-   2. `npm run reimport -- --yes`. Chroma must be running. It backs up `messages.db` to `messages.db.old` (a hard link, else a verified copy), puts a freshly built database in its place and re-imports the whole channel. Vectors go into a new Chroma generation (`message_embeddings_g<UTC timestamp>` and the matching reply collection). The old collections are not touched.
+   2. `npm run reimport -- --yes`. Chroma must be running; the script checks Chroma and the embedding API before it starts fetching. It backs up `messages.db` to `messages.db.old` (a hard link, else a verified copy), puts a freshly built database in its place and re-imports the whole channel. Vectors go into a new Chroma generation (`message_embeddings_g<UTC timestamp>` and the matching reply collection). The old collections are not touched.
    3. `npm run backfill` once, to pick up anything posted during the re-import.
    4. `npm start`.
 
@@ -297,7 +297,7 @@ How a build decides what is a topic:
 `npm run reimport -- [--yes] [--resume]` rebuilds the database from Discord so every current rule applies to old rows: `has_gif` metadata, reply links, the corpus filter, offline edits and deletes, and the bot's own messages. It is not routine. The script cannot detect a running bot and says so before doing anything.
 
 1. Without flags it is a dry run: it reads the whole channel and prints a plan (fetched, human, own, other bots', how many the filter would keep). Nothing changes on disk or in Chroma.
-2. With `--yes` it checks the state, reads the history (a failure here changes nothing), and backs up `messages.db` as `messages.db.old`. The backup is a hard link, else a copy made as `messages.db.old.tmp`, verified and renamed. It never overwrites an existing backup. A fresh database (built as `messages.db.new`) replaces the original by rename. The bot's own messages are imported first, then human messages oldest first, then a vector sync. Nothing is deleted.
+2. With `--yes` it checks the state, then runs a preflight before reading anything: Chroma must answer, one test embedding request must succeed with the configured size, and the database directory must be writable. All failures are listed in one message and nothing is fetched or changed. It then reads the history (a failure here changes nothing), and backs up `messages.db` as `messages.db.old`. The backup is a hard link, else a copy made as `messages.db.old.tmp`, verified and renamed. It never overwrites an existing backup. A fresh database (built as `messages.db.new`) replaces the original by rename. The bot's own messages are imported first, then human messages oldest first, then a vector sync. Nothing is deleted.
 3. It prints the backup path, the generation, a comparison with the old database (counts, ids missing in the new one, ids whose content changed) and the next steps.
 
 | Data | In the new database |

@@ -23,7 +23,9 @@ const seedOld = (file) => {
   db.close();
 };
 
-const setup = (t, { status = { state: 'ready', reason: null }, historyError = null, verifyError = null } = {}) => {
+const setup = (t, {
+  status = { state: 'ready', reason: null }, historyError = null, verifyError = null, heartbeatError = null,
+} = {}) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dpt-reimport-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const databasePath = path.join(dir, 'messages.db');
@@ -68,7 +70,15 @@ const setup = (t, { status = { state: 'ready', reason: null }, historyError = nu
   };
   const reimporter = createReimporter({
     config: { ...config, storage: { ...config.storage, databasePath } },
-    vendor: { Client: discord.Client },
+    vendor: {
+      Client: discord.Client,
+      ChromaClient: class {
+        async heartbeat() { events.push('preflight'); if (heartbeatError) throw heartbeatError; }
+      },
+      OpenAIEmbeddingFunction: class {
+        async generate() { return [Array(config.embedding.dimensions).fill(0)]; }
+      },
+    },
     data: { users: USERS, pingCache: PING_CACHE },
     clock: { now: () => BASE_TIME, sleep: async () => {}, setTimeout, clearTimeout },
     logger,
@@ -104,7 +114,7 @@ test('applying switches first, then builds, carries over, imports, syncs and onl
   const { reimporter, events, calls, discord } = setup(t);
   const report = await reimporter.run({ yes: true });
   assert.deepEqual(events, [
-    'inspect', 'prepare', 'backup', 'swap', 'build', 'connect-vectors', 'import', 'sync', 'meta:reimport_completed_at',
+    'inspect', 'preflight', 'prepare', 'backup', 'swap', 'build', 'connect-vectors', 'import', 'sync', 'meta:reimport_completed_at',
   ]);
   assert.deepEqual(calls.prepare, { generation: buildGeneration(BASE_TIME), startedAt: BASE_TIME });
   assert.equal(calls.meta.get('reimport_completed_at'), String(BASE_TIME));
@@ -145,7 +155,7 @@ test('the comparison counts ids deleted and edited since the backup', async (t) 
 test('a failed history read changes nothing', async (t) => {
   const { reimporter, events, discord } = setup(t, { historyError: new Error('discord down') });
   await assert.rejects(reimporter.run({ yes: true }), /discord down/);
-  assert.deepEqual(events, ['inspect']);
+  assert.deepEqual(events, ['inspect', 'preflight']);
   assert.equal(discord.state.destroyed, 1);
 });
 
@@ -175,10 +185,10 @@ test('resuming before the swap only swaps; resuming in progress switches nothing
   const swap = setup(t, { status: { state: 'interrupted-before-swap', reason: null } });
   await swap.reimporter.run({ yes: true, resume: true });
   // Spec 32: the backup is verified right after inspect and again immediately before the swap.
-  assert.deepEqual(swap.events.slice(0, 5), ['inspect', 'verify', 'verify', 'swap', 'build']);
+  assert.deepEqual(swap.events.slice(0, 6), ['inspect', 'verify', 'preflight', 'verify', 'swap', 'build']);
   const progress = setup(t, { status: { state: 'in-progress', reason: null } });
   const report = await progress.reimporter.run({ yes: true, resume: true });
-  assert.deepEqual(progress.events.slice(0, 2), ['inspect', 'build']);
+  assert.deepEqual(progress.events.slice(0, 3), ['inspect', 'preflight', 'build']);
   assert.equal(report.state, 'in-progress');
 });
 
@@ -198,4 +208,27 @@ test('a failing sync leaves the run incomplete', async (t) => {
   container.vectorSync.run = async () => { throw new Error('chroma down'); };
   await assert.rejects(reimporter.run({ yes: true }), /chroma down/);
   assert.equal(calls.meta.has('reimport_completed_at'), false);
+});
+
+test('an applied run whose preflight fails stops before Discord is contacted or anything is switched', async (t) => {
+  const { reimporter, events, calls, discord } = setup(t, { heartbeatError: new Error('connect ECONNREFUSED') });
+  await assert.rejects(reimporter.run({ yes: true }), /Preflight failed; nothing was fetched or changed[\s\S]*ECONNREFUSED/);
+  assert.deepEqual(events, ['inspect', 'preflight']);
+  assert.equal(calls.clientOptions, undefined);
+  assert.equal(discord.state.destroyed, 0);
+});
+
+test('a resumed applied run is preflighted too', async (t) => {
+  const { reimporter, events } = setup(t, {
+    status: { state: 'in-progress', reason: null }, heartbeatError: new Error('down'),
+  });
+  await assert.rejects(reimporter.run({ yes: true, resume: true }), /Preflight failed/);
+  assert.deepEqual(events, ['inspect', 'preflight']);
+});
+
+test('a dry run is not preflighted', async (t) => {
+  const { reimporter, events } = setup(t, { heartbeatError: new Error('down') });
+  const report = await reimporter.run({});
+  assert.equal(report.applied, false);
+  assert.deepEqual(events, ['inspect']);
 });

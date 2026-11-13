@@ -302,11 +302,19 @@ test('a crash after the backup is finished by --resume', async (t) => {
 
 test('a crash after the swap is finished by --resume', async (t) => {
   const env = await prepared(t);
-  env.fakes.chroma.state.failHeartbeat(new Error('chroma down'));
+  // Chroma answers the preflight and goes down before the import connects, after the swap.
+  let beats = 0;
+  const Reachable = env.vendor.ChromaClient;
+  env.vendor.ChromaClient = class extends Reachable {
+    async heartbeat() {
+      beats += 1;
+      if (beats === 2) throw new Error('chroma down');
+      return super.heartbeat();
+    }
+  };
   await assert.rejects(makeReimporter(env).run({ yes: true }), /chroma down/);
   assert.equal(metaOf(env.databasePath, 'reimport_completed_at'), null);
   assert.equal(rows(env.databasePath, 'SELECT COUNT(*) AS n FROM messages')[0].n, 0);
-  env.fakes.chroma.state.failHeartbeat(null);
   const report = await makeReimporter(env).run({ yes: true, resume: true });
   assert.equal(report.state, 'in-progress');
   assert.equal(rows(env.databasePath, 'SELECT COUNT(*) AS n FROM messages')[0].n, 5);
@@ -382,4 +390,15 @@ test('--resume with an identical (copied) .old proceeds', async (t) => {
   const report = await makeReimporter(env).run({ yes: true, resume: true });
   assert.equal(report.applied, true);
   assert.deepEqual(fileBytes(`${env.databasePath}.old`), bytes);
+});
+
+test('Chroma down before an applied run: the preflight refuses and nothing is fetched or changed', async (t) => {
+  const env = await prepared(t);
+  const before = fs.readFileSync(env.databasePath);
+  env.fakes.chroma.state.failHeartbeat(new Error('connect ECONNREFUSED'));
+  await assert.rejects(makeReimporter(env).run({ yes: true }), /Preflight failed; nothing was fetched or changed/);
+  assert.equal(env.fakes.discord.state.channel.messages.calls.length, 0);
+  assert.deepEqual(fs.readFileSync(env.databasePath), before);
+  assert.equal(fs.existsSync(`${env.databasePath}.old`), false);
+  assert.equal(fs.existsSync(`${env.databasePath}.new`), false);
 });
