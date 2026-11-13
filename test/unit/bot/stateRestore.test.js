@@ -23,7 +23,7 @@ const run = ({ human = null, bots = {}, capped = false, now = 10_000 } = {}) => 
 };
 
 const NATURAL = 'auto,revive,conversation';
-const REPLIES = 'auto,chain,command,conversation';
+const REPLIES = 'auto,chain,command,mention,conversation';
 
 test('no stored human message leaves activity alone but still restores the rate limit', () => {
   const { activity, policy } = run({ bots: { [REPLIES]: { timestamp: 500 } } });
@@ -42,11 +42,11 @@ test('a natural bot message newer than the last human one makes the bot the last
   assert.deepEqual(activity, [{ lastMessageTime: 150, lastWasBot: true }]);
 });
 
-test('chain and command replies restore the rate limit but not the activity', () => {
+test('chain, command and mention replies restore the rate limit but not the activity', () => {
   const { activity, policy, queries } = run({ human: { timestamp: 100 }, bots: { [REPLIES]: { timestamp: 200 } } });
   assert.deepEqual(activity, [{ lastMessageTime: 100, lastWasBot: false }]);
   assert.deepEqual(policy, [{ replyTime: 200 }]);
-  assert.deepEqual(queries, [['auto', 'revive', 'conversation'], ['auto', 'chain', 'command', 'conversation']]);
+  assert.deepEqual(queries, [['auto', 'revive', 'conversation'], ['auto', 'chain', 'command', 'mention', 'conversation']]);
 });
 
 test('a capped catch-up restores the fresh-start activity instead of the stored newest message', () => {

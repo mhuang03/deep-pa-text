@@ -1,7 +1,5 @@
 import { createActivityTracker } from '../bot/activityTracker.js';
 import { createReplyPolicy } from '../bot/replyPolicy.js';
-import { createChainPolicy } from '../bot/chainPolicy.js';
-import { createCommandLimiter } from '../bot/commandLimiter.js';
 import { createChainBuilder } from '../context/chainBuilder.js';
 import { createResponder } from '../bot/responder.js';
 import { createMessageDeleteHandler } from '../bot/handlers/messageDelete.js';
@@ -19,8 +17,6 @@ const buildHandlers = ({ config, data, clock, logger, parts }) => {
   const { ingest, personaSelector } = services;
   const { messageFilter, botMessageStore, messageStore } = storage;
   const { delivery, memberProfiles, botMessageResolver } = discord;
-  const chainPolicy = createChainPolicy({ config, random: clock.random, now: clock.now });
-  const commandLimiter = createCommandLimiter({ config, now: clock.now });
   const deleteHandler = createMessageDeleteHandler({ config, ingest, clock, logger });
   return {
     messageDelete: deleteHandler.onDelete,
@@ -30,11 +26,11 @@ const buildHandlers = ({ config, data, clock, logger, parts }) => {
     }).onUpdate,
     messageCreate: createMessageCreateHandler({
       config, activity, ingest, messageFilter, replyPolicy, personaSelector, responder, logger,
-      botMessageStore, messageStore, botMessageResolver, chainBuilder, chainPolicy,
+      botMessageStore, messageStore, botMessageResolver, chainBuilder, client,
     }),
     replyCommand: createReplyCommandHandler({
       client, config, users: data.users, messageFilter, personaSelector, responder,
-      delivery, replyPolicy, botMessageResolver, commandLimiter, logger,
+      delivery, replyPolicy, botMessageResolver, logger,
     }),
     profileRefresh: createProfileRefresh({ client, config, memberProfiles, logger }),
     reviveTick: createReviveTick({

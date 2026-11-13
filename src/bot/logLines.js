@@ -27,11 +27,13 @@ export const formatCommandRequest = ({ requester, record, logging }) =>
 
 export const joinLines = (lines) => lines.join('\n');
 
-export const formatChainDecision = ({ persona, botTurns, decision }) =>
-  `    [CHAIN: ${persona}, ${botTurns} bot turns, ${decision.reason}${decision.reply ? '' : ', no reply'}]`;
+export const formatChain = ({ persona, botTurns }) => `    [CHAIN: ${persona}, ${botTurns} bot turns]`;
+
+export const formatMentionWithoutTarget = () => '    [MENTION: nothing to reply to]';
 
 const TRIGGER_LABELS = {
   auto: 'auto reply', chain: 'chain reply', command: 'command reply', revive: 'revive', conversation: 'conversation turn',
+  mention: 'mention reply',
 };
 
 // The label of a handler-level error log: which work failed, for whom and where.

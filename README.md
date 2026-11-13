@@ -88,6 +88,7 @@ Every trigger acts only in the configured channel (`PATEXT_CHANNEL_ID`). Bot-aut
 | --- | --- | --- | --- |
 | Auto reply | A human message that passes the content filter and the checks below | Weighted pick (see [Retrieval and prompting](#retrieval-and-prompting)) | Discord reply to the message |
 | Reply chain | A human replies to a bot message whose persona is still in `users.json` | The persona of that bot message | Discord reply to the message |
+| Mention | A human message that pings the bot in its text (`MENTION_REPLIES` on) | The auto-reply pick for the target: weighted likely repliers, never the target's author | Discord reply to the message that pinged |
 | `reply` command | A user picks **Apps -> reply** on a message and chooses a persona in a modal | The modal choice, or the auto-reply pick for `random` | Interaction reply (not a Discord reply to the target) |
 | Revive | A timer finds the channel idle after a human message | Random member | Plain channel message |
 | Scripted conversation | A due revive that wins a roll (see below) | 2 to 5 members whose history fits the topic | Plain channel messages, one persona after another |
@@ -104,11 +105,16 @@ A failure before delivery also hands the channel activity back to the human mess
 
 **Reply chain.**
 - With `CHAIN_REPLIES` on, a reply to a bot message continues the thread when the thread can be built. Otherwise (persona no longer listed, bot message deleted, message dropped by the chain filter) it is treated as any other message.
-- Rate limit and probability do not apply. The first `chain.fullDepth` (3) bot messages in a thread are always answered. Later ones are answered with chance `chain.decay` raised to the number of bot turns beyond that (0.5, 0.25, 0.125, 0.0625). A thread never holds more than `chain.maxBotTurns` (8) bot messages.
-- One chain reply is generated at a time. One user gets at most one per `chain.userCooldownMs`, and at most `chain.maxPerWindow` are accepted per `chain.windowMs`.
+- A chain reply is always sent: no probability, no rate limit, no cap on thread length, no cooldown. See [Manual engagement](#manual-engagement-is-never-limited).
 - With `CHAIN_REPLIES=false` such a message goes through the auto-reply path.
 
-**`reply` command.** It skips the probability, the rate limit and the in-flight guard. A user may start one per `command.userCooldownMs`, and at most `command.maxConcurrent` run at once. A refused invocation gets an ephemeral message. The modal lists at most 24 members plus `random`. With more members the list starts with the default persona and is cut to 24. When the target is a bot message, its persona is the default choice. The submission is acknowledged at once (`deferReply`) before anything slow happens. If the reply fails afterwards, the placeholder is edited to `Could not generate a reply.`
+**Mention.** A message that pings the bot in its text gets a guaranteed reply from the automatically chosen best reply author. The mention is removed and the rest of the message is the target; short text such as `why` is fine. A ping with no other text points at another message: the one it replies to, else the message before it. With nothing to answer, the bot logs `[MENTION: nothing to reply to]` and sends nothing. A reply to a bot message that also pings the bot is a chain reply. The mention Discord adds automatically to a reply does not count. `MENTION_REPLIES=false` turns this off.
+
+**`reply` command.** It skips the probability, the rate limit and the in-flight guard, and is answered every time. The modal lists at most 24 members plus `random`. With more members the list starts with the default persona and is cut to 24. When the target is a bot message, its persona is the default choice. The submission is acknowledged at once (`deferReply`) before anything slow happens. If the reply fails afterwards, the placeholder is edited to `Could not generate a reply.`
+
+### Manual engagement is never limited
+
+Mention replies, reply chains and the `reply` command are things a person chose to do, so nothing caps them: no cooldown, no per-user or per-thread limit, no concurrency limit. Each one costs one LLM call plus a few embedding and vector calls, bounded only by how often people ask. They still arm the 5-minute rate limit for **auto** replies, and they do not count as the bot speaking last.
 
 **Revive.** Checked every `revive.checkIntervalMs` (10 min).
 - It fires only when the last activity was a human message, not a fresh start and not a naturally spawned bot message. That message is more than `revive.dayIdleMs` (3 h) old between 10:00 and 22:59 in `revive.timeZone`, or more than `revive.nightIdleMs` (12 h) old otherwise.
@@ -216,7 +222,7 @@ The profile used at send time was read within the last `profiles.minCheckInterva
 - Webhook messages cannot be native replies. An auto or chain reply therefore starts with `-# ↪ <jump link>` (`discord.webhookReplyLink`). The stored text has no such line.
 - Names are cut to `discord.webhookUsernameMax` code points. Discord rejects names containing `clyde` or `discord`, so such a name is replaced by the username. If that fails too, the message goes out in embed form.
 - If the webhook cannot be obtained or the send fails, the message is delivered in embed form. A failed lookup is retried on the next send.
-- For the `reply` command the acknowledgement is ephemeral, the placeholder reads `Replying as <persona>...` and becomes `Sent as <persona>.`, and the persona message goes to the channel.
+- For the `reply` command the acknowledgement is ephemeral, the placeholder reads `Replying as <persona>...` and becomes `Sent as <persona>.`, and the persona message goes to the channel. With `discord.webhookReplyLink` on, that message starts with the jump link to the message the command was used on, as replies do.
 - Messages already sent keep the name and avatar they were sent with.
 
 ## Operations
@@ -227,7 +233,7 @@ The profile used at send time was read within the last `profiles.minCheckInterva
 
 **Gateway failures.** discord.js reports a disconnect only when the gateway closed for good, for example close code 4004 (bad `DISCORD_BOT_TOKEN`) or 4014 (Message Content intent not enabled). The bot logs the code with a hint and exits 1 instead of idling. Run it under a supervisor (systemd `Restart=on-failure`, pm2, a container restart policy). A supervisor will also restart a bot that exits because Chroma is down, so start Chroma first. Reconnects and resumes are logged at info level.
 
-**Restart continuity.** From the database the bot restores the reply rate limit (newest auto, chain, command or conversation reply, so a restart allows no extra reply) and who spoke last and when (newest human message, or a newer auto reply, revive or conversation turn). A channel that was already quiet is revived at the first check. The miss counter restarts at 0. With an empty database the bot counts as the last speaker.
+**Restart continuity.** From the database the bot restores the reply rate limit (newest auto, chain, command, mention or conversation reply, so a restart allows no extra reply) and who spoke last and when (newest human message, or a newer auto reply, revive or conversation turn). A channel that was already quiet is revived at the first check. The miss counter restarts at 0. With an empty database the bot counts as the last speaker.
 
 **Catch-up.** At ready the bot fetches messages posted after the newest stored one, up to `catchUp.maxMessages`. It imports them like a backfill (corpus, embeddings, own bot messages) and generates no replies. It does nothing on an empty database (use `npm run backfill`). If more than the cap were missed, the oldest are imported, a warning says to run `npm run backfill`, and activity restarts as on a fresh start. A failed fetch is a warning. `CATCH_UP=false` turns it off. A bot message delivered but not recorded before a crash is imported as `imported`, so it does not restore the rate limit.
 
@@ -331,6 +337,7 @@ Credentials are listed under [Setup](#setup). Boolean variables accept `true` or
 | `REPLY_OVERRIDE` | `false` | `true` replies to every message (testing) |
 | `REVIVE_OVERRIDE` | `false` | `true` checks every minute and revives regardless of idle time (testing) |
 | `CHAIN_REPLIES` | `true` | `false` turns off reply chains |
+| `MENTION_REPLIES` | `true` | `false` turns off replies to messages that ping the bot |
 | `CONVERSATIONS` | `true` | `false` turns off scripted conversations |
 | `BURSTS` | `true` | `false` turns off multi-message bursts |
 | `PING_REPLIED_USER` | `true` | `false` stops replies from pinging the author of the message they answer |
@@ -369,15 +376,8 @@ Times are in milliseconds unless the key says otherwise.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `chain.fullDepth` | 3 | Bot messages in a thread that are always answered |
-| `chain.decay` | 0.5 | Answer chance factor per bot turn beyond `fullDepth`. Above 0, below 1 |
-| `chain.maxBotTurns` | 8 | Bot messages a thread may hold |
 | `chain.maxContextTurns` | 12 | Turns sent to the model. Integer, 2 or more |
 | `chain.maxWalkSteps` | 50 | Reply references followed |
-| `chain.userCooldownMs` | 10000 | Per-user spacing of chain replies. 0 or more |
-| `chain.maxPerWindow`, `chain.windowMs` | 6, 600000 | Chain replies accepted per window. Integer 1 or more; above 0 |
-| `command.userCooldownMs` | 30000 | Per-user spacing of `reply` commands. 0 or more |
-| `command.maxConcurrent` | 2 | Commands running at once. Integer, 1 or more |
 | `typing.enabled`, `typing.refreshMs` | true, 8000 | Typing indicator and its refresh |
 
 **`burst`**
@@ -527,7 +527,7 @@ Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are
 | `src/main.js`, `src/container.js`, `src/container/`, `src/vendor.js` | Entry point; the only place services are wired (one builder per layer, plus the default clock); the only place real third-party constructors are collected |
 | `src/config.js`, `src/config/` | Every tunable, strict environment parsing, range validation, required-variable checks, the secret list and the optional `.env` loader |
 | `src/backfill/` | History import, catch-up and the full re-import (steps, guards, database switch, archive reader, plan, comparison, report). Imported only by scripts and the container |
-| `src/bot/` | Triggers and orchestration: the handlers (message create, edit, delete, `reply` command, revive tick, profile refresh), reply, chain, revive and command-limit policies, activity tracker, composer, responder, lifecycle, startup and ready steps, process hooks and state restore. `src/bot/conversation/` holds the conversation policy, planner (topic call, persona draw, turn order) and runner |
+| `src/bot/` | Triggers and orchestration: the handlers (message create, edit, delete, `reply` command, revive tick, profile refresh), reply and revive policies, the mention path, activity tracker, composer, responder, lifecycle, startup and ready steps, process hooks and state restore. `src/bot/conversation/` holds the conversation policy, planner (topic call, persona draw, turn order) and runner |
 | `src/ingest/`, `src/retrieval/`, `src/context/`, `src/profiles/`, `src/llm/`, `src/gifs/`, `src/topics/` | Recording into SQLite and Chroma, vector sync and repair; retrieval and persona choice; transcript and thread builders; member profile checks; prompts, generators (reply, revive and conversation turn), chat client and output cleaning; GIF engines and resolver; the topic bank (sampling, clustering filter, labelling, builder, topic source and neighbourhood fallback) |
 | `src/storage/`, `src/discord/` | SQLite schema, migrations, stores and the read-only inspector, and the Chroma vector store; Discord client, payloads, embeds, delivery, webhooks, the reply modal, command definition, login and error codes |
 | `src/corpus/`, `src/text/`, `src/util/`, `src/userData/`, `src/logger.js` | Content transformers and filter predicates; pure text helpers; small pure helpers; validation of `data/*.json`; the logger |
@@ -546,7 +546,7 @@ Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are
 - `PATEXT_CHANNEL_ID` and `GUILD_ID` default to the values the original bot hard-coded. Set both to point the bot elsewhere.
 - The Klipy content filter stays `off` (`gifs.klipyContentFilter`) and no output token cap is set. Discord's length limit and the reply limits bound what is sent.
 - A human replying to part one of a burst while later parts are pending, and GIF lookups that run one after another across burst parts, are accepted.
-- Discord REST calls rely on discord.js's own request timeout and retries. The `reply` command has no role allow-list: the per-user cooldown and the concurrency cap bound its cost.
+- Discord REST calls rely on discord.js's own request timeout and retries. Mention replies, reply chains and the `reply` command are unlimited by decision, and the command has no role allow-list, so their cost is bounded only by how often people use them.
 - Edits and deletes made while the bot is offline are not seen until a re-import. A re-import does not carry over edit history or soft-delete markers.
 - A dry run of `backfill` may apply additive schema migrations and create empty collections.
 - Recent channel messages, including from people not in `users.json`, are sent to the LLM provider as context.

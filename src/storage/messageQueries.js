@@ -48,13 +48,17 @@ const countContents = ({ db, chunkSize }, { author, contents, before }) => {
   return counts;
 };
 
-const getRaw = ({ statements }, id) => {
-  const row = statements.rawById.get(id);
+// The stored message with its newest revision's text.
+const toRaw = ({ statements }, row) => {
   if (!row) return null;
   const { deleted_at: deletedAt, ...rest } = row;
-  const revision = statements.newestRevision.get(id);
+  const revision = statements.newestRevision.get(rest.id);
   return { ...rest, content: revision?.content ?? rest.content, deleted: deletedAt !== null };
 };
+
+const getRaw = (ctx, id) => toRaw(ctx, ctx.statements.rawById.get(id));
+
+const previousRaw = (ctx, { before, excludeId }) => toRaw(ctx, ctx.statements.previousRaw.get(before, excludeId));
 
 const newestRaw = ({ statements }, { includeDeleted = false } = {}) => {
   const row = (includeDeleted ? statements.newestRaw : statements.newestRawVisible).get();
@@ -76,6 +80,7 @@ export const createMessageQueries = ({ db, statements, chunkSize }) => {
   return {
     pageFiltered: (options) => pageFiltered(ctx, options),
     getRaw: (id) => getRaw(ctx, id),
+    previousRaw: (options) => previousRaw(ctx, options),
     newestRaw: (options) => newestRaw(ctx, options),
     countContents: (options) => countContents(ctx, options),
     getParents: (ids) => getParents(ctx, ids),

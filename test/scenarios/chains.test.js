@@ -140,42 +140,21 @@ async function growThread(world, rounds) {
   for (let i = 0; i < rounds; i += 1) await replyToBot(world, `reply ${i}`);
 }
 
-test('with four bot turns the chance is one half: a roll of 0.4 replies and 0.6 does not', async (t) => {
-  const hit = await newWorld(t, { random: 0 });
-  await growThread(hit, 3);
-  assert.equal(botRows(hit).length, 4);
-  hit.setRandom(0.4);
-  assert.equal((await replyToBot(hit, 'more')).replies.length, 1);
-  await hit.close();
-
-  const miss = await newWorld(t, { random: 0 });
-  await growThread(miss, 3);
-  const calls = miss.llm.calls.length;
-  miss.setRandom(0.6);
-  assert.equal((await replyToBot(miss, 'more')).replies.length, 0);
-  assert.equal(miss.llm.calls.length, calls);
-  assert.equal(botRows(miss).length, 4);
-});
-
-test('a long thread stops at the bot message cap and the prompt holds only the last twelve turns', async (t) => {
+test('a thread keeps being answered at any depth, and the prompt holds only the last twelve turns', async (t) => {
   const world = await newWorld(t, { random: 0 });
-  await growThread(world, 6);
-  assert.equal(botRows(world).length, 7);
+  await growThread(world, 10);
+  assert.equal(botRows(world).length, 11);
   assert.equal(lastRequest(world).length, 14);
   assert.equal(lastRequest(world)[2].role, 'assistant');
   assert.ok(!JSON.stringify(lastRequest(world)).includes(HELLO));
-  await replyToBot(world, 'one more');
-  assert.equal(botRows(world).length, 8);
-  const calls = world.llm.calls.length;
-  const capped = await replyToBot(world, 'and again');
-  assert.equal(capped.replies.length, 0);
-  assert.equal(world.llm.calls.length, calls);
-  assert.ok(world.logs.log.some((args) => String(args[0]).includes('chain-limit')));
+  world.setRandom(0.99);
+  assert.equal((await replyToBot(world, 'and again')).replies.length, 1);
+  assert.equal(botRows(world).length, 12);
 });
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-test('a second reply while a chain reply is generating is declined without an LLM call', async (t) => {
+test('two replies to the same bot message while one is generating are both answered', async (t) => {
   const world = await newWorld(t, { random: 0 });
   await startThread(world);
   const parent = lastBot(world);
@@ -189,15 +168,12 @@ test('a second reply while a chain reply is generating is declined without an LL
   for (let i = 0; i < 50 && world.llm.calls.length < 2; i += 1) await tick();
   const second = world.addHistory({ author: 'dave', content: 'me too', reference: parent.id });
   world.discord.client.emit(Events.MessageCreate, second);
-  for (let i = 0; i < 20; i += 1) await tick();
-  assert.equal(world.llm.calls.length, 2);
+  for (let i = 0; i < 50 && world.llm.calls.length < 3; i += 1) await tick();
+  assert.equal(world.llm.calls.length, 3);
   release('late answer');
   await world.settle();
   assert.equal(first.replies.length, 1);
-  assert.equal(second.replies.length, 0);
-  assert.ok(world.logs.log.some((args) => String(args[0]).includes('chain-busy')));
-  const third = await replyToBot(world, 'ok');
-  assert.equal(third.replies.length, 1);
+  assert.equal(second.replies.length, 1);
 });
 
 test('a chain reply arms the rate limit for unrelated messages', async (t) => {

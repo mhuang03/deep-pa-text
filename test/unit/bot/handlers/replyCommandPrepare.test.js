@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageFlags } from 'discord.js';
 import {
-  isReplyCommand, refuse, prepare, isAllowed, showModal, awaitSubmit,
+  isReplyCommand, refuse, prepare, showModal, awaitSubmit,
 } from '../../../../src/bot/handlers/replyCommandPrepare.js';
 import { REPLY_COMMAND_NAME } from '../../../../src/discord/commands.js';
 import { WRONG_CHANNEL_MESSAGE, NOT_REPLYABLE_MESSAGE } from '../../../../src/discord/replyModal.js';
@@ -40,7 +40,6 @@ const deps = (overrides = {}) => ({
   config,
   botMessageResolver: { resolve: () => null },
   messageFilter: { filterAnyAuthor: (record) => record },
-  commandLimiter: { check: () => ({ allowed: true }) },
   users: [{ username: 'alice' }, { username: 'bob' }],
   logger: { info: () => {} },
   ...overrides,
@@ -74,14 +73,6 @@ test('prepare refuses a target in another channel without naming a channel', asy
   assert.equal(await prepare(deps(), interaction), undefined);
   assert.equal(interaction.replies[0].content, WRONG_CHANNEL_MESSAGE);
   assert.doesNotMatch(WRONG_CHANNEL_MESSAGE, /#/);
-});
-
-test('isAllowed passes a free user and refuses a limited one with the matching text', async () => {
-  assert.equal(await isAllowed(deps(), makeInteraction()), true);
-  const interaction = makeInteraction();
-  const limited = deps({ commandLimiter: { check: () => ({ allowed: false, reason: 'cooldown' }) } });
-  assert.equal(await isAllowed(limited, interaction), false);
-  assert.equal(interaction.replies.length, 1);
 });
 
 test('showModal builds a modal for the invocation and returns its id', async () => {

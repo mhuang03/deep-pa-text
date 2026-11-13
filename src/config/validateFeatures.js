@@ -1,20 +1,11 @@
-import { above, atLeast, between, checkRules, integer } from './rules.js';
+import { above, atLeast, checkRules, integer } from './rules.js';
 
 const MAX_SEARCH_LIMIT = 1000;
 const MAX_PAGE_SIZE = 100;
 const MIN_CONTEXT_TURNS = 2;
 
 export const assertChain = (chain) => checkRules('chain', chain, {
-  decay: between(0, 1, 'both'),
   maxContextTurns: integer(MIN_CONTEXT_TURNS),
-  userCooldownMs: atLeast(0),
-  maxPerWindow: integer(1),
-  windowMs: above(0),
-});
-
-export const assertCommand = (command) => checkRules('command', command, {
-  userCooldownMs: atLeast(0),
-  maxConcurrent: integer(1),
 });
 
 export const assertBurst = (burst) => checkRules('burst', burst, {

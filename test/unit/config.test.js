@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig,
   assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp, assertChroma, assertVector,
-  assertRevive, assertDiscord, assertCommand } from '../../src/config.js';
+  assertRevive, assertDiscord } from '../../src/config.js';
 
 const EXPECTED_DEFAULTS = {
   discord: {
@@ -50,10 +50,9 @@ const EXPECTED_DEFAULTS = {
     frequentLimit: 10, recentBotMessages: 10,
   },
   context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
-  chain: { enabled: true, fullDepth: 3, decay: 0.5, maxBotTurns: 8, maxContextTurns: 12, maxWalkSteps: 50,
-    userCooldownMs: 10000, maxPerWindow: 6, windowMs: 600000,
+  chain: { enabled: true, maxContextTurns: 12, maxWalkSteps: 50,
   },
-  command: { userCooldownMs: 30000, maxConcurrent: 2 },
+  mention: { enabled: true },
   typing: { enabled: true, refreshMs: 8000 },
   burst: {
     enabled: true, maxMessages: 3, windowMs: 30000, minRate: 0.2, minSamples: 20, cacheMs: 3600000,
@@ -217,10 +216,9 @@ test('assertRetrieval rejects an invalid over-fetch factor or near-duplicate thr
   });
 });
 
-test('assertChain validates decay and the context size', () => {
+test('assertChain validates the context size', () => {
   const ok = { ...DEFAULTS.chain };
   assert.equal(assertChain(ok), ok);
-  [0, 1, -0.5, 1.5, NaN].forEach((decay) => assert.throws(() => assertChain({ ...ok, decay }), /chain\.decay/));
   [1, 1.5, 0, NaN].forEach((maxContextTurns) =>
     assert.throws(() => assertChain({ ...ok, maxContextTurns }), /chain\.maxContextTurns/));
   assert.doesNotThrow(() => assertChain({ ...ok, maxContextTurns: 2 }));
@@ -381,23 +379,16 @@ test('assertReply and assertRevive require a non-negative failure cooldown', () 
   passesFor(assertRevive, revive, 'failureCooldownMs', [0, 1800000]);
 });
 
-test('assertChain validates the chain limits', () => {
-  const chain = loadConfig({}).chain;
-  failsFor(assertChain, chain, 'userCooldownMs', [-1, NaN, Infinity]);
-  failsFor(assertChain, chain, 'maxPerWindow', [0, 1.5, NaN, -1]);
-  failsFor(assertChain, chain, 'windowMs', [0, -1, NaN, Infinity]);
-  passesFor(assertChain, chain, 'userCooldownMs', [0, 10000]);
-  passesFor(assertChain, chain, 'maxPerWindow', [1, 6]);
-  passesFor(assertChain, chain, 'windowMs', [1, 600000]);
+test('manual engagement has no limit keys: chain keeps only its shape, and there is no command section', () => {
+  const config = loadConfig({});
+  assert.deepEqual(Object.keys(config.chain).sort(), ['enabled', 'maxContextTurns', 'maxWalkSteps']);
+  assert.equal(config.command, undefined);
 });
 
-test('assertCommand validates the cooldown and the concurrency', () => {
-  const command = loadConfig({}).command;
-  assert.equal(assertCommand(command), command);
-  failsFor(assertCommand, command, 'userCooldownMs', [-1, NaN, Infinity]);
-  failsFor(assertCommand, command, 'maxConcurrent', [0, 1.5, NaN, -1]);
-  passesFor(assertCommand, command, 'userCooldownMs', [0, 30000]);
-  passesFor(assertCommand, command, 'maxConcurrent', [1, 2]);
+test('MENTION_REPLIES is a strict boolean that defaults to on', () => {
+  assert.equal(loadConfig({}).mention.enabled, true);
+  assert.equal(loadConfig({ MENTION_REPLIES: 'false' }).mention.enabled, false);
+  assert.throws(() => loadConfig({ MENTION_REPLIES: 'off' }), /MENTION_REPLIES/);
 });
 
 test('assertDiscord requires a non-negative integer preview length and assertLlm the post-process retries', () => {

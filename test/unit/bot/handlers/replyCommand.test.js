@@ -2,9 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { MessageFlags } from 'discord.js';
 import { createReplyCommandHandler } from '../../../../src/bot/handlers/replyCommand.js';
-import {
-  createCommandLimiter, COMMAND_COOLDOWN_MESSAGE, COMMAND_BUSY_MESSAGE,
-} from '../../../../src/bot/commandLimiter.js';
 import { loadConfig } from '../../../../src/config.js';
 import { createFakeDiscord } from '../../../support/fakes/discord.js';
 import { GENERATION_FAILED_MESSAGE } from '../../../../src/discord/replyModal.js';
@@ -13,7 +10,7 @@ import { USERS } from '../../../support/fixtures.js';
 const DEFER = { flags: MessageFlags.Ephemeral };
 
 const setup = ({
-  target = null, failCompose = false, resolveBot = () => null, armNoticeFailure = false, limiter = null,
+  target = null, failCompose = false, resolveBot = () => null, armNoticeFailure = false,
   users = USERS, pickReplier = null,
 } = {}) => {
   const events = [];
@@ -23,7 +20,6 @@ const setup = ({
   const discord = createFakeDiscord();
   const message = target ?? discord.makeMessage({ author: 'bob', content: 'a replyable message' });
   const config = loadConfig({});
-  const commandLimiter = limiter ?? createCommandLimiter({ config, now: () => time.now });
   const deps = {
     client: {
       guilds: { fetch: async (id) => (events.push(['guildFetch', id]), order.push('guildFetch'), discord.state.guild) },
@@ -52,7 +48,6 @@ const setup = ({
         embeds: [{ author: persona, thinking: true }], allowedMentions: { parse: [] },
       }),
     },
-    commandLimiter,
     replyPolicy: { noteReply: (arg) => events.push(['noteReply', arg]) },
     botMessageResolver: { resolve: (m) => resolveBot(m) },
     logger: { info: (m) => logs.info.push(m), error: (...a) => logs.error.push(a) },
@@ -68,7 +63,7 @@ const setup = ({
     return modal;
   };
   return {
-    handler: createReplyCommandHandler(deps), command, events, order, logs, discord, message, commandLimiter, time, config,
+    handler: createReplyCommandHandler(deps), command, events, order, logs, discord, message, time, config,
   };
 };
 
@@ -161,8 +156,8 @@ test('only logs when the failure notice itself cannot be sent', async () => {
   assert.equal(logs.error.length, 2);
 });
 
-test('a failed acknowledgement is logged, sends nothing else and frees the limiter', async () => {
-  const { handler, command, events, logs, commandLimiter } = setup();
+test('a failed acknowledgement is logged and sends nothing else', async () => {
+  const { handler, command, events, logs } = setup();
   const taken = command.awaitModalSubmit;
   command.awaitModalSubmit = async (options) => {
     const modal = await taken(options);
@@ -173,10 +168,6 @@ test('a failed acknowledgement is logged, sends nothing else and frees the limit
   const submitted = await command.submit({ author: 'bob' });
   assert.deepEqual([submitted.edits, submitted.replies, submitted.deferrals, events], [[], [], [], []]);
   assert.equal(logs.error.length, 1);
-  assert.equal(commandLimiter.check('another-user').allowed, true);
-  assert.equal(commandLimiter.begin('third-user').allowed, true);
-  assert.equal(commandLimiter.begin('fourth-user').allowed, true);
-  assert.equal(commandLimiter.begin('fifth-user').allowed, false);
 });
 
 test('a failed placeholder still gets the failure notice and no reply is generated', async () => {
@@ -261,58 +252,15 @@ test('acknowledges before choosing the persona and before any guild lookup', asy
   assert.deepEqual(order.slice(0, 3), ['deferReply', 'guildFetch', 'pickReplier']);
 });
 
-test('refuses an invocation inside the user cooldown with an ephemeral message and no modal', async () => {
-  const { handler, command, commandLimiter } = setup();
-  commandLimiter.begin('user-dave');
-  commandLimiter.end();
-  await (await run(handler, command)).done;
-  assert.deepEqual(command.replies, [{
-    content: COMMAND_COOLDOWN_MESSAGE, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
-  }]);
-  assert.equal(command.modal, null);
-});
-
-test('refuses an invocation while the command is busy', async () => {
-  const { handler, command, commandLimiter } = setup();
-  commandLimiter.begin('u1');
-  commandLimiter.begin('u2');
-  await (await run(handler, command)).done;
-  assert.equal(command.replies[0].content, COMMAND_BUSY_MESSAGE);
-  assert.equal(command.modal, null);
-});
-
-test('refuses a submission that loses the claim race with an ephemeral reply and no deferral', async () => {
-  const { handler, command, commandLimiter, events } = setup();
+test('the same user invoking the command twice in a row is answered both times', async () => {
+  const { handler, command, events, discord, message } = setup();
   await run(handler, command);
-  commandLimiter.begin('user-dave');
-  commandLimiter.end();
-  const submitted = await command.submit({ author: 'bob' });
-  assert.deepEqual(submitted.deferrals, []);
-  assert.deepEqual(submitted.replies, [{
-    content: COMMAND_COOLDOWN_MESSAGE, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
-  }]);
-  assert.deepEqual(events, []);
-});
-
-test('a submission refused as busy is told so and generates nothing', async () => {
-  const { handler, command, commandLimiter, events } = setup();
-  await run(handler, command);
-  commandLimiter.begin('u1');
-  commandLimiter.begin('u2');
-  const submitted = await command.submit({ author: 'bob' });
-  assert.equal(submitted.replies[0].content, COMMAND_BUSY_MESSAGE);
-  assert.deepEqual(events, []);
-});
-
-test('the limiter is released after a successful reply and after a failed one', async () => {
-  for (const failCompose of [false, true]) {
-    const { handler, command, commandLimiter } = setup({ failCompose });
-    await run(handler, command);
-    await command.submit({ author: 'bob' });
-    assert.equal(commandLimiter.begin('x').allowed, true);
-    assert.equal(commandLimiter.begin('y').allowed, true);
-    assert.equal(commandLimiter.begin('z').allowed, false, 'only the two probes are active');
-  }
+  await command.submit({ author: 'bob' });
+  const again = discord.makeReplyCommand({ target: message, user: 'dave' });
+  await run(handler, again);
+  await again.submit({ author: 'bob' });
+  assert.equal(events.filter((e) => e[0] === 'respond').length, 2);
+  assert.deepEqual([command.replies, again.replies], [[], []]);
 });
 
 test('the modal preview is cut to the configured number of characters', async () => {

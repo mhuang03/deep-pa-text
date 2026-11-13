@@ -1,11 +1,10 @@
 import { formatFailure } from '../logLines.js';
 import {
-  isReplyCommand, prepare, isAllowed, showModal, awaitSubmit,
+  isReplyCommand, prepare, showModal, awaitSubmit,
 } from './replyCommandPrepare.js';
 import { answer } from './replyCommandAnswer.js';
 
 const run = async (deps, interaction) => {
-  if (!await isAllowed(deps, interaction)) return;
   const prepared = await prepare(deps, interaction);
   if (!prepared) return;
   const modalId = await showModal(deps, interaction, prepared);

@@ -73,6 +73,16 @@ test('a reply gets the jump-link line above the content', async () => {
   assert.equal(REPLY_LINK_PREFIX, '-# ↪ ');
 });
 
+test('a command reply links the message the command was used on; a follow-up part does not', async () => {
+  const { delivery, events } = setup();
+  const interaction = { editReply: async () => {} };
+  await delivery.deliver(request({ type: 'interaction', interaction, replyTo: { url: 'https://discord.test/m/7' } }));
+  assert.equal(sentPayload(events).content, `${REPLY_LINK_PREFIX}https://discord.test/m/7\nhello`);
+  const plain = setup();
+  await plain.delivery.deliver(request({ type: 'interaction', interaction }));
+  assert.equal(sentPayload(plain.events).content, 'hello');
+});
+
 test('the reply link is omitted when webhookReplyLink is off or the via is not a reply', async () => {
   const { delivery, events } = setup();
   await delivery.deliver(request({ type: 'followUp', interaction: { editReply: async () => {} } }));

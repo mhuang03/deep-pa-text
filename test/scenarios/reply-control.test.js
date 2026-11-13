@@ -4,7 +4,6 @@ import { MessageFlags } from 'discord.js';
 import { createWorld } from '../support/world.js';
 import { BASE_TIME } from '../support/fixtures.js';
 import { GENERATION_FAILED_MESSAGE } from '../../src/discord/replyModal.js';
-import { COMMAND_COOLDOWN_MESSAGE, COMMAND_BUSY_MESSAGE } from '../../src/bot/commandLimiter.js';
 
 const SECOND = 1000;
 const MINUTE = 60_000;
@@ -172,34 +171,30 @@ test('a failed revive restores the activity and is retried only after 30 minutes
   assert.equal(world.discord.channel.sent.length, 1);
 });
 
-test('seven chain replies within 10 minutes across threads: six answered, the seventh throttled', async (t) => {
+test('chain replies are never throttled: seven across threads within a minute are all answered', async (t) => {
   const world = await newWorld(t);
   const authors = ['alice', 'bob', 'carol', 'dave', 'alice', 'bob', 'carol'];
   const replies = [];
   for (const [index, author] of authors.entries()) {
     insertBot(world, `b${index}`);
     replies.push(await replyTo(world, `b${index}`, author));
-    await world.advance(11 * SECOND);
+    await world.advance(SECOND);
   }
-  assert.deepEqual(replies.map((m) => m.replies.length), [1, 1, 1, 1, 1, 1, 0]);
-  assert.ok(logged(world, 'chain-throttled'));
+  assert.deepEqual(replies.map((m) => m.replies.length), [1, 1, 1, 1, 1, 1, 1]);
 });
 
-test('the same user replying to bot messages 3 s apart is refused the second time while another user is answered', async (t) => {
+test('the same user replying to bot messages seconds apart is answered every time', async (t) => {
   const world = await newWorld(t);
   ['b1', 'b2', 'b3'].forEach((id) => insertBot(world, id));
   const first = await replyTo(world, 'b1', 'alice');
   await world.advance(3 * SECOND);
   const second = await replyTo(world, 'b2', 'alice');
-  const other = await replyTo(world, 'b3', 'dave');
-  assert.deepEqual([first, second, other].map((m) => m.replies.length), [1, 0, 1]);
-  assert.ok(logged(world, 'chain-user-cooldown'));
-  await world.advance(10 * SECOND);
-  assert.equal((await replyTo(world, 'b2', 'alice')).replies.length, 1);
+  const third = await replyTo(world, 'b3', 'alice');
+  assert.deepEqual([first, second, third].map((m) => m.replies.length), [1, 1, 1]);
 });
 
 test('a chain reply whose send fails arms the rate limit so the next chain reply costs no LLM call', async (t) => {
-  const world = await newWorld(t, { random: 0, config: { chain: { userCooldownMs: 0 } } });
+  const world = await newWorld(t, { random: 0 });
   insertBot(world, 'b1');
   const failing = world.discord.makeMessage({ author: 'alice', content: WHY, reference: 'b1' });
   failing.failReplies(new Error('Unknown Message'));
@@ -213,50 +208,26 @@ test('a chain reply whose send fails arms the rate limit so the next chain reply
   assert.ok(logged(world, 'rate limited'));
 });
 
-test('a second command by the same user within 30 s gets an ephemeral cooldown message and no modal', async (t) => {
+test('the command is never limited: the same user twice in a row and three users at once are all answered', async (t) => {
   const world = await newWorld(t);
   const first = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'alice' });
   await first.submit({ author: 'bob' });
   const second = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'alice' });
-  assert.equal(second.modal, null);
-  assert.deepEqual(second.replies, [{
-    content: COMMAND_COOLDOWN_MESSAGE, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
-  }]);
-  await world.advance(30 * SECOND);
-  const third = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'alice' });
-  assert.notEqual(third.modal, null);
-  await third.timeout();
-});
+  assert.notEqual(second.modal, null);
+  assert.deepEqual(second.replies, []);
+  assert.equal((await second.submit({ author: 'bob' })).edits.length, 2);
 
-test('with two commands in progress the third user gets the busy message', async (t) => {
-  const world = await newWorld(t);
-  const releases = [world.llm.hold(), world.llm.hold()];
-  const a = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'alice' });
-  const b = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'bob' });
-  await a.submit({ author: 'carol' });
-  await b.submit({ author: 'dave' });
-  const c = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'carol' });
-  assert.equal(c.modal, null);
-  assert.equal(c.replies[0].content, COMMAND_BUSY_MESSAGE);
+  const releases = [world.llm.hold(), world.llm.hold(), world.llm.hold()];
+  const commands = [];
+  for (const user of ['alice', 'bob', 'carol']) {
+    commands.push(await world.openReplyCommand({ target: { content: REPLYABLE }, user }));
+  }
+  const submissions = [];
+  for (const command of commands) submissions.push(await command.submit({ author: 'dave' }));
+  assert.deepEqual(submissions.map((submitted) => submitted.deferrals.length), [1, 1, 1]);
   releases.forEach((release) => release());
   await world.settle();
-  const again = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'carol' });
-  assert.notEqual(again.modal, null);
-  await again.timeout();
-});
-
-test('a submission that loses the limiter race is refused ephemerally without a deferral', async (t) => {
-  const world = await newWorld(t, { config: { command: { maxConcurrent: 1 } } });
-  const release = world.llm.hold();
-  const a = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'alice' });
-  const b = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'bob' });
-  await a.submit({ author: 'carol' });
-  const refused = await b.submit({ author: 'dave' });
-  assert.deepEqual(refused.deferrals, []);
-  assert.equal(refused.replies[0].content, COMMAND_BUSY_MESSAGE);
-  assert.equal(world.llm.calls.length, 1);
-  release();
-  await world.settle();
+  assert.deepEqual(submissions.map((submitted) => submitted.edits.length), [2, 2, 2]);
 });
 
 test('the command defers before the embedding for random is requested', async (t) => {
@@ -293,8 +264,8 @@ test('a failing embedding for random is reported through editReply after the ack
   assert.deepEqual(world.errors, []);
 });
 
-test('a deferReply that rejects is logged, sends nothing and releases the limiter', async (t) => {
-  const world = await newWorld(t, { config: { command: { maxConcurrent: 1, userCooldownMs: 0 } } });
+test('a deferReply that rejects is logged and sends nothing; the next command works', async (t) => {
+  const world = await newWorld(t);
   const first = await world.openReplyCommand({ target: { content: REPLYABLE }, user: 'alice' });
   const failed = await first.submit({ author: 'bob', failDefer: { error: new Error('Unknown interaction') } });
   assert.deepEqual([failed.edits, failed.replies, failed.deferrals], [[], [], []]);

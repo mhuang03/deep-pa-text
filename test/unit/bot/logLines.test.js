@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   formatReceived, formatNoReply, formatNotReplyable, formatReply, formatRevive,
-  formatCommandRequest, formatChainDecision, formatFailure, formatConversation, joinLines,
+  formatCommandRequest, formatChain, formatMentionWithoutTarget, formatFailure, formatConversation, joinLines,
 } from '../../../src/bot/logLines.js';
 
 const logging = { locale: 'en-US', timeZone: 'America/Chicago' };
@@ -38,15 +38,11 @@ test('joins lines with newlines', () => {
   assert.equal(joinLines(['a', 'b']), 'a\nb');
 });
 
-test('formats chain decisions with persona, bot turns and reason', () => {
-  assert.equal(
-    formatChainDecision({ persona: 'bob', botTurns: 4, decision: { reply: false, reason: 'chain-roll' } }),
-    '    [CHAIN: bob, 4 bot turns, chain-roll, no reply]',
-  );
-  assert.equal(
-    formatChainDecision({ persona: 'bob', botTurns: 1, decision: { reply: true, reason: 'chain-guaranteed' } }),
-    '    [CHAIN: bob, 1 bot turns, chain-guaranteed]',
-  );
+test('formats the chain line with persona and bot turns, and the mention line with nothing to answer', () => {
+  assert.equal(formatChain({ persona: 'bob', botTurns: 4 }), '    [CHAIN: bob, 4 bot turns]');
+  assert.equal(formatMentionWithoutTarget(), '    [MENTION: nothing to reply to]');
+  assert.equal(formatFailure({ what: 'Error processing message', messageId: '9', trigger: 'mention', persona: 'bob' }),
+    'Error processing message 9 (mention reply as bob):');
 });
 
 test('formatFailure names the work, message, trigger, persona and stage', () => {

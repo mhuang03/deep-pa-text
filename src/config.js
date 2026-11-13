@@ -12,7 +12,7 @@ export { createConfigError, isConfigError } from './config/errors.js';
 export {
   assertGifs, assertLlm, assertReply, assertRevive, assertDiscord, assertFilter, assertStorage, assertRetrieval, assertPersona, assertChroma,
 } from './config/validate.js';
-export { assertChain, assertCommand, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector } from './config/validateFeatures.js';
+export { assertChain, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector } from './config/validateFeatures.js';
 export { assertTopics } from './config/validateTopics.js';
 export { assertConversation } from './config/validateConversation.js';
 
@@ -36,7 +36,7 @@ const buildConfig = (env) => ({
   gifs: check.assertGifs(feature.buildGifs(env)),
   context: feature.buildContext(),
   chain: checkFeature.assertChain(feature.buildChain(env)),
-  command: checkFeature.assertCommand(feature.buildCommand()),
+  mention: feature.buildMention(env),
   typing: feature.buildTyping(),
   burst: checkFeature.assertBurst(feature.buildBurst(env)),
   profiles: checkFeature.assertProfiles(feature.buildProfiles()),

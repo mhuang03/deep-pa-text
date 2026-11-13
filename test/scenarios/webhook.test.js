@@ -162,7 +162,7 @@ test('the reply command defers ephemerally, shows a placeholder, sends via the w
   assert.deepEqual(submitted.replies, []);
   const [payload] = hookSends(world);
   assert.equal(payload.username, 'bob-display');
-  assert.ok(!payload.content.startsWith(REPLY_LINK_PREFIX));
+  assert.ok(payload.content.startsWith(`${REPLY_LINK_PREFIX}${command.targetMessage.url}\n`));
   assert.deepEqual(submitted.edits, [
     { content: 'Replying as bob…', allowedMentions: { parse: [] } },
     { content: 'Sent as bob.', allowedMentions: { parse: [] } },

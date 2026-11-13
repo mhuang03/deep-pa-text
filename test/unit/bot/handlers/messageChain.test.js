@@ -29,15 +29,10 @@ test('buildChain needs a bot parent, a replyable target and a buildable chain', 
   assert.deepEqual(buildChain(deps(), record, { id: 'p' }), { chain, target: record });
 });
 
-const setup = ({ decision = { reply: true, reason: 'chain-guaranteed' } } = {}) => {
+const setup = () => {
   const events = [];
   const infos = [];
   const deps = {
-    chainPolicy: {
-      decide: (arg) => { events.push(['decide', arg]); return decision; },
-      begin: (arg) => events.push(['begin', arg]),
-      end: () => events.push('end'),
-    },
     replyPolicy: { noteReply: (arg) => events.push(['noteReply', arg]), noteFailure: () => {} },
     responder: {
       respond: async (request) => { events.push(['respond', request.trigger, request.persona]); request.onDelivered(); return { response: 'yo' }; },
@@ -49,27 +44,23 @@ const setup = ({ decision = { reply: true, reason: 'chain-guaranteed' } } = {}) 
   return { deps, events, infos, message, threaded };
 };
 
-test('a refused chain decision is logged and nothing starts', async () => {
-  const { deps, events, infos, message, threaded } = setup({ decision: { reply: false, reason: 'chain-limit' } });
-  await chainReply(deps, { message, threaded, lines: ['received'] });
-  assert.deepEqual(events.map((e) => (Array.isArray(e) ? e[0] : e)), ['decide']);
-  assert.equal(infos.length, 1);
-  assert.match(infos[0], /received\n.*chain-limit, no reply/);
-});
-
-test('an accepted chain reply begins, responds as the persona, logs and ends', async () => {
+test('a chain reply responds as the persona, arms the auto-reply limit and logs', async () => {
   const { deps, events, infos, message, threaded } = setup();
   await chainReply(deps, { message, threaded, lines: ['received'] });
-  assert.deepEqual(events.map((e) => (Array.isArray(e) ? e[0] : e)), ['decide', 'begin', 'respond', 'noteReply', 'end']);
-  assert.deepEqual(events[0][1], { persona: 'bob', turns: [], botTurns: 2, userId: 'u1' });
-  assert.deepEqual(events[1][1], { userId: 'u1' });
-  assert.deepEqual(events[3][1], { resetMisses: false });
-  assert.match(infos[0], /\[REPLY\] bob: yo/);
+  assert.deepEqual(events, [['respond', 'chain', 'bob'], ['noteReply', { resetMisses: false }]]);
+  assert.match(infos[0], /received\n {4}\[CHAIN: bob, 2 bot turns\]\n {4}\[REPLY\] bob: yo$/);
 });
 
-test('the chain slot is released when the response fails', async () => {
+test('a chain reply is never refused, whatever the thread length', async () => {
   const { deps, events, message, threaded } = setup();
+  const long = { ...threaded, chain: { ...threaded.chain, botTurns: 99 } };
+  await chainReply(deps, { message, threaded: long, lines: [] });
+  await chainReply(deps, { message, threaded: long, lines: [] });
+  assert.equal(events.filter((e) => e[0] === 'respond').length, 2);
+});
+
+test('a failed response propagates', async () => {
+  const { deps, message, threaded } = setup();
   deps.responder.respond = async () => { throw new Error('boom'); };
   await assert.rejects(chainReply(deps, { message, threaded, lines: [] }), /boom/);
-  assert.equal(events.at(-1), 'end');
 });

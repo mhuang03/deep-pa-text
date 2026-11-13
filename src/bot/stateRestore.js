@@ -1,7 +1,7 @@
 import { TRIGGERS } from '../util/triggers.js';
 
 const NATURAL = [TRIGGERS.AUTO, TRIGGERS.REVIVE, TRIGGERS.CONVERSATION];
-const REPLIES = [TRIGGERS.AUTO, TRIGGERS.CHAIN, TRIGGERS.COMMAND, TRIGGERS.CONVERSATION];
+const REPLIES = [TRIGGERS.AUTO, TRIGGERS.CHAIN, TRIGGERS.COMMAND, TRIGGERS.MENTION, TRIGGERS.CONVERSATION];
 
 const buildActivity = ({ lastHuman, lastNatural }) => {
   if (lastNatural && lastNatural.timestamp > lastHuman.timestamp) {

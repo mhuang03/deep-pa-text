@@ -24,6 +24,12 @@ export const PREVIOUS_VISIBLE = `
 export const RAW_BY_ID = `
   SELECT id, author, content, timestamp, reference, deleted_at FROM messages WHERE id = ?
 `;
+// The newest visible raw message at or before a time, other than one given message.
+export const PREVIOUS_RAW = `
+  SELECT id, author, content, timestamp, reference, deleted_at FROM messages
+  WHERE deleted_at IS NULL AND timestamp <= ? AND id != ?
+  ORDER BY timestamp DESC, id DESC LIMIT 1
+`;
 export const HAS_RAW = 'SELECT 1 AS found FROM messages WHERE id = ?';
 // Keyset pagination over visible corpus rows; the (timestamp, id) cursor is exclusive.
 export const PAGE_FILTERED = `

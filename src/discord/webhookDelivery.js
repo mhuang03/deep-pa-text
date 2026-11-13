@@ -22,10 +22,18 @@ const fallbackRequest = (request) => (EPHEMERAL_VIAS.includes(request.via.type)
   ? { ...request, via: { type: 'channel', channel: request.channel } }
   : request);
 
+// A webhook message cannot be a native reply, so the message it answers is linked instead:
+// the replied message, or the one a command was used on.
+const answeredMessage = (via) => {
+  if (via.type === 'reply') return via.message;
+  return via.type === 'interaction' ? via.replyTo : null;
+};
+
 const withReplyLink = ({ config }, content, via) => {
   const { webhookReplyLink, maxMessageLength, truncateLookbackChars } = config.discord;
-  if (via.type !== 'reply' || !webhookReplyLink || !via.message?.url) return content;
-  return truncateForDiscord(`${REPLY_LINK_PREFIX}${via.message.url}\n${content}`, {
+  const url = answeredMessage(via)?.url;
+  if (!webhookReplyLink || !url) return content;
+  return truncateForDiscord(`${REPLY_LINK_PREFIX}${url}\n${content}`, {
     maxLength: maxMessageLength, lookback: truncateLookbackChars,
   });
 };

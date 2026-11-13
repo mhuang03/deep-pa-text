@@ -38,19 +38,12 @@ export const buildContext = () => ({
 
 export const buildChain = (env) => ({
   enabled: parseBoolean(env, 'CHAIN_REPLIES', true),
-  fullDepth: 3,
-  decay: 0.5,
-  maxBotTurns: 8,
   maxContextTurns: 12,
   maxWalkSteps: 50,
-  userCooldownMs: 10000,
-  maxPerWindow: 6,
-  windowMs: 600000,
 });
 
-export const buildCommand = () => ({
-  userCooldownMs: 30000,
-  maxConcurrent: 2,
+export const buildMention = (env) => ({
+  enabled: parseBoolean(env, 'MENTION_REPLIES', true),
 });
 
 export const buildTyping = () => ({

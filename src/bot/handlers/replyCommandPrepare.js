@@ -1,4 +1,4 @@
-// Preparation of the reply command: the courtesy limit check, the target, and the modal.
+// Preparation of the reply command: the target and the modal.
 import { MessageFlags } from 'discord.js';
 import { SAFE_MENTIONS } from '../../discord/payload.js';
 import { toMessageRecord } from '../../discord/messageRecord.js';
@@ -6,7 +6,6 @@ import { REPLY_COMMAND_NAME } from '../../discord/commands.js';
 import {
   buildReplyModal, buildModalId, isModalTimeout, NOT_REPLYABLE_MESSAGE, WRONG_CHANNEL_MESSAGE, MODAL_TIMEOUT_LOG,
 } from '../../discord/replyModal.js';
-import { COMMAND_REFUSALS } from '../commandLimiter.js';
 
 export const isReplyCommand = (interaction) =>
   interaction.isMessageContextMenuCommand() && interaction.commandName === REPLY_COMMAND_NAME;
@@ -31,14 +30,6 @@ export const prepare = async (deps, interaction) => {
     return void (await refuse(interaction, WRONG_CHANNEL_MESSAGE));
   }
   return { target, message, channel: message.channel, defaultAuthor };
-};
-
-// Only a courtesy: the claim that counts is the one made when the modal is submitted.
-export const isAllowed = async ({ commandLimiter }, interaction) => {
-  const verdict = commandLimiter.check(interaction.user.id);
-  if (verdict.allowed) return true;
-  await refuse(interaction, COMMAND_REFUSALS[verdict.reason]);
-  return false;
 };
 
 export const showModal = async ({ users, config }, interaction, prepared) => {

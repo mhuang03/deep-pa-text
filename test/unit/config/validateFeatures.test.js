@@ -1,13 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  assertChain, assertCommand, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector,
+  assertChain, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector,
 } from '../../../src/config/validateFeatures.js';
 import { DEFAULTS } from '../../../src/config.js';
 
 test('the default sections pass their own validators', () => {
   const pairs = [
-    [assertChain, DEFAULTS.chain], [assertCommand, DEFAULTS.command], [assertBurst, DEFAULTS.burst],
+    [assertChain, DEFAULTS.chain], [assertBurst, DEFAULTS.burst],
     [assertProfiles, DEFAULTS.profiles], [assertBackfill, DEFAULTS.backfill], [assertLifecycle, DEFAULTS.lifecycle],
     [assertCatchUp, DEFAULTS.catchUp], [assertVector, DEFAULTS.vector],
   ];
@@ -19,8 +19,7 @@ test('assertBackfill bounds the page size at Discord\'s 100 and requires a compa
   assert.throws(() => assertBackfill({ ...DEFAULTS.backfill, comparisonPageSize: 0 }), /backfill\.comparisonPageSize/);
 });
 
-test('assertChain needs a decay in [0, 1] and at least two context turns', () => {
-  assert.throws(() => assertChain({ ...DEFAULTS.chain, decay: 1.1 }), /chain\.decay/);
+test('assertChain needs at least two context turns', () => {
   assert.throws(() => assertChain({ ...DEFAULTS.chain, maxContextTurns: 1 }), /chain\.maxContextTurns/);
 });
 

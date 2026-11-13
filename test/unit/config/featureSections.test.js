@@ -30,7 +30,7 @@ test('buildLogging, buildLifecycle and buildVector name their tunables', () => {
 });
 
 test('every other section builder returns a plain object', () => {
-  [feature.buildContext, feature.buildCommand, feature.buildTyping, feature.buildProfiles].forEach((build) => {
+  [feature.buildContext, () => feature.buildMention({}), feature.buildTyping, feature.buildProfiles].forEach((build) => {
     const section = build();
     assert.equal(Object.getPrototypeOf(section), Object.prototype);
     assert.ok(Object.keys(section).length > 0);

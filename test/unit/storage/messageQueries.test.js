@@ -74,3 +74,20 @@ test('randomMessages, burstStats and the latest lists read through the prepared 
   assert.equal(queries.latestWithReference(10).length, 1);
   assert.equal(queries.randomStarters({ author: 'a', minGapMs: 1, limit: 5 }).length > 0, true);
 });
+
+test('previousRaw is the newest visible message at or before a time, other than the excluded one, with revisions', () => {
+  const { edits, queries } = setup();
+  add(edits, rec('1', 'a', 10, 'first'));
+  add(edits, rec('2', 'b', 20, 'second'));
+  add(edits, rec('3', 'c', 30, 'third'));
+  assert.equal(queries.previousRaw({ before: 30, excludeId: '3' }).id, '2');
+  assert.equal(queries.previousRaw({ before: 30, excludeId: 'other' }).id, '3');
+  edits.softDelete('2', 99);
+  assert.equal(queries.previousRaw({ before: 30, excludeId: '3' }).id, '1');
+  edits.applyEdit({ id: '1', content: 'first, revised', editedAt: 50, filtered: { ...rec('1', 'a', 10), content: 'first, revised' } });
+  assert.deepEqual(
+    queries.previousRaw({ before: 25, excludeId: '3' }),
+    { id: '1', author: 'a', content: 'first, revised', timestamp: 10, reference: null, deleted: false },
+  );
+  assert.equal(queries.previousRaw({ before: 5, excludeId: 'x' }), null);
+});

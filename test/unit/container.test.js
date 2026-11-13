@@ -237,9 +237,10 @@ test('the database is opened with the configured busy timeout', () => {
 
 const PUBLIC_KEYS = {
   messageStore: [
-    'applyEdit', 'burstStats', 'countContents', 'getParents', 'getRaw', 'hasRaw', 'hiddenIds', 'insertFiltered', 'insertRaw',
-    'latestFiltered', 'latestRaw', 'latestWithGif', 'latestWithReference', 'newestRaw', 'pageFiltered', 'randomCorpus', 'randomMessages',
-    'randomStarters', 'randomStartersAll', 'softDelete', 'topicSample', 'transaction',
+    'applyEdit', 'burstStats', 'countContents', 'getParents', 'getRaw', 'hasRaw', 'hiddenIds', 'insertFiltered',
+    'insertRaw', 'latestFiltered', 'latestRaw', 'latestWithGif', 'latestWithReference', 'newestRaw', 'pageFiltered',
+    'previousRaw', 'randomCorpus', 'randomMessages', 'randomStarters', 'randomStartersAll', 'softDelete',
+    'topicSample', 'transaction',
   ],
   vectorStore: ['addReplyRows', 'connect', 'embed', 'fillMetadata', 'getEmbeddings', 'getRecords', 'query', 'upsertMessages'],
   generator: ['generateConversationTurn', 'generateReply', 'generateRevive'],

@@ -10,6 +10,7 @@ const STATEMENTS = {
   hasRaw: sql.HAS_RAW,
   page: sql.PAGE_FILTERED,
   rawById: sql.RAW_BY_ID,
+  previousRaw: sql.PREVIOUS_RAW,
   newestRevision: sql.NEWEST_REVISION,
   anchored: sql.ANCHORED_VISIBLE,
   rowExists: sql.ROW_EXISTS,

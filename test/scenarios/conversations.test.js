@@ -518,7 +518,7 @@ test('a human reply to turn 2 gets a chain reply as turn 2\'s persona that sees 
   assert.match(messages[1].content, /alice: line 1$/);
   assert.equal(messages[2].content, 'line 2');
   assert.equal(messages[3].content, 'dave: why though');
-  assert.ok(infoLogs(world).some((line) => line.includes('0 bot turns, chain-guaranteed')));
+  assert.ok(infoLogs(world).some((line) => line.includes('0 bot turns]')));
 });
 
 test('a human reply to a conversation turn after a long time is still answered, whatever the roll and rate limit', async (t) => {
