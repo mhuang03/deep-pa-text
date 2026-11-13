@@ -62,7 +62,7 @@ export const RANDOM_MESSAGES = `
 // The gap sequence covers visible raw and bot messages: messages the corpus filter dropped still count as
 // activity, and a human message right after a bot message is not a starter. It is computed once and joined
 // by logical id (no OR), so SQLite does not rescan it for every corpus row.
-export const RANDOM_STARTERS = `
+const startersQuery = (columns, authorCondition) => `
   WITH timeline AS (
     SELECT id, timestamp FROM messages WHERE deleted_at IS NULL
     UNION ALL
@@ -71,13 +71,15 @@ export const RANDOM_STARTERS = `
   gaps AS (
     SELECT id, timestamp - LAG(timestamp) OVER (ORDER BY timestamp, id) AS gap FROM timeline
   )
-  SELECT f.content
+  SELECT ${columns}
   FROM filtered_messages f
   JOIN gaps g ON g.id = COALESCE(f.source_id, f.id)
-  WHERE f.author = ? AND f.deleted_at IS NULL AND (g.gap IS NULL OR g.gap > ?)
+  WHERE ${authorCondition}f.deleted_at IS NULL AND (g.gap IS NULL OR g.gap > ?)
   ORDER BY RANDOM() LIMIT ?
 `;
-// Measured on the raw table: the corpus filter drops the short messages bursts are made of.
+export const RANDOM_STARTERS = startersQuery('f.content', 'f.author = ? AND ');
+// The same sequence for every author, for the topic bank's second source of openers.
+export const RANDOM_STARTERS_ALL = startersQuery('f.author, f.content', '');
 export const BURST_STATS = `
   SELECT COUNT(*) AS samples, COALESCE(AVG(is_burst), 0) AS rate FROM (
     SELECT author,

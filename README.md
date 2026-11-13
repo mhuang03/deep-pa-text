@@ -176,9 +176,10 @@ SQLite file `messages.db` (source of truth):
 | `bot_messages` | Every message the bot sent and Discord accepted: `id`, `persona`, `content` (corpus form, GIF tokens kept), `timestamp`, `reference` (the message it answered, null for a revive), `trigger` (`auto`, `command`, `revive`, `chain` or `imported`), `deleted_at`. One row per burst part. A failed insert is logged and does not affect the reply |
 | `user_profiles` | Append-only observations of members' Discord profiles: `username`, `user_id`, `display_name`, `avatar_url`, `observed_at`. The newest row per user is current |
 | `message_revisions` | Append-only edit history: `message_id`, `content`, `edited_at` |
+| `topic_builds`, `topics`, `topic_authors`, `topic_messages` | The topic bank (see [Topic bank](#topic-bank)): one `topic_builds` row per completed build, and per topic its label, summary, size, cohesion, median timestamp, authors with their share, and the corpus ids of its representative messages. Append-only: a build adds rows, and only `topics.deleted_at` (set by `--hide`) is ever updated |
 | `meta` | Installation facts, written once and never overwritten. `chroma_generation` names the Chroma generation. `reimport_started_at` and `reimport_completed_at` mark a re-import |
 
-Indexes cover corpus timestamp, author and content (frequency counts), `source_id`, bot message timestamp and raw `(timestamp, id)`. Migrations are additive and idempotent, run on every non-read-only open, and work on a database from any earlier version.
+Indexes cover corpus timestamp, author and content (frequency counts), `source_id`, bot message timestamp, raw `(timestamp, id)` and the topics of a build. Migrations are additive and idempotent, run on every non-read-only open, and work on a database from any earlier version.
 
 **Soft deletes and edits.** Nothing is removed or overwritten. A message has one logical id, its Discord id. A corpus row's logical id is `COALESCE(source_id, id)`, and `reference` columns hold logical ids.
 - A delete sets `deleted_at` on the raw row, on every corpus row of that logical id, and on the `bot_messages` row if the bot sent it.
@@ -226,7 +227,7 @@ The profile used at send time was read within the last `profiles.minCheckInterva
 
 ## Scripts
 
-Run from the repo root with `.env` present. Stop the bot before `backfill` and `reimport`: the script and the bot would write the same SQLite file.
+Run from the repo root with `.env` present. Stop the bot before `backfill` and `reimport`: the script and the bot would write the same SQLite file. `topics` only reads Chroma and inserts into its own tables, so it may run while the bot is up.
 
 | Command | What it does |
 | --- | --- |
@@ -237,6 +238,7 @@ Run from the repo root with `.env` present. Stop the bot before `backfill` and `
 | `npm run gif-smoke` | Resolves a sample text through the real GIF APIs. Exits 1 when no GIF key is set or a token stays unresolved |
 | `npm run backfill -- [options]` | Imports channel history and repairs Chroma (below) |
 | `npm run reimport -- [options]` | Rebuilds the database from Discord (below) |
+| `npm run topics -- [options]` | Builds, lists and hides the topic bank (below) |
 
 ### Backfill
 
@@ -255,6 +257,30 @@ Everything is additive and idempotent. The script logs in without starting the b
 - `--sync-vectors` walks the corpus in pages and adds rows missing from Chroma, adds `has_gif` to Chroma rows that lack it (document and embedding unchanged) and adds missing reply rows. Rows with a missing stored document or embedding are skipped and counted. Nothing is removed. In a dry run the sync cannot see rows the import would have added.
 - If a vector call fails during an import, the SQLite rows are already written. Repair with `npm run backfill -- --skip-history --sync-vectors`.
 - A backfill only adds messages that are not stored yet. It does not re-filter old rows, apply offline edits or deletes, or change stored references.
+
+### Topic bank
+
+`npm run topics` builds a list of the subjects this group talks about, for conversations that need something to start from. It clusters message embeddings that are already stored in Chroma (nothing is embedded again), asks the LLM to name each cluster, and appends the result to SQLite. Clustering runs in this script, never in the bot, because k-means on 10,000 messages takes seconds of CPU. Run it once in a while, and again after a large import. At ready the bot logs one line when the bank is empty or older than `topics.maxAgeMs` (90 days). With an empty bank the bot falls back to a neighbourhood search at conversation time.
+
+```
+npm run topics -- [--dry-run] [--max-messages <n>] [--list] [--hide <id>]
+```
+
+| Option | Effect |
+| --- | --- |
+| none | Samples up to `topics.maxMessages` eligible messages, reads their stored embeddings, clusters them, labels each kept cluster with one LLM call and stores the topics. Prints the report |
+| `--dry-run` | Clusters and prints a preview (size, authors, cohesion and five representatives per kept cluster) to tune the thresholds. No LLM call, nothing written. Needs only the embedding key |
+| `--max-messages <n>` | Integer, 1 or more. Overrides `topics.maxMessages` |
+| `--list` | Prints the current bank (newest completed build, visible topics). Needs neither Chroma nor the LLM |
+| `--hide <id>` | Hides one topic and says whether it was found. The row stays, and a later build skips a cluster with the same label |
+
+A build needs `DEEPSEEK_API_KEY` and the embedding key and a running Chroma. It reads Chroma and only inserts into SQLite, so it can run while the bot is up. It costs one LLM call per kept cluster, at most `topics.maxLabelled` (80). With thinking enabled the calls run one after another and can take tens of minutes.
+
+How a build decides what is a topic:
+- **Eligibility.** A message must have at least `minWords` (5) words, `minDistinctWords` (4) distinct words and `minChars` (25) characters, counted on the text without GIF tokens, emoji names, mentions and punctuation, lower-cased, with stretched letters collapsed. Authors not in `data/users.json` are dropped. A phrase that occurs more than `maxPhraseRepeats` (2) times is dropped. A five-word reaction such as `lol yeah that is so true` is still eligible and is left to the cluster rules and the LLM. Text with no spaces between words (Chinese, Japanese) counts as one word and is never eligible.
+- **Clusters.** `round(sqrt(n / clusterDivisor))` clusters, between `minClusters` and `maxClusters`. A cluster is kept with at least `minClusterSize` messages, `minAuthors` distinct authors (at most the number of people in `users.json`), a median length of `minMedianChars`, no author above `maxAuthorShare` of it, and no three-word opening above `maxPrefixShare` of it. The largest `maxLabelled` are labelled.
+- **Labels.** The LLM sees up to `representatives` messages per cluster and may reject a cluster (reactions, logistics, bot commands, private matters, harassment). A duplicate or hidden label is skipped.
+- **A bad run never replaces a good bank.** The new build becomes current only if at least `topics.minTopics` (3) topics were accepted. After `maxConsecutiveFailures` (3) failed LLM calls in a row the run stops with `reason: llm-failing`. Topics already written by such a run stay in the table but are ignored.
 
 ### Reimport
 
@@ -424,6 +450,31 @@ Times are in milliseconds unless the key says otherwise.
 | `vector.repairIntervalMs` | 600000 | Repair period and warning spacing. Above 0 |
 | `vector.repairWindowMs` | 604800000 | How far back the repair looks (7 days). Above 0 |
 
+**`topics`** (no environment overrides)
+
+| Key | Default | Meaning |
+| --- | --- | --- |
+| `topics.maxMessages` | 30000 | Messages sampled per build. Integer, 1 or more |
+| `topics.recentWindowMs`, `recentShare` | 31536000000, 0.6 | Window counted as recent (365 days, above 0) and the share of the sample taken from it (0 to 1) |
+| `topics.sampleOverFetch` | 2 | Each sample statement reads this many times its limit before the filters. Integer, 1 or more |
+| `topics.minWords`, `minDistinctWords`, `minChars` | 5, 4, 25 | Eligibility thresholds. Integers, 1 or more |
+| `topics.maxPhraseRepeats` | 2 | A phrase seen more often is dropped. Integer, 1 or more |
+| `topics.clusterDivisor` | 2 | Clusters are `round(sqrt(n / clusterDivisor))`. Above 0 |
+| `topics.minClusters`, `maxClusters` | 5, 120 | Bounds on the cluster count. Integer, 2 or more, and `maxClusters` at least `minClusters` |
+| `topics.iterations` | 15 | k-means rounds. Integer, 1 or more |
+| `topics.minClusterSize`, `minAuthors` | 15, 3 | Cluster filter. Integers, 2 or more |
+| `topics.minMedianChars` | 40 | Median message length of a cluster. 0 or more |
+| `topics.maxAuthorShare`, `maxPrefixShare` | 0.6, 0.3 | Largest share one author, and one three-word opening, may have in a cluster. 0 to 1 |
+| `topics.maxLabelled` | 80 | Clusters labelled per build, largest first. Integer, 1 or more |
+| `topics.representatives` | 20 | Messages shown to the LLM per cluster. Integer, 2 or more |
+| `topics.embeddingPageSize` | 500 | Ids per embedding read. Integer, 1 to 1000 |
+| `topics.maxLabelChars`, `maxSummaryChars` | 80, 300 | Cut-offs for the label and the summary. Integers, 1 or more |
+| `topics.minTopics`, `maxConsecutiveFailures` | 3, 3 | Topics needed to replace the bank, and failed labels in a row that stop a run. Integers, 1 or more |
+| `topics.recencyHalfLifeMs`, `recencyFloor` | 15552000000, 0.1 | Topic weight at conversation time: `max(floor, 0.5 ^ (age / halfLife)) * log(1 + size)`. Above 0 and 0 to 1 |
+| `topics.maxAgeMs` | 7776000000 | Age after which the bank counts as stale (90 days). Above 0 |
+| `topics.conversationSamples` | 8 | Sample messages offered with a topic. Integer, 1 or more |
+| `topics.fallbackSeeds`, `neighbourhoodSize`, `minNeighbours` | 6, 30, 8 | Empty-bank fallback: seeds tried, hits per seed (integer, 2 or more) and hits needed (integer, 2 or more) |
+
 **`backfill`, `lifecycle`, `catchUp`, `logging`**
 
 | Key | Default | Meaning |
@@ -449,10 +500,10 @@ Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are
 | `src/config.js`, `src/config/` | Every tunable, strict environment parsing, range validation, required-variable checks, the secret list and the optional `.env` loader |
 | `src/backfill/` | History import, catch-up and the full re-import (steps, guards, database switch, archive reader, plan, comparison, report). Imported only by scripts and the container |
 | `src/bot/` | Triggers and orchestration: the handlers (message create, edit, delete, `reply` command, revive tick, profile refresh), reply, chain, revive and command-limit policies, activity tracker, composer, responder, lifecycle, startup and ready steps, process hooks and state restore |
-| `src/ingest/`, `src/retrieval/`, `src/context/`, `src/profiles/`, `src/llm/`, `src/gifs/` | Recording into SQLite and Chroma, vector sync and repair; retrieval and persona choice; transcript and thread builders; member profile checks; prompts, generators, chat client and output cleaning; GIF engines and resolver |
+| `src/ingest/`, `src/retrieval/`, `src/context/`, `src/profiles/`, `src/llm/`, `src/gifs/`, `src/topics/` | Recording into SQLite and Chroma, vector sync and repair; retrieval and persona choice; transcript and thread builders; member profile checks; prompts, generators, chat client and output cleaning; GIF engines and resolver; the topic bank (sampling, clustering filter, labelling, builder, topic source and neighbourhood fallback) |
 | `src/storage/`, `src/discord/` | SQLite schema, migrations, stores and the read-only inspector, and the Chroma vector store; Discord client, payloads, embeds, delivery, webhooks, the reply modal, command definition, login and error codes |
 | `src/corpus/`, `src/text/`, `src/util/`, `src/userData/`, `src/logger.js` | Content transformers and filter predicates; pure text helpers; small pure helpers; validation of `data/*.json`; the logger |
-| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js`, `reimport.js` |
+| `scripts/` | `registerCommands.js`, `inspectDb.js`, `gifSmoke.js`, `backfill.js`, `reimport.js`, `topics.js` |
 | `test/unit/` | One file per source module, mirroring `src/`, plus the enforcement tests `layering`, `sizeLimits`, `unusedExports`, `coverageMap`, `nonDestructive` and `sendSites` |
 | `test/characterization/`, `test/scenarios/` | Whole-bot tests through the `createWorld()` harness: behaviour pinned from the original bot, then one file per feature |
 | `test/harness/`, `test/support/` | Smoke tests of the harness, and the harness itself: the world, boot helper, fakes for Discord, Chroma, the LLM, GIFs, webhooks and members, clocks and the source scanners |
@@ -471,3 +522,4 @@ Rules are in [CLAUDE.md](CLAUDE.md). The essentials: all database operations are
 - Edits and deletes made while the bot is offline are not seen until a re-import. A re-import does not carry over edit history or soft-delete markers.
 - A dry run of `backfill` may apply additive schema migrations and create empty collections.
 - Recent channel messages, including from people not in `users.json`, are sent to the LLM provider as context.
+- The topic bank is built and read (`topicSource.candidates`, `openers`, `bankStatus`) but nothing in the bot consumes it until scripted conversations (spec 35); at ready the bot only logs when the bank is empty or stale.

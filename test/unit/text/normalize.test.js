@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizeForDedup } from '../../../src/text/normalize.js';
+import { normalizeForDedup, collapseStretched } from '../../../src/text/normalize.js';
 
 const TABLE = [
   ['lol', 'lol'], ['LOL', 'lol'], ['lol ', 'lol'], ['lolll', 'lol'], ['lol!!', 'lol'],
@@ -27,4 +27,10 @@ test('normalizeForDedup is idempotent', () => {
 test('runs of two letters are kept and runs of three collapse', () => {
   assert.equal(normalizeForDedup('woow'), 'woow');
   assert.equal(normalizeForDedup('wooow'), 'wow');
+});
+
+test('collapseStretched shortens runs of three or more letters to one and leaves doubles alone', () => {
+  assert.equal(collapseStretched('sooooo gooood'), 'so god');
+  assert.equal(collapseStretched('good coffee'), 'good coffee');
+  assert.equal(collapseStretched('1111'), '1111');
 });

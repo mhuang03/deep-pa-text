@@ -5,6 +5,7 @@ import { buildServices } from '../../src/container/services.js';
 import { buildDiscord } from '../../src/container/discord.js';
 import { buildOrchestration, buildLifecycle } from '../../src/container/bot.js';
 import { buildBackfill } from '../../src/container/backfill.js';
+import { buildTopics } from '../../src/container/topics.js';
 import { createFakeDiscord } from './fakes/discord.js';
 import { createFakeChroma } from './fakes/chroma.js';
 import { createFakeOpenAI } from './fakes/llm.js';
@@ -41,5 +42,6 @@ export const buildAll = (envOverrides = {}) => {
   const orchestration = buildOrchestration({ ...base, storage, services, discord });
   const lifecycle = buildLifecycle({ ...base, storage, discord, exit: () => {}, closeDatabase: null });
   const backfill = buildBackfill({ ...base, storage, discord, services, lifecycle });
-  return { ...base, storage, services, discord, orchestration, lifecycle, backfill };
+  const topics = buildTopics({ ...base, storage, services });
+  return { ...base, storage, services, discord, orchestration, lifecycle, backfill, topics };
 };

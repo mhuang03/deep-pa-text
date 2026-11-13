@@ -5,7 +5,7 @@ export const LEVELS = {
   main: 5, container: 5, vendor: 5, scripts: 5,
   backfill: 4,
   bot: 3,
-  ingest: 2, retrieval: 2, context: 2, profiles: 2, llm: 2, gifs: 2,
+  ingest: 2, retrieval: 2, context: 2, profiles: 2, llm: 2, gifs: 2, topics: 2,
   storage: 1, discord: 1,
   corpus: 0, text: 0, util: 0, config: 0, logger: 0, userData: 0,
 };

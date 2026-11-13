@@ -16,6 +16,7 @@
     "inspect": "node scripts/inspectDb.js",
     "backfill": "node scripts/backfill.js",
     "reimport": "node scripts/reimport.js",
+    "topics": "node scripts/topics.js",
     "gif-smoke": "node scripts/gifSmoke.js"
   },
   "dependencies": {

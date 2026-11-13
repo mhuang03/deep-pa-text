@@ -55,11 +55,12 @@ const buildGeneration = ({ config, vendor, clock, logger, storage }) => {
   const { vectorStore, messageStore, botMessageStore, userDirectory } = storage;
   const retriever = createRetriever({ vectorStore, messageStore, config, logger });
   const burstProfile = createBurstProfile({ messageStore, config, now: clock.now });
+  const chatClient = buildChatClient({ config, vendor });
   const generator = createGenerator({
-    chatClient: buildChatClient({ config, vendor }),
+    chatClient,
     retriever, userDirectory, botMessageStore, messageStore, burstProfile, config, logger,
   });
-  return { retriever, burstProfile, generator };
+  return { retriever, burstProfile, generator, chatClient };
 };
 
 // Use-case services built on the storage adapters: ingest, retrieval, generation and GIFs.

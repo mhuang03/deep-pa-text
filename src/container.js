@@ -3,6 +3,7 @@ import { buildStorage } from './container/storage.js';
 import { buildServices } from './container/services.js';
 import { buildDiscord } from './container/discord.js';
 import { buildBackfill } from './container/backfill.js';
+import { buildTopics } from './container/topics.js';
 import { buildOrchestration, buildLifecycle, buildBot } from './container/bot.js';
 import { defaultClock } from './container/clock.js';
 
@@ -10,7 +11,7 @@ export { defaultClock } from './container/clock.js';
 export { buildGifResolver } from './container/services.js';
 
 // The public service map. Its keys are pinned by the container test.
-const publicServices = ({ logger, storage, services, discord, orchestration, lifecycle, backfill, bot }) => ({
+const publicServices = ({ logger, storage, services, discord, orchestration, lifecycle, backfill, topics, bot }) => ({
   bot, lifecycle, client: discord.client, logger,
   gifResolver: services.gifResolver, composer: services.composer, delivery: discord.delivery,
   responder: orchestration.responder, botMessageResolver: discord.botMessageResolver,
@@ -21,7 +22,8 @@ const publicServices = ({ logger, storage, services, discord, orchestration, lif
   ...storage,
   vectorSync: services.vectorSync, vectorHealth: services.vectorHealth, ingest: services.ingest,
   retriever: services.retriever, personaSelector: services.personaSelector, burstProfile: services.burstProfile,
-  generator: services.generator,
+  generator: services.generator, chatClient: services.chatClient,
+  ...topics,
 });
 
 export const buildContainer = ({
@@ -34,7 +36,8 @@ export const buildContainer = ({
   const orchestration = buildOrchestration({ config, clock, logger, storage, services, discord });
   const lifecycle = buildLifecycle({ config, clock, logger, storage, discord, exit, closeDatabase });
   const backfill = buildBackfill({ config, clock, logger, storage, discord, services, lifecycle });
-  const parts = { storage, services, discord, orchestration, lifecycle, catchUp: backfill.catchUp };
+  const topics = buildTopics({ config, clock, logger, storage, services });
+  const parts = { storage, services, discord, orchestration, lifecycle, topics, catchUp: backfill.catchUp };
   const bot = buildBot({ config, data, clock, logger, parts });
-  return publicServices({ logger, storage, services, discord, orchestration, lifecycle, backfill, bot });
+  return publicServices({ logger, storage, services, discord, orchestration, lifecycle, backfill, topics, bot });
 };

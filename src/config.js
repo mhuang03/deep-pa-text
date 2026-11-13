@@ -2,6 +2,8 @@ import * as base from './config/sections.js';
 import * as feature from './config/featureSections.js';
 import * as check from './config/validate.js';
 import * as checkFeature from './config/validateFeatures.js';
+import { buildTopics } from './config/topicSections.js';
+import { assertTopics } from './config/validateTopics.js';
 
 export { DEFAULT_BUSY_TIMEOUT_MS } from './config/sections.js';
 export { createConfigError, isConfigError } from './config/errors.js';
@@ -9,6 +11,7 @@ export {
   assertGifs, assertLlm, assertReply, assertRevive, assertDiscord, assertFilter, assertStorage, assertRetrieval, assertPersona, assertChroma,
 } from './config/validate.js';
 export { assertChain, assertCommand, assertBurst, assertProfiles, assertBackfill, assertLifecycle, assertCatchUp, assertVector } from './config/validateFeatures.js';
+export { assertTopics } from './config/validateTopics.js';
 
 const deepFreeze = (value) => {
   if (value === null || typeof value !== 'object') return value;
@@ -38,6 +41,7 @@ const buildConfig = (env) => ({
   lifecycle: checkFeature.assertLifecycle(feature.buildLifecycle()),
   catchUp: checkFeature.assertCatchUp(feature.buildCatchUp(env)),
   vector: checkFeature.assertVector(feature.buildVector()),
+  topics: assertTopics(buildTopics()),
   logging: feature.buildLogging(),
 });
 

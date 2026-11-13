@@ -25,7 +25,7 @@ const setup = ({ config = loadConfig({}), restoreError = null, catchUpResult = {
     },
     logger: { info: (m) => logs.info.push(m), warn: (...a) => logs.warn.push(a), error: (...a) => logs.error.push(a) },
   };
-  return { ready: createReady(deps), events, logs, config };
+  return { ready: createReady(deps), deps, events, logs, config };
 };
 
 const names = (events) => events.map((e) => (Array.isArray(e) ? e.join(':') : e));
@@ -71,4 +71,40 @@ test('a failed first restore is logged and the startup continues', async () => {
   await ready.onReady();
   assert.equal(logs.error.length >= 1, true);
   assert.ok(names(events).some((e) => e.startsWith('catchUp')));
+});
+
+const readyWithBank = (status) => {
+  const logs = { warn: [] };
+  const base = setup();
+  const ready = createReady({
+    ...base.deps, topicSource: { bankStatus: () => status }, logger: { ...base.deps.logger, warn: (...a) => logs.warn.push(a) },
+  });
+  return { ready, logs };
+};
+
+test('logs one line saying to run npm run topics when the topic bank is empty or stale', async () => {
+  for (const status of [{ topics: 0, completedAt: null, stale: true }, { topics: 5, completedAt: 1, stale: true }]) {
+    const { ready, logs } = readyWithBank(status);
+    await ready.onReady();
+    assert.equal(logs.warn.length, 1);
+    assert.match(logs.warn[0][0], /npm run topics/);
+  }
+});
+
+test('says nothing about the topic bank when it is filled and fresh', async () => {
+  const { ready, logs } = readyWithBank({ topics: 5, completedAt: 1, stale: false });
+  await ready.onReady();
+  assert.deepEqual(logs.warn, []);
+});
+
+test('a failing bank check is logged and the startup continues', async () => {
+  const base = setup();
+  const errors = [];
+  const ready = createReady({
+    ...base.deps, topicSource: { bankStatus: () => { throw new Error('db'); } },
+    logger: { ...base.deps.logger, warn: (...a) => errors.push(a) },
+  });
+  await ready.onReady();
+  assert.match(errors[0][0], /topic bank status/);
+  assert.ok(base.events.some((e) => e === 'startupRepair'));
 });

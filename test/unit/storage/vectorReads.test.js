@@ -55,3 +55,21 @@ test('query returns hits nearest first and needs exactly one of embedding or tex
   assert.deepEqual(filtered.map((h) => h.id), ['2']);
   await assert.rejects(reads.query('messages', { limit: 1 }), /exactly one of embedding or text/);
 });
+
+test('getEmbeddings uses the interactive timeout by default and the batch timeout with batch: true', async () => {
+  const seen = [];
+  const recording = { ...guard, timed: async (name, ms, work) => { seen.push([name, ms]); return work(); } };
+  const fake = createFakeChroma();
+  const client = new fake.ChromaClient({});
+  const embeddingFunction = new fake.OpenAIEmbeddingFunction({});
+  const messages = await client.getOrCreateCollection({ name: 'm', embeddingFunction });
+  const loads = [];
+  const reads = createVectorReads({
+    guard: recording, collections: async (ms) => { loads.push(ms); return { messages, replies: messages }; }, embeddingFunction,
+  });
+  messages.seed([{ id: '1', document: 'one', metadata: {} }]);
+  await reads.getEmbeddings(['1']);
+  await reads.getEmbeddings(['1'], { batch: true });
+  assert.deepEqual(seen, [['getEmbeddings', 1], ['getEmbeddings', 2]]);
+  assert.deepEqual(loads, [1, 2]);
+});

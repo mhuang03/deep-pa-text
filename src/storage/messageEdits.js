@@ -1,18 +1,7 @@
 // Write operations of the message store: raw and corpus inserts, edits as new rows, soft deletes.
-const GIF_TOKEN = '<gif!';
+import { runInTransaction } from './transaction.js';
 
-// fn must be synchronous: the connection is shared, so awaiting inside would interleave other writes.
-const runInTransaction = (db, fn) => {
-  db.exec('BEGIN IMMEDIATE');
-  try {
-    const result = fn();
-    db.exec('COMMIT');
-    return result;
-  } catch (error) {
-    db.exec('ROLLBACK');
-    throw error;
-  }
-};
+const GIF_TOKEN = '<gif!';
 
 const resolveExplicit = (statements, reference) =>
   reference && statements.anchored.get(reference) ? reference : null;

@@ -6,11 +6,13 @@ const embed = async ({ guard, embeddingFunction }, text) => {
   return embedding;
 };
 
-const getEmbeddings = async ({ guard, collections }, ids) => {
+// A batch read (the topic builder pages through thousands of rows) gets the longer batch timeout.
+const getEmbeddings = async ({ guard, collections }, ids, { batch = false } = {}) => {
   if (ids.length === 0) return new Map();
   const { timed, limits } = guard;
-  const { messages } = await collections(limits.interactive);
-  const found = await timed('getEmbeddings', limits.interactive, () => messages.get({ ids, include: ['embeddings'] }));
+  const ms = batch ? limits.batch : limits.interactive;
+  const { messages } = await collections(ms);
+  const found = await timed('getEmbeddings', ms, () => messages.get({ ids, include: ['embeddings'] }));
   const entries = found.ids.map((id, i) => [id, found.embeddings?.[i]]);
   return new Map(entries.filter(([, embedding]) => hasEmbedding(embedding)));
 };
@@ -44,7 +46,7 @@ export const createVectorReads = ({ guard, collections, embeddingFunction }) => 
   const ctx = { guard, collections, embeddingFunction };
   return {
     embed: (text) => embed(ctx, text),
-    getEmbeddings: (ids) => getEmbeddings(ctx, ids),
+    getEmbeddings: (ids, options) => getEmbeddings(ctx, ids, options),
     getRecords: (name, ids) => getRecords(ctx, name, ids),
     query: (name, options) => query(ctx, name, options),
   };

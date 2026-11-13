@@ -40,12 +40,22 @@ const restoreAfterCatchUp = async (deps, result) => {
   });
 };
 
+const BANK_HINT = 'The topic bank is empty or out of date, so conversations fall back to a plain search. Build it with: npm run topics';
+
+// Synchronous read of two small tables; skipped where no topic source is wired.
+const checkTopicBank = ({ topicSource, logger }) => {
+  if (!topicSource) return;
+  const status = topicSource.bankStatus();
+  if (status.topics === 0 || status.stale) logger.warn(BANK_HINT);
+};
+
 const onReady = async (deps, state) => {
   const { client, startupTasks, vectorHealth, lifecycle, logger } = deps;
   if (state.started) return;
   state.started = true;
   logger.info(`Logged in as ${client.user.tag}`);
   await guarded(logger, { label: 'restore state', run: () => startupTasks.restoreState() });
+  await guarded(logger, { label: 'topic bank status', run: () => checkTopicBank(deps), level: 'warn' });
   startIntervals(deps);
   const caught = await guarded(logger, { label: 'catch up', run: () => catchUp(deps), level: 'warn' });
   await restoreAfterCatchUp(deps, caught);

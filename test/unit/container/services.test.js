@@ -7,7 +7,7 @@ import { makeParts, buildAll } from '../../support/containerParts.js';
 test('returns the ingest, retrieval, generation and gif services', () => {
   const { services, storage } = buildAll();
   assert.deepEqual(Object.keys(services).sort(), [
-    'burstProfile', 'composer', 'generator', 'gifResolver', 'ingest', 'personaSelector', 'retriever', 'vectorHealth', 'vectorSync',
+    'burstProfile', 'chatClient', 'composer', 'generator', 'gifResolver', 'ingest', 'personaSelector', 'retriever', 'vectorHealth', 'vectorSync',
   ]);
   assert.deepEqual(Object.keys(services.generator).sort(), ['generateReply', 'generateRevive']);
   assert.deepEqual(Object.keys(services.retriever).sort(), ['retrieveForReply', 'retrieveForRevive']);

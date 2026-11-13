@@ -8,6 +8,9 @@ const REQUIRED = Object.freeze({
   backfill: (config) => ['DISCORD_BOT_TOKEN', config.embedding.apiKeyEnvVar],
   reimport: (config) => ['DISCORD_BOT_TOKEN', config.embedding.apiKeyEnvVar],
   register: () => ['DISCORD_BOT_TOKEN', 'DISCORD_CLIENT_ID'],
+  topics: (config) => ['DEEPSEEK_API_KEY', config.embedding.apiKeyEnvVar],
+  'topics-dry-run': (config) => [config.embedding.apiKeyEnvVar],
+  'topics-bank': () => [],
   'gif-smoke': () => [],
   inspect: () => [],
 });

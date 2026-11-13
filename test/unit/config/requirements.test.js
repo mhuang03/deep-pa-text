@@ -74,3 +74,14 @@ test('the GIF warning names the variables only when no key is set', () => {
   assert.match(warning, /KLIPY_API_KEY, GIPHY_API_KEY, HUMOR_API_KEY/);
   assert.equal(buildGifKeyWarning(loadConfig({ GIPHY_API_KEY: 'g' })), null);
 });
+
+test('topics needs the DeepSeek key and the embedding key', () => {
+  assert.match(messageOf({}, 'topics'), /: DEEPSEEK_API_KEY, OPENAI_API_KEY\. Set/);
+  assert.equal(messageOf({ DEEPSEEK_API_KEY: 'd', OPENAI_API_KEY: 'o' }, 'topics'), null);
+});
+
+test('topics-dry-run needs only the embedding key and topics-bank needs nothing', () => {
+  assert.match(messageOf({}, 'topics-dry-run'), /: OPENAI_API_KEY\. Set/);
+  assert.equal(messageOf({ OPENAI_API_KEY: 'o' }, 'topics-dry-run'), null);
+  assert.equal(messageOf({}, 'topics-bank'), null);
+});

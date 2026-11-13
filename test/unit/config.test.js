@@ -75,6 +75,14 @@ const EXPECTED_DEFAULTS = {
     klipyLocale: 'us', klipyContentFilter: 'off', klipyFormatFilter: 'gif',
     humorUrl: 'https://api.humorapi.com/gif/search', candidates: 5, timeoutMs: 5000, maxPerMessage: 2,
   },
+  topics: {
+    maxMessages: 30000, recentWindowMs: 31536000000, recentShare: 0.6, sampleOverFetch: 2, minWords: 5,
+    minDistinctWords: 4, minChars: 25, maxPhraseRepeats: 2, clusterDivisor: 2, minClusters: 5, maxClusters: 120,
+    iterations: 15, minClusterSize: 15, minAuthors: 3, minMedianChars: 40, maxAuthorShare: 0.6, maxPrefixShare: 0.3,
+    maxLabelled: 80, representatives: 20, embeddingPageSize: 500, maxLabelChars: 80, maxSummaryChars: 300,
+    minTopics: 3, maxConsecutiveFailures: 3, recencyHalfLifeMs: 15552000000, recencyFloor: 0.1, maxAgeMs: 7776000000,
+    conversationSamples: 8, fallbackSeeds: 6, neighbourhoodSize: 30, minNeighbours: 8,
+  },
   logging: { locale: 'en-US', timeZone: 'America/Chicago' },
 };
 

@@ -69,10 +69,11 @@ const buildStartupTasks = ({ storage, orchestration, catchUp, clock }) => ({
 });
 
 export const buildBot = ({ config, data, clock, logger, parts }) => {
-  const { storage, services, discord, orchestration, lifecycle, catchUp } = parts;
+  const { storage, services, discord, orchestration, lifecycle, topics, catchUp } = parts;
   const handlers = buildHandlers({ config, data, clock, logger, parts: { ...orchestration, client: discord.client, storage, services, discord } });
   const startupTasks = buildStartupTasks({ storage, orchestration, catchUp, clock });
   return createBot({
-    client: discord.client, config, handlers, lifecycle, startupTasks, vectorHealth: services.vectorHealth, logger,
+    client: discord.client, config, handlers, lifecycle, startupTasks, vectorHealth: services.vectorHealth,
+    topicSource: topics.topicSource, logger,
   });
 };

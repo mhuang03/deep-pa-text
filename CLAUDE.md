@@ -52,7 +52,7 @@ Runtime code lives in `src/`, CLI entry points in `scripts/`, tests in `test/`, 
   | 5 | `main.js`, `container.js`, `container/`, `vendor.js`, `scripts/*` |
   | 4 | `backfill/` (history import and vector sync; imported only by scripts and the container) |
   | 3 | `bot/` (triggers, handlers, orchestration) |
-  | 2 | `ingest/`, `retrieval/`, `context/`, `profiles/`, `llm/`, `gifs/` |
+  | 2 | `ingest/`, `retrieval/`, `context/`, `profiles/`, `llm/`, `gifs/`, `topics/` |
   | 1 | `storage/`, `discord/` |
   | 0 | `corpus/`, `text/`, `util/`, `config/`, `config.js`, `logger.js`, `userData/` |
 

@@ -20,7 +20,7 @@ const SERVICES = [
   'bot', 'lifecycle', 'client', 'db', 'logger', 'vectorStore', 'messageStore', 'messageFilter', 'ingest',
   'retriever', 'personaSelector', 'generator', 'gifResolver', 'composer', 'delivery', 'responder', 'userDirectory',
   'botMessageStore', 'botMessageResolver', 'contextBuilder', 'chainBuilder', 'burstProfile',
-  'profileStore', 'metaStore', 'memberProfiles', 'webhooks',
+  'profileStore', 'metaStore', 'memberProfiles', 'webhooks', 'chatClient', 'topicStore', 'topicSource', 'topicBuilder',
   'historyReader', 'historyImporter', 'botMessageImporter', 'vectorSync', 'vectorHealth',
 ];
 
@@ -81,7 +81,7 @@ test('constructs nothing that connects until the bot starts', async () => {
 test('opens the configured database and creates the schema', () => {
   const { container } = setup();
   const tables = container.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all();
-  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'message_revisions', 'messages', 'meta', 'user_profiles']);
+  assert.deepEqual(tables.map((row) => row.name).sort(), ['bot_messages', 'filtered_messages', 'message_revisions', 'messages', 'meta', 'sqlite_sequence', 'topic_authors', 'topic_builds', 'topic_messages', 'topics', 'user_profiles']);
   container.db.close();
 });
 
@@ -237,8 +237,8 @@ test('the database is opened with the configured busy timeout', () => {
 const PUBLIC_KEYS = {
   messageStore: [
     'applyEdit', 'burstStats', 'countContents', 'getParents', 'getRaw', 'hasRaw', 'hiddenIds', 'insertFiltered', 'insertRaw',
-    'latestFiltered', 'latestRaw', 'latestWithGif', 'latestWithReference', 'newestRaw', 'pageFiltered', 'randomMessages',
-    'randomStarters', 'softDelete', 'transaction',
+    'latestFiltered', 'latestRaw', 'latestWithGif', 'latestWithReference', 'newestRaw', 'pageFiltered', 'randomCorpus', 'randomMessages',
+    'randomStarters', 'randomStartersAll', 'softDelete', 'topicSample', 'transaction',
   ],
   vectorStore: ['addReplyRows', 'connect', 'embed', 'fillMetadata', 'getEmbeddings', 'getRecords', 'query', 'upsertMessages'],
   generator: ['generateReply', 'generateRevive'],
@@ -254,6 +254,10 @@ const PUBLIC_KEYS = {
   webhooks: ['forChannel', 'forget', 'ownedIds'],
   lifecycle: ['every', 'isShuttingDown', 'shutdown', 'track'],
   chainBuilder: ['build'],
+  chatClient: ['complete'],
+  topicStore: ['completeBuild', 'currentBuild', 'currentTopics', 'hiddenLabelKeys', 'hide', 'insertTopic', 'samplesOf'],
+  topicSource: ['bankStatus', 'candidates', 'openers'],
+  topicBuilder: ['run'],
   composer: ['compose'],
   delivery: ['deferOptions', 'deliver', 'placeholder'],
 };

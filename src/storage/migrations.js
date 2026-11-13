@@ -97,4 +97,54 @@ export const MIGRATIONS = [
   CREATE INDEX IF NOT EXISTS idx_messages_timestamp_id ON messages (timestamp, id)
 `,
   },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS topic_builds (
+    build_id TEXT PRIMARY KEY,
+    completed_at INTEGER NOT NULL,
+    stats TEXT NOT NULL
+  )
+`,
+  },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS topics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    build_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    author_count INTEGER NOT NULL,
+    cohesion REAL NOT NULL,
+    median_timestamp INTEGER NOT NULL,
+    deleted_at INTEGER
+  )
+`,
+  },
+  {
+    sql: `
+  CREATE INDEX IF NOT EXISTS idx_topics_build ON topics (build_id)
+`,
+  },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS topic_authors (
+    topic_id INTEGER NOT NULL,
+    author TEXT NOT NULL,
+    share REAL NOT NULL,
+    newest_timestamp INTEGER NOT NULL,
+    PRIMARY KEY (topic_id, author)
+  )
+`,
+  },
+  {
+    sql: `
+  CREATE TABLE IF NOT EXISTS topic_messages (
+    topic_id INTEGER NOT NULL,
+    message_id TEXT NOT NULL,
+    rank INTEGER NOT NULL,
+    PRIMARY KEY (topic_id, message_id)
+  )
+`,
+  },
 ];
