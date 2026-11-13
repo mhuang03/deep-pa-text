@@ -44,6 +44,9 @@ export const buildChain = (env) => ({
 
 export const buildMention = (env) => ({
   enabled: parseBoolean(env, 'MENTION_REPLIES', true),
+  namedPersona: true,
+  fuzzyMinLength: 5,
+  fuzzyWideMinLength: 8,
 });
 
 export const buildTyping = () => ({

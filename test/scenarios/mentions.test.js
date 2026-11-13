@@ -129,3 +129,39 @@ test('a failed mention reply is logged with its trigger and the next ping still 
   const next = await world.emitMessage({ author: 'alice', content: `${PING} ${QUESTION}` });
   assert.equal(next.replies.length, 1);
 });
+
+test('a ping that starts with a first name is answered by that persona, even its own author, without the name in the target', async (t) => {
+  const world = await newWorld(t);
+  const message = await world.emitMessage({ author: 'alice', content: `${PING} Alice, ${QUESTION}` });
+  assert.equal(personaOf(message), 'alice');
+  assert.ok(lastPrompt(world).includes(`"${QUESTION}"`));
+  const other = await world.emitMessage({ author: 'alice', content: `${PING} carol ${QUESTION}` });
+  assert.equal(personaOf(other), 'carol');
+});
+
+test('a misspelled first name still chooses the persona', async (t) => {
+  const world = await newWorld(t);
+  const message = await world.emitMessage({ author: 'bob', content: `${PING} caorl whats the plan tonight` });
+  assert.equal(personaOf(message), 'carol');
+});
+
+test('a name alone answers the previous message as that persona', async (t) => {
+  const world = await newWorld(t);
+  await world.emitMessage({ author: 'carol', content: 'anyone want to get food later' });
+  await world.advance(1000);
+  const ping = await world.emitMessage({ author: 'alice', content: `${PING} dave` });
+  assert.equal(personaOf(ping), 'dave');
+  assert.ok(lastPrompt(world).includes('anyone want to get food later'));
+});
+
+test('a reply to a bot message that starts with another name stays a chain reply by the thread persona', async (t) => {
+  const world = await newWorld(t, { random: 0 });
+  const root = await world.emitMessage({ author: 'alice', content: 'hello there friends' });
+  const persona = personaOf(root);
+  const otherName = ['bob', 'carol', 'dave'].find((name) => name !== persona);
+  const reply = await world.emitMessage({
+    author: 'alice', content: `${PING} ${otherName} say more`, reference: botRows(world)[0].id,
+  });
+  assert.equal(personaOf(reply), persona);
+  assert.equal(botRows(world).at(-1).trigger, 'chain');
+});

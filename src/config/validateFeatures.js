@@ -3,10 +3,16 @@ import { above, atLeast, checkRules, integer } from './rules.js';
 const MAX_SEARCH_LIMIT = 1000;
 const MAX_PAGE_SIZE = 100;
 const MIN_CONTEXT_TURNS = 2;
+const MIN_FUZZY_LENGTH = 2;
 
 export const assertChain = (chain) => checkRules('chain', chain, {
   maxContextTurns: integer(MIN_CONTEXT_TURNS),
 });
+
+export const assertMention = (mention) => {
+  checkRules('mention', mention, { fuzzyMinLength: integer(MIN_FUZZY_LENGTH) });
+  return checkRules('mention', mention, { fuzzyWideMinLength: integer(mention.fuzzyMinLength) });
+};
 
 export const assertBurst = (burst) => checkRules('burst', burst, {
   maxMessages: integer(1),

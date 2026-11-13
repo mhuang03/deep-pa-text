@@ -49,6 +49,7 @@ const setup = ({
     botMessageResolver: { resolve: () => null },
     chainBuilder: { build: (target, p) => (events.push(['build', target, p]), chain) },
     client: { user: { id: 'bot-user' } },
+    users: [],
     replyPolicy: {
       decide: () => (events.push('decide'), verdict),
       noteReply: (arg) => events.push(['noteReply', arg]),

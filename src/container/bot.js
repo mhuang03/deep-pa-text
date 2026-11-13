@@ -26,7 +26,7 @@ const buildHandlers = ({ config, data, clock, logger, parts }) => {
     }).onUpdate,
     messageCreate: createMessageCreateHandler({
       config, activity, ingest, messageFilter, replyPolicy, personaSelector, responder, logger,
-      botMessageStore, messageStore, botMessageResolver, chainBuilder, client,
+      botMessageStore, messageStore, botMessageResolver, chainBuilder, client, users: data.users,
     }),
     replyCommand: createReplyCommandHandler({
       client, config, users: data.users, messageFilter, personaSelector, responder,

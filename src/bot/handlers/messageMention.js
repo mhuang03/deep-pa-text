@@ -1,6 +1,7 @@
 // The mention path of the message handler: a ping written in a message summons a reply.
 import { TRIGGERS } from '../../util/triggers.js';
 import { mentionsUser, stripUserMention } from '../../text/botMention.js';
+import { matchPersonaPrefix } from '../../text/personaPrefix.js';
 import { toMessageRecord } from '../../discord/messageRecord.js';
 import { formatReply, formatMentionWithoutTarget, joinLines } from '../logLines.js';
 import { respondTo } from './messageAutoReply.js';
@@ -27,9 +28,16 @@ const pointedAt = async (deps, { message, record }) => {
   return messageStore.getRaw(record.reference) ?? fetchReferenced(deps, message);
 };
 
-const findTarget = async (deps, { message, record }) => {
+// "bob what do you think" asks for bob by name; the name is not part of what is answered.
+const readRequest = ({ config, users, client }, record) => {
+  const text = stripUserMention(record.content, client.user?.id);
+  const named = config.mention.namedPersona ? matchPersonaPrefix(text, users, config.mention) : null;
+  return { text: named ? named.rest : text, persona: named?.persona ?? null };
+};
+
+const findTarget = async (deps, { message, record, text }) => {
   const { messageFilter } = deps;
-  const own = messageFilter.filterForChain({ ...record, content: stripUserMention(record.content, botId(deps)) });
+  const own = messageFilter.filterForChain({ ...record, content: text });
   if (own) return own;
   const other = await pointedAt(deps, { message, record });
   return other && !other.deleted ? messageFilter.filterForChain(other) : null;
@@ -38,11 +46,12 @@ const findTarget = async (deps, { message, record }) => {
 // Asked for by a person, so it is never rolled, rate limited or capped; it only arms the auto-reply limit.
 export const mentionReply = async (deps, { message, record, lines }) => {
   const { personaSelector, replyPolicy, logger } = deps;
-  const target = await findTarget(deps, { message, record });
+  const request = readRequest(deps, record);
+  const target = await findTarget(deps, { message, record, text: request.text });
   if (!target) return logger.info(joinLines([...lines, formatMentionWithoutTarget()]));
-  const persona = await personaSelector.pickReplier(target);
+  const persona = request.persona ?? await personaSelector.pickReplier(target);
   const onDelivered = () => replyPolicy.noteReply({ resetMisses: false });
-  const request = { trigger: TRIGGERS.MENTION, persona, target, onDelivered };
-  const { response } = await respondTo(deps, { message, request });
+  const reply = { trigger: TRIGGERS.MENTION, persona, target, onDelivered };
+  const { response } = await respondTo(deps, { message, request: reply });
   return logger.info(joinLines([...lines, formatReply({ persona, response })]));
 };

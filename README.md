@@ -110,6 +110,8 @@ A failure before delivery also hands the channel activity back to the human mess
 
 **Mention.** A message that pings the bot in its text gets a guaranteed reply from the automatically chosen best reply author. The mention is removed and the rest of the message is the target; short text such as `why` is fine. A ping with no other text points at another message: the one it replies to, else the message before it. With nothing to answer, the bot logs `[MENTION: nothing to reply to]` and sends nothing. A reply to a bot message that also pings the bot is a chain reply. The mention Discord adds automatically to a reply does not count. `MENTION_REPLIES=false` turns this off.
 
+**Naming a persona.** If the text after the ping starts with a member's first name or username, that member answers instead of the automatic pick, and the name is left out of what is answered: `@bot bob what do you think`. The named member may be the author. A name alone (`@bot bob`) answers the pointed-at message as that member. Matching ignores case, accents and punctuation (`Bob,`, `bob's`, `bob:`), reduces stretched letters (`bobbb`), and accepts a close spelling for names of at least `mention.fuzzyMinLength` letters (`micheal`). Shorter names must be spelled exactly, so `mike` never catches `make`. A name two members share chooses nobody. A first name that is also an ordinary word (`will`, `mark`) is taken as the name when it comes first. A reply to a bot message stays a chain reply whatever it starts with.
+
 **`reply` command.** It skips the probability, the rate limit and the in-flight guard, and is answered every time. The modal lists at most 24 members plus `random`. With more members the list starts with the default persona and is cut to 24. When the target is a bot message, its persona is the default choice. The submission is acknowledged at once (`deferReply`) before anything slow happens. If the reply fails afterwards, the placeholder is edited to `Could not generate a reply.`
 
 ### Manual engagement is never limited
@@ -378,6 +380,8 @@ Times are in milliseconds unless the key says otherwise.
 | --- | --- | --- |
 | `chain.maxContextTurns` | 12 | Turns sent to the model. Integer, 2 or more |
 | `chain.maxWalkSteps` | 50 | Reply references followed |
+| `mention.namedPersona` | true | A leading first name or username in a ping chooses the persona |
+| `mention.fuzzyMinLength`, `mention.fuzzyWideMinLength` | 5, 8 | Shortest name matched with one spelling slip, and with two. Integers; the first 2 or more, the second at least the first |
 | `typing.enabled`, `typing.refreshMs` | true, 8000 | Typing indicator and its refresh |
 
 **`burst`**

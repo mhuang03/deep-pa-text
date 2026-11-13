@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertPersona, assertRetrieval, loadConfig,
+import { DEFAULTS, isConfigError, assertBackfill, assertProfiles, assertBurst, assertChain, assertMention, assertPersona, assertRetrieval, loadConfig,
   assertGifs, assertLlm, assertReply, assertFilter, assertStorage, assertLifecycle, assertCatchUp, assertChroma, assertVector,
   assertRevive, assertDiscord } from '../../src/config.js';
 
@@ -52,7 +52,7 @@ const EXPECTED_DEFAULTS = {
   context: { transcriptLimit: 20, maxEntryChars: 300, maxAgeMs: 21600000, timeZone: 'America/Chicago' },
   chain: { enabled: true, maxContextTurns: 12, maxWalkSteps: 50,
   },
-  mention: { enabled: true },
+  mention: { enabled: true, namedPersona: true, fuzzyMinLength: 5, fuzzyWideMinLength: 8 },
   typing: { enabled: true, refreshMs: 8000 },
   burst: {
     enabled: true, maxMessages: 3, windowMs: 30000, minRate: 0.2, minSamples: 20, cacheMs: 3600000,
@@ -399,4 +399,12 @@ test('assertDiscord requires a non-negative integer preview length and assertLlm
   passesFor(assertDiscord, discord, 'maxEmbeds', [1, 10]);
   failsFor(assertLlm, loadConfig({}).llm, 'postProcessRetries', [-1, 1.5, NaN]);
   passesFor(assertLlm, loadConfig({}).llm, 'postProcessRetries', [0, 2]);
+});
+
+test('assertMention validates the close-spelling lengths', () => {
+  const mention = loadConfig({}).mention;
+  assert.equal(assertMention(mention), mention);
+  [1, 2.5, NaN].forEach((fuzzyMinLength) => assert.throws(() => assertMention({ ...mention, fuzzyMinLength }), /mention\.fuzzyMinLength/));
+  assert.throws(() => assertMention({ ...mention, fuzzyWideMinLength: 4 }), /mention\.fuzzyWideMinLength/);
+  assert.doesNotThrow(() => assertMention({ ...mention, fuzzyMinLength: 2, fuzzyWideMinLength: 2 }));
 });
